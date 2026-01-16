@@ -17,6 +17,8 @@ from app.schemas.ppd import (
     PPDDownloadURLResponse,
     PPDSearchResponse,
     PPDTransaction,
+    PPDTransactionRecord,
+    PPDTransactionRecordResponse,
 )
 
 DEFAULT_LIMIT = 50
@@ -83,6 +85,69 @@ def _parse_comps_transactions(rows: Iterable[Dict[str, Any]]) -> List[PPDTransac
             )
         )
     return results
+
+
+def _label_from(node: Any) -> Optional[str]:
+    if not isinstance(node, dict):
+        return None
+    labels = node.get("label")
+    if isinstance(labels, list) and labels:
+        first = labels[0]
+        if isinstance(first, dict):
+            return first.get("_value")
+    return None
+
+
+def _about_from(node: Any) -> Optional[str]:
+    if isinstance(node, dict):
+        return node.get("_about")
+    if isinstance(node, str):
+        return node
+    return None
+
+
+def _safe_int(value: Any) -> Optional[int]:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def _normalize_transaction_record(raw: Dict[str, Any]) -> PPDTransactionRecord:
+    result = raw.get("result", {}) if isinstance(raw, dict) else {}
+    primary = result.get("primaryTopic", {}) if isinstance(result, dict) else {}
+
+    property_type_node = primary.get("propertyType")
+    estate_type_node = primary.get("estateType")
+    category_node = primary.get("transactionCategory")
+    record_status_node = primary.get("recordStatus")
+
+    new_build_raw = primary.get("newBuild")
+    if isinstance(new_build_raw, bool):
+        new_build = new_build_raw
+    elif isinstance(new_build_raw, str):
+        new_build = new_build_raw.lower() == "true"
+    else:
+        new_build = None
+
+    return PPDTransactionRecord(
+        transaction_id=primary.get("transactionId"),
+        transaction_uri=_about_from(primary),
+        transaction_date=primary.get("transactionDate"),
+        price_paid=_safe_int(primary.get("pricePaid")),
+        new_build=new_build,
+        property_address_uri=_about_from(primary.get("propertyAddress")),
+        property_type=_label_from(property_type_node),
+        property_type_uri=_about_from(property_type_node),
+        estate_type=_label_from(estate_type_node),
+        estate_type_uri=_about_from(estate_type_node),
+        transaction_category=_label_from(category_node),
+        transaction_category_uri=_about_from(category_node),
+        record_status=_label_from(record_status_node),
+        record_status_uri=_about_from(record_status_node),
+        source_url=result.get("_about"),
+    )
 
 
 class PPDService:
@@ -204,5 +269,12 @@ class PPDService:
             transactions=transactions,
         )
 
-    def transaction_record(self, transaction_id: str, view: str = "all") -> Dict[str, Any]:
-        return self.client.get_transaction_record(transaction_id, view=view)
+    def transaction_record(
+        self,
+        transaction_id: str,
+        view: str = "all",
+        include_raw: bool = False,
+    ) -> PPDTransactionRecordResponse:
+        raw = self.client.get_transaction_record(transaction_id, view=view)
+        record = _normalize_transaction_record(raw)
+        return PPDTransactionRecordResponse(record=record, raw=raw if include_raw else None)

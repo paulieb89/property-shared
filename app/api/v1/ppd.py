@@ -4,7 +4,12 @@ from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.schemas.ppd import PPDCompsResponse, PPDDownloadURLResponse, PPDSearchResponse
+from app.schemas.ppd import (
+    PPDCompsResponse,
+    PPDDownloadURLResponse,
+    PPDSearchResponse,
+    PPDTransactionRecordResponse,
+)
 from app.services.ppd_service import PPDService
 
 router = APIRouter(prefix="/ppd", tags=["ppd"])
@@ -88,13 +93,18 @@ def comps(
         raise HTTPException(status_code=502, detail=f"PPD comps failed: {exc}") from exc
 
 
-@router.get("/transaction/{transaction_id}")
+@router.get("/transaction/{transaction_id}", response_model=PPDTransactionRecordResponse)
 def transaction_record(
     transaction_id: str,
     view: str = Query("all", description="Linked Data view (e.g., all, basic)"),
-) -> dict[str, Any]:
+    include_raw: bool = Query(False, description="Include raw linked-data JSON"),
+) -> PPDTransactionRecordResponse:
     try:
-        return service.transaction_record(transaction_id=transaction_id, view=view)
+        return service.transaction_record(
+            transaction_id=transaction_id,
+            view=view,
+            include_raw=include_raw,
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=502,

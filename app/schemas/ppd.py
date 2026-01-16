@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -51,3 +51,26 @@ class PPDCompsResponse(BaseModel):
 
 class PPDDownloadURLResponse(BaseModel):
     url: str
+
+
+class PPDTransactionRecord(BaseModel):
+    transaction_id: Optional[str] = None
+    transaction_uri: Optional[str] = None
+    transaction_date: Optional[str] = None
+    price_paid: Optional[int] = None
+    new_build: Optional[bool] = None
+    property_address_uri: Optional[str] = None
+    property_type: Optional[str] = None
+    property_type_uri: Optional[str] = None
+    estate_type: Optional[str] = None
+    estate_type_uri: Optional[str] = None
+    transaction_category: Optional[str] = None
+    transaction_category_uri: Optional[str] = None
+    record_status: Optional[str] = None
+    record_status_uri: Optional[str] = None
+    source_url: Optional[str] = None
+
+
+class PPDTransactionRecordResponse(BaseModel):
+    record: PPDTransactionRecord
+    raw: Optional[dict[str, Any]] = None
