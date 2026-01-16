@@ -25,7 +25,11 @@ class Settings(BaseSettings):
     rightmove_delay_seconds: float = Field(0.6, description="Delay between Rightmove requests")
     rightmove_max_concurrency: int = Field(1, description="Max concurrent Rightmove requests")
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 @lru_cache

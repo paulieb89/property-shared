@@ -13,12 +13,12 @@ dependencies = [
   "requests>=2.32.5",
   "tenacity>=9.1.2",
   "beautifulsoup4>=4.14.3",
-  "pytest>=9.0.2",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.0.0",
+  "pytest>=9.0.2",
+  "python-dotenv>=1.0.1",
   "openapi-python-client>=0.28.1",
 ]
 

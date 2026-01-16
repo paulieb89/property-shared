@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Any, Optional
+
+from pydantic import BaseModel, ConfigDict
 
 
 class EPCData(BaseModel):
@@ -47,5 +49,11 @@ class EPCData(BaseModel):
     inspection_date: str | None = None
     certificate_hash: str | None = None
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class EPCRecordResponse(BaseModel):
+    """Normalized EPC record with optional raw payload."""
+
+    record: EPCData
+    raw: Optional[dict[str, Any]] = None

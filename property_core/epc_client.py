@@ -172,9 +172,15 @@ class EPCClient:
                             best_score = score
                             best_cert = cert
                     if best_cert and best_score >= 30:
-                        return self._parse_certificate(best_cert)
+                        return {
+                            "record": self._parse_certificate(best_cert),
+                            "raw": data,
+                        }
 
-                return self._parse_certificate(rows[0])
+                return {
+                    "record": self._parse_certificate(rows[0]),
+                    "raw": data,
+                }
 
             except (httpx.HTTPError, KeyError, ValueError):
                 return None

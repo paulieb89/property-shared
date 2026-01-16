@@ -1,17 +1,25 @@
+import os
 import time
+
+import pytest
 
 from app.services.ppd_service import PPDService
 from property_core.ppd_client import PricePaidDataClient
 
 
 def test_ppd_service_live_search() -> None:
+    if os.getenv("RUN_LIVE_TESTS") != "1":
+        pytest.skip("Set RUN_LIVE_TESTS=1 to run live network tests")
+
     client = PricePaidDataClient(timeout=30)
     service = PPDService(client=client)
+
+    postcode_prefix = os.getenv("PPD_TEST_POSTCODE_PREFIX", "PL6 8")
 
     start = time.perf_counter()
     response = service.search_transactions(
         postcode=None,
-        postcode_prefix="PL6 8",
+        postcode_prefix=postcode_prefix,
         from_date=None,
         to_date=None,
         min_price=None,
