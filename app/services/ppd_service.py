@@ -203,3 +203,6 @@ class PPDService:
             thin_market=raw["thin_market"],
             transactions=transactions,
         )
+
+    def transaction_record(self, transaction_id: str, view: str = "all") -> Dict[str, Any]:
+        return self.client.get_transaction_record(transaction_id, view=view)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -86,3 +86,17 @@ def comps(
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"PPD comps failed: {exc}") from exc
+
+
+@router.get("/transaction/{transaction_id}")
+def transaction_record(
+    transaction_id: str,
+    view: str = Query("all", description="Linked Data view (e.g., all, basic)"),
+) -> dict[str, Any]:
+    try:
+        return service.transaction_record(transaction_id=transaction_id, view=view)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"PPD transaction lookup failed: {exc}",
+        ) from exc

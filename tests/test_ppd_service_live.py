@@ -28,6 +28,12 @@ def test_ppd_service_live_search() -> None:
     elapsed = time.perf_counter() - start
 
     print(f"PPD live search took {elapsed:.2f}s")
+    print(f"PPD live search returned {response.count} results (limit={response.limit})")
+    for idx, item in enumerate(response.results[:3], start=1):
+        print(
+            f"{idx}. {item.postcode} {item.price} {item.date} "
+            f"{item.property_type} {item.town or ''} {item.street or ''}".strip()
+        )
 
     assert response.count > 0
     assert response.results
