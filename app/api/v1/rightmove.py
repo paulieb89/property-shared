@@ -1,0 +1,53 @@
+"""Rightmove API endpoints (Phase 1): search URL + listings."""
+
+from __future__ import annotations
+
+from typing import Literal, Optional
+
+from fastapi import APIRouter, HTTPException, Query
+
+from app.schemas.rightmove import RightmoveListingsResponse, RightmoveSearchURLResponse
+from app.services.rightmove_service import RightmoveService
+
+router = APIRouter(prefix="/rightmove", tags=["rightmove"])
+service = RightmoveService()
+
+
+@router.get("/search-url", response_model=RightmoveSearchURLResponse)
+async def search_url(
+    postcode: str = Query(..., min_length=2),
+    property_type: Literal["sale", "rent"] = "sale",
+    min_price: Optional[int] = Query(None, ge=0),
+    max_price: Optional[int] = Query(None, ge=0),
+    min_bedrooms: Optional[int] = Query(None, ge=0),
+    max_bedrooms: Optional[int] = Query(None, ge=0),
+    radius: Optional[float] = Query(None, ge=0),
+) -> RightmoveSearchURLResponse:
+    """Build a Rightmove search URL from a postcode/outcode."""
+    try:
+        url = await service.build_search_url(
+            postcode=postcode,
+            property_type=property_type,
+            min_price=min_price,
+            max_price=max_price,
+            min_bedrooms=min_bedrooms,
+            max_bedrooms=max_bedrooms,
+            radius=radius,
+        )
+        return RightmoveSearchURLResponse(url=url)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Rightmove lookup failed: {exc}") from exc
+
+
+@router.get("/listings", response_model=RightmoveListingsResponse)
+async def listings(
+    search_url: str = Query(..., min_length=10),
+    max_pages: Optional[int] = Query(None, ge=1, le=20),
+) -> RightmoveListingsResponse:
+    """Fetch listing results from a Rightmove search URL."""
+    try:
+        results = await service.listings(search_url=search_url, max_pages=max_pages)
+        return RightmoveListingsResponse(count=len(results), results=results)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Rightmove listings failed: {exc}") from exc
+
