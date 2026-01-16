@@ -7,7 +7,7 @@ to exercise the deployed API instead.
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import List, Optional
 
 import typer
 from rich import print as rprint
@@ -37,6 +37,10 @@ def _echo_json(data: object) -> None:
     rprint(json.dumps(data, indent=2, default=str))
 
 
+def _join_tokens(tokens: List[str]) -> str:
+    return " ".join(tokens).strip()
+
+
 @app.command("meta")
 def meta(api_url: Optional[str] = typer.Option(None, help="Call API instead of core")) -> None:
     """Show integration availability (core or API)."""
@@ -61,19 +65,20 @@ app.add_typer(ppd, name="ppd")
 
 @ppd.command("comps")
 def ppd_comps(
-    postcode: str = typer.Argument(...),
+    postcode: List[str] = typer.Argument(..., nargs=-1),
     property_type: Optional[str] = typer.Option(None, help="D/S/T/F/O"),
     months: int = typer.Option(24, help="Lookback months"),
     limit: int = typer.Option(50, help="Max transactions"),
     search_level: str = typer.Option("sector", help="postcode|sector|district"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
+    postcode_value = _join_tokens(postcode)
     http = _maybe_http_client(api_url)
     if http:
         data = http.get(
             "/v1/ppd/comps",
             params={
-                "postcode": postcode,
+                "postcode": postcode_value,
                 "property_type": property_type,
                 "months": months,
                 "limit": limit,
@@ -84,7 +89,7 @@ def ppd_comps(
     else:
         client = PricePaidDataClient()
         data = client.get_comps_summary(
-            postcode=postcode,
+            postcode=postcode_value,
             property_type=property_type,
             months=months,
             limit=limit,
@@ -150,17 +155,18 @@ app.add_typer(epc, name="epc")
 
 @epc.command("search")
 def epc_search(
-    postcode: str = typer.Argument(...),
+    postcode: List[str] = typer.Argument(..., nargs=-1),
     address: Optional[str] = typer.Option(None),
     include_raw: bool = typer.Option(False, help="Show raw EPC payload"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
+    postcode_value = _join_tokens(postcode)
     http = _maybe_http_client(api_url)
     if http:
         data = http.get(
             "/v1/epc/search",
             params={
-                "postcode": postcode,
+                "postcode": postcode_value,
                 "address": address,
                 "include_raw": include_raw,
             },
@@ -174,7 +180,7 @@ def epc_search(
         raise typer.Exit(code=1)
     import asyncio
 
-    result = asyncio.run(client.search_by_postcode(postcode, address=address))
+    result = asyncio.run(client.search_by_postcode(postcode_value, address=address))
     if not result:
         typer.echo("No EPC found")
         raise typer.Exit(code=1)
@@ -189,17 +195,18 @@ app.add_typer(rightmove, name="rightmove")
 
 @rightmove.command("search-url")
 def rightmove_search_url(
-    postcode: str = typer.Argument(...),
+    postcode: List[str] = typer.Argument(..., nargs=-1),
     property_type: str = typer.Option("sale"),
     radius: Optional[float] = typer.Option(None, help="Search radius in miles"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
+    postcode_value = _join_tokens(postcode)
     http = _maybe_http_client(api_url)
     if http:
         data = http.get(
             "/v1/rightmove/search-url",
             params={
-                "postcode": postcode,
+                "postcode": postcode_value,
                 "property_type": property_type,
                 "radius": radius,
             },
@@ -208,7 +215,7 @@ def rightmove_search_url(
     else:
         api = RightmoveLocationAPI()
         url = api.build_search_url(
-            postcode,
+            postcode_value,
             property_type=property_type,
             radius=radius,
         )
@@ -263,21 +270,22 @@ app.add_typer(location, name="location")
 
 @location.command("assess")
 def location_assess(
-    postcode: str = typer.Argument(...),
+    postcode: List[str] = typer.Argument(..., nargs=-1),
     address: Optional[str] = typer.Option(None),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
+    postcode_value = _join_tokens(postcode)
     http = _maybe_http_client(api_url)
     if http:
         data = http.get(
             "/v1/location/assess",
-            params={"postcode": postcode, "address": address},
+            params={"postcode": postcode_value, "address": address},
         )
         _echo_json(data)
         return
 
     assessor = LocationAssessor()
-    data = assessor.assess(postcode, address=address)
+    data = assessor.assess(postcode_value, address=address)
     _echo_json(data)
 
 
