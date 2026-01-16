@@ -100,6 +100,11 @@ class RightmoveLocationAPI:
                 f"Could not find location identifier for postcode '{postcode}'."
             )
 
+        # Full postcodes tend to be very tight searches; default to a small radius
+        # so the first request is more likely to return results.
+        if radius is None and location_identifier.startswith("POSTCODE^"):
+            radius = 0.25
+
         property_path = self.PROPERTY_TYPES.get(property_type, "property-for-sale")
         base_url = f"https://www.rightmove.co.uk/{property_path}/find.html"
 
@@ -117,4 +122,3 @@ class RightmoveLocationAPI:
 
         params.update(extra_params)
         return f"{base_url}?{urlencode(params)}"
-

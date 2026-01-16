@@ -12,6 +12,8 @@ FastAPI service + pure-Python core library for shared property capabilities (PPD
 6) Quick checks:
    - Health: `curl http://localhost:8000/v1/health`
    - Integration status: `curl http://localhost:8000/v1/meta/integrations`
+   - Rightmove: `curl 'http://localhost:8000/v1/rightmove/search-url?postcode=SW1A%201AA&radius=0.25'`
+     then `curl 'http://localhost:8000/v1/rightmove/listings?search_url=<pasted_url>&max_pages=1'`
 
 ### Live integration tests
 Live tests make real network calls and are gated:
@@ -45,4 +47,9 @@ Generate a typed client from the running service OpenAPI:
 
 ## Notes
 - Rightmove politeness is in-memory (`app/utils/polite.py`) for now; projects can swap in Redis later if needed.
+- Rightmove search URLs built from full postcodes default to a small radius (0.25 miles) so the initial query returns results; override `radius` to widen/narrow the area in both the API and CLI.
 - OpenAPI/SDK generation will be added after endpoints land.
+
+## Rightmove CLI snippets
+- Build a search URL: `uv run --extra cli property-cli rightmove search-url --postcode SW1A 1AA --property-type sale --radius 0.25`
+- Fetch listings from a search URL: `uv run --extra cli property-cli rightmove listings --search-url "<rightmove_url>" --max-pages 1`
