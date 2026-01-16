@@ -1,3 +1,5 @@
+"""PPD API endpoints (Phase 1): search, comps, and transaction record lookup."""
+
 from __future__ import annotations
 
 from typing import Any, Literal, Optional
@@ -23,6 +25,7 @@ def download_url(
     part: Optional[int] = Query(None, ge=1, le=2),
     fmt: Literal["csv", "txt"] = "csv",
 ) -> PPDDownloadURLResponse:
+    """Return a direct Land Registry download URL for bulk datasets."""
     try:
         return service.download_url(kind=kind, year=year, part=part, fmt=fmt)
     except ValueError as exc:
@@ -46,6 +49,7 @@ def transactions(
     offset: int = Query(0, ge=0),
     order_desc: bool = True,
 ) -> PPDSearchResponse:
+    """Search PPD transactions using postcode or postcode prefix (district/sector)."""
     if bool(postcode) == bool(postcode_prefix):
         raise HTTPException(
             status_code=422,
@@ -81,6 +85,7 @@ def comps(
     limit: int = Query(50, ge=1, le=200),
     search_level: Literal["postcode", "sector", "district"] = "sector",
 ) -> PPDCompsResponse:
+    """Get comparable sales summary for a postcode (sector/district supported)."""
     try:
         return service.comps(
             postcode=postcode,
@@ -99,6 +104,7 @@ def transaction_record(
     view: str = Query("all", description="Linked Data view (e.g., all, basic)"),
     include_raw: bool = Query(False, description="Include raw linked-data JSON"),
 ) -> PPDTransactionRecordResponse:
+    """Fetch and normalize a single transaction record from the Linked Data API."""
     try:
         return service.transaction_record(
             transaction_id=transaction_id,

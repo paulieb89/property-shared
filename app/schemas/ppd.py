@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class PPDTransaction(BaseModel):
+    """Flat transaction row for PPD search/comps."""
     transaction_id: Optional[str] = None
     price: Optional[int] = None
     date: Optional[str] = None
@@ -24,6 +25,7 @@ class PPDTransaction(BaseModel):
 
 
 class PPDSearchResponse(BaseModel):
+    """Search results for PPD transactions."""
     count: int
     limit: int
     offset: int
@@ -32,6 +34,7 @@ class PPDSearchResponse(BaseModel):
 
 
 class PPDCompsQuery(BaseModel):
+    """Echo of comps query parameters."""
     postcode: str
     property_type: Optional[str] = None
     months: int
@@ -39,6 +42,7 @@ class PPDCompsQuery(BaseModel):
 
 
 class PPDCompsResponse(BaseModel):
+    """Comps summary with transactions list."""
     query: PPDCompsQuery
     count: int
     median: Optional[int] = None
@@ -50,10 +54,12 @@ class PPDCompsResponse(BaseModel):
 
 
 class PPDDownloadURLResponse(BaseModel):
+    """Direct download URL for PPD bulk datasets."""
     url: str
 
 
 class PPDTransactionRecord(BaseModel):
+    """Normalized transaction record from the Linked Data API."""
     transaction_id: Optional[str] = None
     transaction_uri: Optional[str] = None
     transaction_date: Optional[str] = None
@@ -72,5 +78,6 @@ class PPDTransactionRecord(BaseModel):
 
 
 class PPDTransactionRecordResponse(BaseModel):
+    """Normalized record with optional raw Linked Data payload."""
     record: PPDTransactionRecord
     raw: Optional[dict[str, Any]] = None

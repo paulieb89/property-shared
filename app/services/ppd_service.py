@@ -1,4 +1,7 @@
-"""Service wrapper for Land Registry PPD helpers."""
+"""Service wrapper for Land Registry PPD helpers.
+
+This layer keeps API concerns (limits/validation) separate from the core client.
+"""
 
 from __future__ import annotations
 
@@ -30,6 +33,7 @@ TRANSACTION_CATEGORY_BY_URI = {v: k for k, v in TRANSACTION_CATEGORY_URIS.items(
 
 
 def _binding_value(binding: Dict[str, Any], key: str) -> Optional[str]:
+    """Extract a SPARQL binding value (or None)."""
     item = binding.get(key)
     if not isinstance(item, dict):
         return None
@@ -37,6 +41,7 @@ def _binding_value(binding: Dict[str, Any], key: str) -> Optional[str]:
 
 
 def _parse_sparql_bindings(bindings: Iterable[Dict[str, Any]]) -> List[PPDTransaction]:
+    """Convert SPARQL results into normalized transaction rows."""
     results: List[PPDTransaction] = []
     for binding in bindings:
         price_raw = _binding_value(binding, "pricePaid")
@@ -65,6 +70,7 @@ def _parse_sparql_bindings(bindings: Iterable[Dict[str, Any]]) -> List[PPDTransa
 
 
 def _parse_comps_transactions(rows: Iterable[Dict[str, Any]]) -> List[PPDTransaction]:
+    """Normalize comps rows returned by PricePaidDataClient.get_comps_summary."""
     results: List[PPDTransaction] = []
     for row in rows:
         results.append(
@@ -88,6 +94,7 @@ def _parse_comps_transactions(rows: Iterable[Dict[str, Any]]) -> List[PPDTransac
 
 
 def _label_from(node: Any) -> Optional[str]:
+    """Get the first English label from a linked-data node."""
     if not isinstance(node, dict):
         return None
     labels = node.get("label")
@@ -99,6 +106,7 @@ def _label_from(node: Any) -> Optional[str]:
 
 
 def _about_from(node: Any) -> Optional[str]:
+    """Get the _about URI from a linked-data node or URI string."""
     if isinstance(node, dict):
         return node.get("_about")
     if isinstance(node, str):
@@ -107,6 +115,7 @@ def _about_from(node: Any) -> Optional[str]:
 
 
 def _safe_int(value: Any) -> Optional[int]:
+    """Convert simple numeric fields that may be int or numeric string."""
     if isinstance(value, int):
         return value
     if isinstance(value, str) and value.isdigit():
@@ -115,6 +124,7 @@ def _safe_int(value: Any) -> Optional[int]:
 
 
 def _normalize_transaction_record(raw: Dict[str, Any]) -> PPDTransactionRecord:
+    """Normalize Linked Data API JSON into a flat record."""
     result = raw.get("result", {}) if isinstance(raw, dict) else {}
     primary = result.get("primaryTopic", {}) if isinstance(result, dict) else {}
 
@@ -151,6 +161,7 @@ def _normalize_transaction_record(raw: Dict[str, Any]) -> PPDTransactionRecord:
 
 
 class PPDService:
+    """High-level PPD operations used by the API layer."""
     def __init__(self, client: Optional[PricePaidDataClient] = None):
         self.client = client or PricePaidDataClient()
 
@@ -162,6 +173,7 @@ class PPDService:
         part: Optional[int],
         fmt: str,
     ) -> PPDDownloadURLResponse:
+        """Resolve download URLs for bulk PPD datasets."""
         if kind == "complete":
             url = self.client.complete_url(fmt=fmt)
         elif kind == "monthly":
@@ -192,6 +204,7 @@ class PPDService:
         offset: int,
         order_desc: bool,
     ) -> PPDSearchResponse:
+        """Search PPD via SPARQL with guardrails on limit/offset."""
         warnings: List[str] = []
 
         if limit <= 0:
@@ -237,6 +250,7 @@ class PPDService:
         limit: int,
         search_level: str,
     ) -> PPDCompsResponse:
+        """Return comparable sales and summary stats for a postcode."""
         if limit <= 0:
             limit = DEFAULT_LIMIT
         if limit > MAX_LIMIT:
@@ -275,6 +289,7 @@ class PPDService:
         view: str = "all",
         include_raw: bool = False,
     ) -> PPDTransactionRecordResponse:
+        """Fetch a single transaction record and normalize the result."""
         raw = self.client.get_transaction_record(transaction_id, view=view)
         record = _normalize_transaction_record(raw)
         return PPDTransactionRecordResponse(record=record, raw=raw if include_raw else None)
