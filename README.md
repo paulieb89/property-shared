@@ -2,6 +2,23 @@
 
 FastAPI service + pure-Python core library for shared property capabilities (PPD, EPC, Rightmove, Location scoring). Currently scaffolded with a health route and minimal settings/logging (no DB/Redis assumptions in this repo).
 
+## How to run
+### Dev (uv)
+1) Create `.env` from `.env.example` (set `EPC_API_EMAIL`/`EPC_API_KEY` if you want EPC enabled)
+2) Install deps: `uv sync --extra dev`
+3) Run API: `uv run uvicorn app.main:app --reload`
+4) Quick checks:
+   - Health: `curl http://localhost:8000/v1/health`
+   - Integration status: `curl http://localhost:8000/v1/meta/integrations`
+
+### Live integration tests
+Live tests make real network calls and are gated:
+- Run: `RUN_LIVE_TESTS=1 uv run --extra dev pytest -q -s`
+
+### Fly.io (high-level)
+- Set secrets: `fly secrets set EPC_API_EMAIL=... EPC_API_KEY=...`
+- Deploy: `fly deploy`
+
 ## Structure
 - `property_core/` – pure-Python core library (no FastAPI, no DB/Redis assumptions)
 - `app/main.py` – app factory, lifespan setup
