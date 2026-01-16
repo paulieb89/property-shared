@@ -1,0 +1,15 @@
+[project]
+name = "pp-data"
+version = "0.1.0"
+description = "HM Land Registry Price Paid Data wrapper"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "mypy",
+    "pytest",
+]
+
+[tool.mypy]
+strict = true

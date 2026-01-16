@@ -1,0 +1,1 @@
+"""Shared property service package."""
