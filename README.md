@@ -19,6 +19,11 @@ Live tests make real network calls and are gated:
 - Set secrets: `fly secrets set EPC_API_EMAIL=... EPC_API_KEY=...`
 - Deploy: `fly deploy`
 
+## Python SDK (OpenAPI)
+Generate a typed client from the running service OpenAPI:
+1) Run the API: `uv run uvicorn app.main:app --reload`
+2) Generate client: `uv run --extra dev openapi-python-client generate --url http://localhost:8000/openapi.json --output-path clients/python`
+
 ## Structure
 - `property_core/` – pure-Python core library (no FastAPI, no DB/Redis assumptions)
 - `app/main.py` – app factory, lifespan setup

@@ -31,8 +31,9 @@ class EPCService:
         address: str | None = None,
         include_raw: bool = False,
     ) -> EPCRecordResponse | None:
-        payload = await self.client.search_by_postcode(postcode, address=address)
-        if payload is None:
+        result = await self.client.search_by_postcode(postcode, address=address)
+        if result is None:
             return None
-        record = EPCData.model_validate(payload.get("record", {}))
-        return EPCRecordResponse(record=record, raw=payload.get("raw") if include_raw else None)
+        record_dict, raw = result
+        record = EPCData.model_validate(record_dict)
+        return EPCRecordResponse(record=record, raw=raw if include_raw else None)

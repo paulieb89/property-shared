@@ -8,7 +8,7 @@ from __future__ import annotations
 import base64
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 
@@ -143,8 +143,12 @@ class EPCClient:
 
     async def search_by_postcode(
         self, postcode: str, address: str | None = None
-    ) -> Optional[Dict[str, Any]]:
-        """Search for EPC by postcode, optionally matching address."""
+    ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+        """Search for EPC by postcode, optionally matching address.
+
+        Returns:
+            Tuple of (normalized_record, raw_response_json) or None.
+        """
         if not self.is_configured():
             return None
 
@@ -172,15 +176,9 @@ class EPCClient:
                             best_score = score
                             best_cert = cert
                     if best_cert and best_score >= 30:
-                        return {
-                            "record": self._parse_certificate(best_cert),
-                            "raw": data,
-                        }
+                        return (self._parse_certificate(best_cert), data)
 
-                return {
-                    "record": self._parse_certificate(rows[0]),
-                    "raw": data,
-                }
+                return (self._parse_certificate(rows[0]), data)
 
             except (httpx.HTTPError, KeyError, ValueError):
                 return None
