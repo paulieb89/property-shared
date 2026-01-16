@@ -5,43 +5,43 @@ Goal: run one project with several user touch surfaces (API, CLI dev tools, brow
 ## Architecture decisions (commit to these)
 
 ### Source of truth
-- `property_core/` is the single source of truth for domain logic (PPD/EPC/Rightmove).
-- `app/` is a thin FastAPI wrapper that exposes `property_core/` over HTTP.
+- `property_core/` is the single source of truth for domain logic (PPD/EPC/Rightmove). **(done)**
+- `app/` is a thin FastAPI wrapper that exposes `property_core/` over HTTP. **(done)**
 
 ### CLI strategy
-- Default: CLI **imports `property_core`** (fast local dev, no server required).
-- Optional: CLI can call the deployed API when `--api-url` is provided (validates real service behavior).
+- Default: CLI **imports `property_core`** (fast local dev, no server required). **(done)**
+- Optional: CLI can call the deployed API when `--api-url` is provided (validates real service behavior). *(todo)*
 
 ### Demo UI strategy
-- Phase 2 demo UI lives in `app/web/` (FastAPI-served templates/static).
-- Demo UI should **call the API routes** (even when same process) to validate contracts.
+- Phase 2 demo UI lives in `app/web/` (FastAPI-served templates/static). **(done)**
+- Demo UI should **call the API routes** (even when same process) to validate contracts. **(done)**
 - A separate `ui/` (Next.js) is a later option if/when we want a real standalone webapp.
 
 ## Repo layout changes
-- `property_cli/` (new) — Typer-based CLI package
-- `app/web/` (new) — minimal demo UI (templates + static)
+- `property_cli/` (new) — Typer-based CLI package **(done)**
+- `app/web/` (new) — minimal demo UI (templates + static) **(done)**
 - `clients/python/` (generated) — OpenAPI client output (gitignored or committed by choice)
 
 ## Dependency management (uv + extras)
 
 Keep one `pyproject.toml` with optional extras:
-- `api`: `fastapi`, `uvicorn`
-- `cli`: `typer`, optional `rich`
-- `demo`: `jinja2`, optional `python-multipart`
-- `dev`: `pytest`, `openapi-python-client`, `python-dotenv`
+- `api`: `fastapi`, `uvicorn` **(done)**
+- `cli`: `typer`, optional `rich` **(done)**
+- `demo`: `jinja2`, optional `python-multipart` **(done)**
+- `dev`: `pytest`, `openapi-python-client`, `python-dotenv` **(done)**
 
 Guideline: base deps should be minimal; “surface” deps go into extras.
 
 ## Entry points (`[project.scripts]`)
 
 Add scripts so each surface is runnable consistently:
-- `property-api` → run FastAPI (uvicorn `app.main:app`)
-- `property-cli` → Typer entrypoint (`property_cli.main:app`)
-- `property-demo` → run API with demo routes enabled (could be same as `property-api` initially)
+- `property-api` → run FastAPI (uvicorn `app.main:app`) **(done)**
+- `property-cli` → Typer entrypoint (`property_cli.main:app`) **(done)**
+- `property-demo` → run API with demo routes enabled (could be same as `property-api` initially) **(done)**
 
 ## API work (small tweaks)
-- Add `/v1/meta/integrations` is already present; ensure it’s used by demo/CLI for self-check.
-- Keep response normalization consistent (`record` + optional `raw`) for provider-backed endpoints.
+- Add `/v1/meta/integrations` is already present; ensure it’s used by demo/CLI for self-check. **(done)**
+- Keep response normalization consistent (`record` + optional `raw`) for provider-backed endpoints. **(done)**
 
 ## CLI scope (initial)
 
@@ -54,8 +54,8 @@ Commands (MVP):
 - `property-cli rightmove listings --search-url ... --max-pages 1`
 
 Behavior:
-- If `--api-url` is set, call HTTP endpoints.
-- Otherwise, call `property_core` directly.
+- If `--api-url` is set, call HTTP endpoints. *(todo)*
+- Otherwise, call `property_core` directly. **(done)**
 
 ## Demo UI scope (initial)
 
@@ -66,14 +66,14 @@ Pages:
 - `/demo/rightmove` (postcode → search url; optional fetch listings)
 
 Implementation:
-- Simple server-rendered HTML with fetch calls to `/v1/...`
-- No auth
-- Clear “this calls third-party services” note
+- Simple server-rendered HTML with fetch calls to `/v1/...` **(done)**
+- No auth **(done)**
+- Clear “this calls third-party services” note **(todo/note)**
 
 ## OpenAPI client generation (Python)
 
 Add a documented command (and optional script) to generate:
-- `uv run --extra dev openapi-python-client generate --url http://localhost:8000/openapi.json --output-path clients/python`
+- `uv run --extra dev openapi-python-client generate --url http://localhost:8000/openapi.json --output-path clients/python` **(doc added)**
 
 Decide whether to:
 - commit generated client (stable consumer use), or
@@ -86,8 +86,7 @@ Decide whether to:
 
 ## Milestones
 1) Adjust `pyproject.toml` extras + add scripts
-2) Scaffold `property_cli/` + MVP commands (core mode first)
-3) Add `--api-url` mode for CLI
-4) Add `app/web/` demo pages that call API
-5) Add OpenAPI client generation docs + optional script
-
+2) Scaffold `property_cli/` + MVP commands (core mode first) **(done)**
+3) Add `--api-url` mode for CLI *(todo)*
+4) Add `app/web/` demo pages that call API **(done)**
+5) Add OpenAPI client generation docs + optional script **(done)**
