@@ -35,6 +35,8 @@ class LocationAssessor:
         if cached and cached["cache_expires_at"] > now:
             return cached
 
+        local_highlights: list[str] = []
+
         try:
             summary = self.ppd.get_comps_summary(
                 postcode=outcode,
@@ -52,11 +54,15 @@ class LocationAssessor:
                 f"{'£{:,}'.format(median) if median else 'unknown'}."
             )
             data_sources = ["land_registry:price_paid"]
+            local_highlights.append(f"{count} transactions in the last 12 months")
+            if median:
+                local_highlights.append(f"Median price £{median:,.0f}")
         except Exception as exc:  # noqa: BLE001
             breakdown = self._fallback_breakdown()
             reasoning = f"PPD lookup failed, returning neutral scores: {exc}"
             confidence = 0.15
             data_sources = ["fallback:neutral"]
+            local_highlights.append("Using fallback neutral scores")
 
         scores = list(breakdown.values())
         assessment = {
@@ -66,7 +72,7 @@ class LocationAssessor:
             "reasoning": reasoning,
             "confidence": confidence,
             "data_sources": data_sources,
-            "local_highlights": [],
+            "local_highlights": local_highlights,
             "cached": False,
             "assessed_at": now,
             "cache_expires_at": now + timedelta(hours=6),
