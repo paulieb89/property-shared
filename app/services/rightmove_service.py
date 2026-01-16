@@ -7,6 +7,7 @@ Wraps the pure-python Rightmove helpers with:
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Optional
 
 import anyio
@@ -48,7 +49,7 @@ class RightmoveService:
         radius: float | None = None,
     ) -> str:
         async with self.limiter:
-            return await anyio.to_thread.run_sync(
+            fn = partial(
                 self.location_api.build_search_url,
                 postcode,
                 property_type=property_type,
@@ -58,6 +59,7 @@ class RightmoveService:
                 max_bedrooms=max_bedrooms,
                 radius=radius,
             )
+            return await anyio.to_thread.run_sync(fn)
 
     async def listings(
         self,
@@ -66,11 +68,11 @@ class RightmoveService:
         max_pages: int | None = None,
     ) -> list[RightmoveListing]:
         async with self.limiter:
-            results = await anyio.to_thread.run_sync(
+            fn = partial(
                 fetch_listings,
                 search_url,
                 max_pages=max_pages,
                 rate_limit_seconds=self._delay,
             )
+            results = await anyio.to_thread.run_sync(fn)
         return [RightmoveListing.model_validate(item.to_dict()) for item in results]
-

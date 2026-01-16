@@ -28,7 +28,7 @@ async def test_epc_service_live_search() -> None:
     address = os.getenv("EPC_TEST_ADDRESS")
 
     start = time.perf_counter()
-    result = await service.search(postcode=postcode, address=address)
+    result = await service.search(postcode=postcode, address=address, include_raw=True)
     elapsed = time.perf_counter() - start
 
     print(f"EPC live search took {elapsed:.2f}s")
@@ -37,4 +37,5 @@ async def test_epc_service_live_search() -> None:
             "No EPC result for test postcode. Set EPC_TEST_POSTCODE to a known-good "
             "postcode (and EPC_TEST_ADDRESS if needed)."
         )
-    assert result.rating
+    print(f"EPC rating={result.record.rating} score={result.record.score} address={result.record.address}")
+    assert result.record.rating

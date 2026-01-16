@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from app.core.config import get_settings
-from app.schemas.epc import EPCData
+from app.schemas.epc import EPCData, EPCRecordResponse
 from property_core.epc_client import EPCClient
 
 
@@ -30,12 +30,9 @@ class EPCService:
         postcode: str,
         address: str | None = None,
         include_raw: bool = False,
-    ) -> dict[str, Any] | None:
+    ) -> EPCRecordResponse | None:
         payload = await self.client.search_by_postcode(postcode, address=address)
         if payload is None:
             return None
         record = EPCData.model_validate(payload.get("record", {}))
-        return {
-            "record": record,
-            "raw": payload.get("raw") if include_raw else None,
-        }
+        return EPCRecordResponse(record=record, raw=payload.get("raw") if include_raw else None)
