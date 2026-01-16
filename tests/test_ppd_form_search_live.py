@@ -1,4 +1,5 @@
 import os
+import urllib.error
 
 import pytest
 
@@ -10,16 +11,20 @@ def test_ppd_form_search_live() -> None:
     service = PPDService()
     limit = 5
     # Birmingham city centre Broad Street has frequent transactions.
-    res = service.address_search(
-        postcode_prefix="B1",
-        street="Broad Street",
-        paon=None,
-        saon=None,
-        town=None,
-        county=None,
-        postcode=None,
-        limit=limit,
-    )
+    try:
+        res = service.address_search(
+            postcode_prefix="B1",
+            street="Broad Street",
+            paon=None,
+            saon=None,
+            town=None,
+            county=None,
+            postcode=None,
+            limit=limit,
+        )
+    except urllib.error.HTTPError as exc:
+        # Upstream SPARQL endpoint can return 503 under load; skip instead of failing CI.
+        pytest.skip(f"PPD endpoint unavailable: {exc}")
 
     assert res.count > 0
     assert res.count <= limit
