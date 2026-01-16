@@ -1,6 +1,6 @@
 # Property Shared API (scaffold)
 
-FastAPI service for shared property capabilities (PPD, EPC, Rightmove, Location scoring). Currently scaffolded with health route and wiring for settings, Postgres, and Redis.
+FastAPI service + pure-Python core library for shared property capabilities (PPD, EPC, Rightmove, Location scoring). Currently scaffolded with a health route and minimal settings/logging (no DB/Redis assumptions in this repo).
 
 ## Structure
 - `property_core/` – pure-Python core library (no FastAPI, no DB/Redis assumptions)
@@ -11,12 +11,12 @@ FastAPI service for shared property capabilities (PPD, EPC, Rightmove, Location 
 - `app/schemas/` – Pydantic models (EPC, location, more to come)
 - `property_core/ppd_client.py` – vendored PPD helper from `pp_data`
 - `app/tasks/`, `app/clients/`, `app/utils/` – API wrapper helpers (`app/utils/polite.py` for in-memory politeness)
-- Existing original helper files remain in the repo root for reference
+- `example_ref/` – reference-only example code copied from other projects
 
 ## Local setup
 1) Create venv: `python -m venv .venv && source .venv/bin/activate`
-2) Install deps (later): `pip install fastapi uvicorn pydantic pydantic-settings httpx requests redis asyncpg sqlalchemy tenacity beautifulsoup4`
-3) Copy `.env.example` to `.env` and fill values (DB/Redis URLs, EPC/OpenAI keys if used)
+2) Install deps (later): `pip install fastapi uvicorn pydantic pydantic-settings httpx requests tenacity beautifulsoup4`
+3) Copy `.env.example` to `.env` and fill values (EPC/OpenAI keys if used)
 4) Run: `uvicorn app.main:app --reload`
 
 ## Notes
