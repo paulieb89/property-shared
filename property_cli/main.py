@@ -7,7 +7,7 @@ to exercise the deployed API instead.
 from __future__ import annotations
 
 import json
-from typing import Annotated, Iterable, Optional
+from typing import Iterable, Optional
 
 import typer
 from rich import print as rprint
@@ -37,7 +37,9 @@ def _echo_json(data: object) -> None:
     rprint(json.dumps(data, indent=2, default=str))
 
 
-def _join_tokens(tokens: Iterable[str]) -> str:
+def _join_tokens(tokens: Iterable[str] | str) -> str:
+    if isinstance(tokens, str):
+        return tokens.strip()
     return " ".join(tokens).strip()
 
 
@@ -65,7 +67,7 @@ app.add_typer(ppd, name="ppd")
 
 @ppd.command("comps")
 def ppd_comps(
-    postcode: Annotated[list[str], typer.Argument(..., nargs=-1, metavar="POSTCODE")] ,
+    postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
     property_type: Optional[str] = typer.Option(None, help="D/S/T/F/O"),
     months: int = typer.Option(24, help="Lookback months"),
     limit: int = typer.Option(50, help="Max transactions"),
@@ -155,7 +157,7 @@ app.add_typer(epc, name="epc")
 
 @epc.command("search")
 def epc_search(
-    postcode: Annotated[list[str], typer.Argument(..., nargs=-1, metavar="POSTCODE")] ,
+    postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
     address: Optional[str] = typer.Option(None),
     include_raw: bool = typer.Option(False, help="Show raw EPC payload"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
@@ -195,7 +197,7 @@ app.add_typer(rightmove, name="rightmove")
 
 @rightmove.command("search-url")
 def rightmove_search_url(
-    postcode: Annotated[list[str], typer.Argument(..., nargs=-1, metavar="POSTCODE")] ,
+    postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
     property_type: str = typer.Option("sale"),
     radius: Optional[float] = typer.Option(None, help="Search radius in miles"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
@@ -270,7 +272,7 @@ app.add_typer(location, name="location")
 
 @location.command("assess")
 def location_assess(
-    postcode: Annotated[list[str], typer.Argument(..., nargs=-1, metavar="POSTCODE")] ,
+    postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
     address: Optional[str] = typer.Option(None),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
