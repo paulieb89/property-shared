@@ -10,7 +10,7 @@ Goal: run one project with several user touch surfaces (API, CLI dev tools, brow
 
 ### CLI strategy
 - Default: CLI **imports `property_core`** (fast local dev, no server required). **(done)**
-- Optional: CLI can call the deployed API when `--api-url` is provided (validates real service behavior). *(todo)*
+- Optional: CLI can call the deployed API when `--api-url` is provided (validates real service behavior). **(done)**
 
 ### Demo UI strategy
 - Phase 2 demo UI lives in `app/web/` (FastAPI-served templates/static). **(done)**
@@ -68,7 +68,7 @@ Pages:
 Implementation:
 - Simple server-rendered HTML with fetch calls to `/v1/...` **(done)**
 - No auth **(done)**
-- Clear “this calls third-party services” note **(todo/note)**
+- Clear “this calls third-party services” note **(done)**
 
 ## OpenAPI client generation (Python)
 
@@ -87,6 +87,6 @@ Decide whether to:
 ## Milestones
 1) Adjust `pyproject.toml` extras + add scripts
 2) Scaffold `property_cli/` + MVP commands (core mode first) **(done)**
-3) Add `--api-url` mode for CLI *(todo)*
+3) Add `--api-url` mode for CLI **(done)**
 4) Add `app/web/` demo pages that call API **(done)**
 5) Add OpenAPI client generation docs + optional script **(done)**

@@ -7,7 +7,7 @@ FastAPI service + pure-Python core library for shared property capabilities (PPD
 1) Create `.env` from `.env.example` (set `EPC_API_EMAIL`/`EPC_API_KEY` if you want EPC enabled)
 2) Install deps: `uv sync --extra dev`
 3) Run API: `uv run property-api` (or `uv run uvicorn app.main:app --reload`)
-4) CLI (core mode): `uv run --extra cli property-cli meta`
+4) CLI (core mode): `uv run --extra cli property-cli meta` (add `--api-url http://localhost:8000` to hit the running API instead of local core)
 5) Demo UI: visit `http://localhost:8000/demo` (served by the same FastAPI app)
 6) Quick checks:
    - Health: `curl http://localhost:8000/v1/health`

@@ -1,7 +1,7 @@
 """Typer CLI for property shared tools.
 
-Defaults to calling `property_core` directly (fast, offline). An `--api-url`
-option is available for future HTTP mode; currently core mode only.
+Defaults to calling `property_core` directly (fast, offline). Pass `--api-url`
+to exercise the deployed API instead.
 """
 
 from __future__ import annotations
@@ -101,7 +101,7 @@ def ppd_transaction(
     if http:
         data = http.get(
             f"/v1/ppd/transaction/{transaction_id}",
-            params={"include_raw": str(include_raw).lower()},
+            params={"include_raw": include_raw},
         )
         _echo_json(data)
     else:
@@ -160,7 +160,7 @@ def epc_search(
             params={
                 "postcode": postcode,
                 "address": address,
-                "include_raw": str(include_raw).lower(),
+                "include_raw": include_raw,
             },
         )
         _echo_json(data)
@@ -189,18 +189,27 @@ app.add_typer(rightmove, name="rightmove")
 def rightmove_search_url(
     postcode: str = typer.Argument(...),
     property_type: str = typer.Option("sale"),
+    radius: Optional[float] = typer.Option(None, help="Search radius in miles"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
     http = _maybe_http_client(api_url)
     if http:
         data = http.get(
             "/v1/rightmove/search-url",
-            params={"postcode": postcode, "property_type": property_type},
+            params={
+                "postcode": postcode,
+                "property_type": property_type,
+                "radius": radius,
+            },
         )
         typer.echo(data.get("url"))
     else:
         api = RightmoveLocationAPI()
-        url = api.build_search_url(postcode, property_type=property_type)
+        url = api.build_search_url(
+            postcode,
+            property_type=property_type,
+            radius=radius,
+        )
         typer.echo(url)
 
 
