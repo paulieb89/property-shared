@@ -15,7 +15,6 @@ from rich.table import Table
 
 from property_core.epc_client import EPCClient
 from property_core.ppd_client import PricePaidDataClient
-from property_core.location_assessor import LocationAssessor
 from property_core.rightmove_location import RightmoveLocationAPI
 from property_core.rightmove_scraper import fetch_listings
 
@@ -56,7 +55,6 @@ def meta(api_url: Optional[str] = typer.Option(None, help="Call API instead of c
             "ppd": True,
             "epc": bool(EPCClient().is_configured()),
             "rightmove": True,
-            "location": True,
         }
     )
 
@@ -264,31 +262,6 @@ def rightmove_listings(
     rprint(table)
     if len(listings) > 20:
         typer.echo(f"...and {len(listings) - 20} more")
-
-
-location = typer.Typer(help="Location scoring commands")
-app.add_typer(location, name="location")
-
-
-@location.command("assess")
-def location_assess(
-    postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
-    address: Optional[str] = typer.Option(None),
-    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
-) -> None:
-    postcode_value = _join_tokens(postcode)
-    http = _maybe_http_client(api_url)
-    if http:
-        data = http.get(
-            "/v1/location/assess",
-            params={"postcode": postcode_value, "address": address},
-        )
-        _echo_json(data)
-        return
-
-    assessor = LocationAssessor()
-    data = assessor.assess(postcode_value, address=address)
-    _echo_json(data)
 
 
 if __name__ == "__main__":

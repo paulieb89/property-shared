@@ -25,6 +25,5 @@ async def integrations() -> dict[str, object]:
             "ppd": {"available": True, "configured": True},
             "rightmove": {"available": True, "configured": True},
             "epc": {"available": True, "configured": epc.is_configured()},
-            "location": {"available": True, "configured": True},
         },
     }

@@ -14,7 +14,6 @@ FastAPI service + pure-Python core library for shared property capabilities (PPD
    - Integration status: `curl http://localhost:8000/v1/meta/integrations`
    - Rightmove: `curl 'http://localhost:8000/v1/rightmove/search-url?postcode=SW1A%201AA&radius=0.25'`
      then `curl 'http://localhost:8000/v1/rightmove/listings?search_url=<pasted_url>&max_pages=1'`
-   - Location (placeholder): `curl 'http://localhost:8000/v1/location/assess?postcode=SW1A%201AA'` (deterministic demo; projects should swap in their own assessor)
 
 ### Live integration tests
 Live tests make real network calls and are gated:
@@ -35,7 +34,7 @@ Generate a typed client from the running service OpenAPI:
 - `app/core/` – config + logging for the API wrapper
 - `app/api/v1/` – versioned routers (health now; domain routers to follow)
 - `app/services/` – reserved for API service wrappers (will call into `property_core/`)
-- `app/schemas/` – Pydantic models (EPC, location, more to come)
+- `app/schemas/` – Pydantic models (EPC, more to come)
 - `property_core/ppd_client.py` – vendored PPD helper from `pp_data`
 - `app/tasks/`, `app/clients/`, `app/utils/` – API wrapper helpers (`app/utils/polite.py` for in-memory politeness)
 - `example_ref/` – reference-only example code copied from other projects
@@ -54,6 +53,3 @@ Generate a typed client from the running service OpenAPI:
 ## Rightmove CLI snippets
 - Build a search URL: `uv run --extra cli property-cli rightmove search-url --postcode SW1A 1AA --property-type sale --radius 0.25`
 - Fetch listings from a search URL: `uv run --extra cli property-cli rightmove listings --search-url "<rightmove_url>" --max-pages 1`
-
-## Location CLI snippet
-- Assess a postcode (placeholder): `uv run --extra cli property-cli location assess SW1A 1AA` (add `--api-url http://localhost:8000` to exercise the API; replace the assessor for real location intelligence)
