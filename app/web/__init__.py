@@ -1,0 +1,2 @@
+"""Demo UI routes."""
+

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Property Shared Demo</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.5; }
+    h1 { margin-bottom: 0.5rem; }
+    section { margin-bottom: 2rem; padding: 1rem; border: 1px solid #ddd; border-radius: 8px; }
+    form { display: grid; gap: 0.5rem; max-width: 480px; }
+    label { display: flex; flex-direction: column; font-weight: 600; }
+    input, select { padding: 0.4rem; font-size: 1rem; }
+    button { padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
+    code { background: #f6f8fa; padding: 0.1rem 0.3rem; border-radius: 4px; }
+  </style>
+  <script>
+    async function callApi(form, endpoint) {
+      const params = new URLSearchParams(new FormData(form));
+      const res = await fetch(endpoint + "?" + params.toString());
+      const data = await res.json();
+      const pre = form.querySelector("pre");
+      pre.textContent = JSON.stringify(data, null, 2);
+    }
+  </script>
+</head>
+<body>
+  <h1>Property Shared Demo</h1>
+  <p>These forms call the API routes directly. Fill a field and click submit.</p>
+
+  <section>
+    <h2>PPD Transactions</h2>
+    <form onsubmit="event.preventDefault(); callApi(this, '/v1/ppd/transactions')">
+      <label>Postcode prefix (district/sector)
+        <input name="postcode_prefix" placeholder="e.g. PL6 8">
+      </label>
+      <label>Limit
+        <input name="limit" type="number" value="5">
+      </label>
+      <button type="submit">Search</button>
+      <pre></pre>
+    </form>
+  </section>
+
+  <section>
+    <h2>EPC Search</h2>
+    <form onsubmit="event.preventDefault(); callApi(this, '/v1/epc/search')">
+      <label>Postcode
+        <input name="postcode" placeholder="e.g. SW1A 1AA" required>
+      </label>
+      <label>Address (optional)
+        <input name="address" placeholder="Optional full address">
+      </label>
+      <label>Include raw
+        <select name="include_raw">
+          <option value="false">false</option>
+          <option value="true">true</option>
+        </select>
+      </label>
+      <button type="submit">Search</button>
+      <pre></pre>
+    </form>
+  </section>
+
+  <section>
+    <h2>Rightmove Listings</h2>
+    <p>Step 1: get a search URL, then paste it below.</p>
+    <form onsubmit="event.preventDefault(); callApi(this, '/v1/rightmove/search-url')">
+      <label>Postcode
+        <input name="postcode" placeholder="e.g. SW1A 1AA" required>
+      </label>
+      <label>Type
+        <select name="property_type">
+          <option value="sale">sale</option>
+          <option value="rent">rent</option>
+        </select>
+      </label>
+      <button type="submit">Get search URL</button>
+      <pre></pre>
+    </form>
+    <p>Step 2: fetch listings for a search URL.</p>
+    <form onsubmit="event.preventDefault(); callApi(this, '/v1/rightmove/listings')">
+      <label>Search URL
+        <input name="search_url" placeholder="paste search URL from step 1" required>
+      </label>
+      <label>Max pages
+        <input name="max_pages" type="number" value="1">
+      </label>
+      <button type="submit">Fetch listings</button>
+      <pre></pre>
+    </form>
+  </section>
+
+</body>
+</html>
