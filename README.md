@@ -14,6 +14,7 @@ FastAPI service + pure-Python core library for shared property capabilities (PPD
    - Integration status: `curl http://localhost:8000/v1/meta/integrations`
    - Rightmove: `curl 'http://localhost:8000/v1/rightmove/search-url?postcode=SW1A%201AA&radius=0.25'`
      then `curl 'http://localhost:8000/v1/rightmove/listings?search_url=<pasted_url>&max_pages=1'`
+   - PPD address search: `curl 'http://localhost:8000/v1/ppd/address-search?postcode_prefix=B1&street=Broad%20Street&limit=5'`
 
 ### Live integration tests
 Live tests make real network calls and are gated:

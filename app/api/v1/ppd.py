@@ -77,6 +77,41 @@ def transactions(
         raise HTTPException(status_code=502, detail=f"PPD search failed: {exc}") from exc
 
 
+@router.get("/address-search", response_model=PPDSearchResponse)
+def address_search(
+    paon: Optional[str] = Query(None, min_length=1, description="Primary addressable object name"),
+    saon: Optional[str] = Query(None, min_length=1, description="Secondary addressable object name"),
+    street: Optional[str] = Query(None, min_length=2),
+    town: Optional[str] = Query(None, min_length=2),
+    county: Optional[str] = Query(None, min_length=2),
+    postcode: Optional[str] = Query(None, min_length=2),
+    postcode_prefix: Optional[str] = Query(None, min_length=2),
+    limit: int = Query(25, ge=1, le=50),
+) -> PPDSearchResponse:
+    """Web-form style address search (requires at least two fields)."""
+    provided = [v for v in (paon, saon, street, town, county, postcode, postcode_prefix) if v]
+    if len(provided) < 2:
+        raise HTTPException(
+            status_code=422, detail="Provide at least two address fields (e.g., postcode + street)."
+        )
+
+    try:
+        return service.address_search(
+            paon=paon,
+            saon=saon,
+            street=street,
+            town=town,
+            county=county,
+            postcode=postcode,
+            postcode_prefix=postcode_prefix,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"PPD address search failed: {exc}") from exc
+
+
 @router.get("/comps", response_model=PPDCompsResponse)
 def comps(
     postcode: str = Query(..., min_length=2),

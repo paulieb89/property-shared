@@ -255,6 +255,115 @@ class PricePaidDataClient:
             return json.load(resp)
 
     # --------
+    # Address-form search (web-form style)
+    # --------
+    def form_search(
+        self,
+        *,
+        paon: Optional[str] = None,
+        saon: Optional[str] = None,
+        street: Optional[str] = None,
+        town: Optional[str] = None,
+        county: Optional[str] = None,
+        postcode: Optional[str] = None,
+        postcode_prefix: Optional[str] = None,
+        limit: int = 25,
+    ) -> Dict:
+        """
+        Search PPD using web-form style address filters.
+
+        Requires at least two non-empty fields to avoid broad scans.
+        Caps limit at 50 to protect the upstream service.
+        """
+        fields = {
+            "paon": paon,
+            "saon": saon,
+            "street": street,
+            "town": town,
+            "county": county,
+            "postcode": postcode,
+            "postcode_prefix": postcode_prefix,
+        }
+        provided = {k: v for k, v in fields.items() if v}
+        if len(provided) < 2:
+            raise ValueError("Provide at least two address fields (e.g., postcode + street)")
+
+        if limit <= 0:
+            limit = 25
+        limit = min(limit, 50)
+
+        def _clean(value: str) -> str:
+            return value.strip().lower().replace('"', "").replace("\\", "")
+
+        filters: list[str] = []
+        values_clauses: list[str] = []
+
+        if postcode:
+            safe_pc = _clean(postcode).upper()
+            values_clauses.append(f'VALUES ?postcode {{"{safe_pc}"^^xsd:string}}')
+        elif postcode_prefix:
+            safe_prefix = _clean(postcode_prefix).upper()
+            filters.append(f'FILTER(STRSTARTS(?postcode, "{safe_prefix}"))')
+
+        if paon:
+            safe = _clean(paon)
+            filters.append(f'FILTER(CONTAINS(LCASE(?paon), "{safe}"))')
+        if saon:
+            safe = _clean(saon)
+            filters.append(f'FILTER(CONTAINS(LCASE(?saon), "{safe}"))')
+        if street:
+            safe = _clean(street)
+            filters.append(f'FILTER(CONTAINS(LCASE(?street), "{safe}"))')
+        if town:
+            safe = _clean(town)
+            filters.append(f'FILTER(CONTAINS(LCASE(?town), "{safe}"))')
+        if county:
+            safe = _clean(county)
+            filters.append(f'FILTER(CONTAINS(LCASE(?county), "{safe}"))')
+
+        query = "\n".join(
+            [
+                "PREFIX lrppi: <http://landregistry.data.gov.uk/def/ppi/>",
+                "PREFIX lrcommon: <http://landregistry.data.gov.uk/def/common/>",
+                "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>",
+                "",
+                "SELECT ?transactionId ?pricePaid ?transactionDate ?postcode "
+                "?propertyType ?estateType ?transactionCategory ?newBuild "
+                "?paon ?saon ?street ?town ?county",
+                "WHERE {",
+                *values_clauses,
+                "  ?transaction lrppi:pricePaid ?pricePaid .",
+                "  ?transaction lrppi:transactionDate ?transactionDate .",
+                "  ?transaction lrppi:propertyAddress ?addr .",
+                "  OPTIONAL { ?transaction lrppi:propertyType ?propertyType }",
+                "  OPTIONAL { ?transaction lrppi:estateType ?estateType }",
+                "  OPTIONAL { ?transaction lrppi:transactionCategory ?transactionCategory }",
+                "  OPTIONAL { ?transaction lrppi:newBuild ?newBuild }",
+                "  ?addr lrcommon:postcode ?postcode .",
+                "  OPTIONAL { ?addr lrcommon:paon ?paon }",
+                "  OPTIONAL { ?addr lrcommon:saon ?saon }",
+                "  OPTIONAL { ?addr lrcommon:street ?street }",
+                "  OPTIONAL { ?addr lrcommon:town ?town }",
+                "  OPTIONAL { ?addr lrcommon:county ?county }",
+                *filters,
+                "  BIND(STRAFTER(STR(?transaction), \"transaction/\") AS ?transactionId)",
+                "}",
+                "ORDER BY DESC(?transactionDate)",
+                f"LIMIT {limit}",
+                "OFFSET 0",
+            ]
+        )
+
+        encoded = urllib.parse.urlencode({"query": query}).encode()
+        req = urllib.request.Request(
+            self.sparql_endpoint,
+            data=encoded,
+            headers={"Accept": "application/sparql-results+json", "User-Agent": self.user_agent},
+        )
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            return json.load(resp)
+
+    # --------
     # Comps helper
     # --------
     def get_comps_summary(

@@ -26,6 +26,7 @@ from app.schemas.ppd import (
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
+FORM_MAX_LIMIT = 50
 
 PROPERTY_TYPE_BY_URI = {v: k for k, v in PROPERTY_TYPE_URIS.items()}
 ESTATE_TYPE_BY_URI = {v: k for k, v in ESTATE_TYPE_URIS.items()}
@@ -237,6 +238,47 @@ class PPDService:
             count=len(results),
             limit=limit,
             offset=offset,
+            results=results,
+            warnings=warnings,
+        )
+
+    def address_search(
+        self,
+        *,
+        paon: Optional[str],
+        saon: Optional[str],
+        street: Optional[str],
+        town: Optional[str],
+        county: Optional[str],
+        postcode: Optional[str],
+        postcode_prefix: Optional[str],
+        limit: int,
+    ) -> PPDSearchResponse:
+        """Address-form search with strict limits."""
+        warnings: List[str] = []
+        if limit <= 0:
+            limit = 25
+        if limit > FORM_MAX_LIMIT:
+            warnings.append(f"limit capped to {FORM_MAX_LIMIT}")
+            limit = FORM_MAX_LIMIT
+
+        raw = self.client.form_search(
+            paon=paon,
+            saon=saon,
+            street=street,
+            town=town,
+            county=county,
+            postcode=postcode,
+            postcode_prefix=postcode_prefix,
+            limit=limit,
+        )
+
+        bindings = raw.get("results", {}).get("bindings", [])
+        results = _parse_sparql_bindings(bindings)
+        return PPDSearchResponse(
+            count=len(results),
+            limit=limit,
+            offset=0,
             results=results,
             warnings=warnings,
         )
