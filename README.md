@@ -39,6 +39,7 @@ Generate a typed client from the running service OpenAPI:
 - `property_core/ppd_client.py` – vendored PPD helper from `pp_data`
 - `app/tasks/`, `app/clients/`, `app/utils/` – API wrapper helpers (`app/utils/polite.py` for in-memory politeness)
 - `example_ref/` – reference-only example code copied from other projects
+- `USER_GUIDE.md` – quickstart and endpoint/CLI usage
 
 ## Local setup
 1) Create venv: `python -m venv .venv && source .venv/bin/activate`
@@ -51,6 +52,25 @@ Generate a typed client from the running service OpenAPI:
 - Rightmove search URLs built from full postcodes default to a small radius (0.25 miles) so the initial query returns results; override `radius` to widen/narrow the area in both the API and CLI.
 - OpenAPI/SDK generation will be added after endpoints land.
 
+## API I/O contracts (summary)
+- `GET /v1/health` → `{ "status": "ok" }`
+- `GET /v1/meta/integrations` → `{ environment, integrations: { ppd|rightmove|epc: { available, configured } } }`
+- `GET /v1/ppd/download-url?kind=complete|monthly|year&year?&part?&fmt=csv|txt` → `{ url }`
+- `GET /v1/ppd/transactions?postcode|postcode_prefix&limit&filters...` (one of postcode/postcode_prefix) → `{ count, limit, offset, results: [ { transaction_id, price, date, postcode, property_type, estate_type, transaction_category, new_build, paon, saon, street, town, county } ], warnings }`
+- `GET /v1/ppd/address-search?paon?&saon?&street?&town?&county?&postcode?&postcode_prefix?&limit` (requires ≥2 fields, limit≤50) → same shape as `/transactions`
+- `GET /v1/ppd/comps?postcode&property_type?&months?&limit?&search_level=postcode|sector|district` → `{ query, count, median, mean, min, max, thin_market, transactions: [PPDTransaction] }`
+- `GET /v1/ppd/transaction/{id}?view=all|basic&include_raw=bool` → `{ record: { transaction_id, price_paid, transaction_date, property/transaction metadata... }, raw? }`
+- `GET /v1/epc/search?postcode&address?&include_raw=bool` → `{ record, raw? }` (returns 501-style response if EPC creds not configured)
+- `GET /v1/rightmove/search-url?postcode&property_type=sale|rent&radius?&min/max price/bedrooms?` → `{ url }`
+- `GET /v1/rightmove/listings?search_url&max_pages?` → `{ count, results: [ { id, url, price, currency, bedrooms, bathrooms, address, summary, property_type, agent_name, agent_branch, first_visible_date, images } ] }`
+
 ## Rightmove CLI snippets
 - Build a search URL: `uv run --extra cli property-cli rightmove search-url --postcode SW1A 1AA --property-type sale --radius 0.25`
 - Fetch listings from a search URL: `uv run --extra cli property-cli rightmove listings --search-url "<rightmove_url>" --max-pages 1`
+
+## Other CLI commands (core mode; add `--api-url` to hit the API)
+- Meta integrations: `uv run --extra cli property-cli meta`
+- PPD comps (postcode is positional): `uv run --extra cli property-cli ppd comps "SW1A 1AA" --months 24 --limit 20 --search-level sector`
+- PPD transactions (postcode/prefix): `uv run --extra cli property-cli ppd search --postcode-prefix SW1A --limit 10`
+- PPD transaction record: `uv run --extra cli property-cli ppd transaction 31C68072-E0B5-FEE3-E063-4804A8C04F37 --include-raw` (replace with a real transaction id)
+- EPC search (requires EPC_API_EMAIL/EPC_API_KEY set): `uv run --extra cli property-cli epc search "SW1A 1AA" --address "10 Downing Street" --include-raw`

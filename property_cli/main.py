@@ -6,6 +6,11 @@ to exercise the deployed API instead.
 
 from __future__ import annotations
 
+import os
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
 import json
 from typing import Iterable, Optional
 
