@@ -38,3 +38,36 @@ The suite skips if credentials are missing or upstream services return 503.
 - Location slice was removed; projects can supply their own location intelligence.
 - UKHPI endpoints are not implemented yet.
 - Rightmove scraping is polite by default (delay + concurrency limits); respect upstream rate limits.
+
+## Using as a Python package (in-process)
+You can import the core logic directly without running the API:
+
+### Install
+- From the repo root: `uv sync --extra cli` (or your preferred env manager).
+- Or install editable for reuse in another project: `pip install -e /path/to/property_shared`.
+
+### Core imports (no HTTP)
+- PPD:
+  - `from property_core.ppd_client import PricePaidDataClient`
+  - Examples:
+    - `client.get_comps_summary(postcode="SW1A 1AA", months=24, limit=20, search_level="sector")`
+    - `client.sparql_search(postcode_prefix="SW1A", limit=10)`
+    - `client.form_search(postcode_prefix="B1", street="Broad Street", limit=5)` (address-form; requires ≥2 fields)
+    - `client.get_transaction_record("<transaction_id>")`
+- EPC:
+  - `from property_core.epc_client import EPCClient`
+  - Requires `EPC_API_EMAIL`/`EPC_API_KEY` in env; call `client.search_by_postcode("SW1A 1AA", address="10 Downing Street")`
+- Rightmove:
+  - `from property_core.rightmove_location import RightmoveLocationAPI`
+  - `from property_core.rightmove_scraper import fetch_listings`
+  - Examples:
+    - `api = RightmoveLocationAPI(); url = api.build_search_url("SW1A 1AA", property_type="sale", radius=0.25)`
+    - `fetch_listings(url, max_pages=1, rate_limit_seconds=0.6)`
+
+### Using the API service layer in-process
+If you want the API guardrails (limits, normalization) but not HTTP, you can import services:
+- PPD: `from app.services.ppd_service import PPDService`
+- EPC: `from app.services.epc_service import EPCService`
+- Rightmove: `from app.services.rightmove_service import RightmoveService`
+
+These services wrap the core with validation, rate limiting, and Pydantic schemas.
