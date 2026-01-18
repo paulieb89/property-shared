@@ -47,19 +47,23 @@ You can import the core logic directly without running the API:
 - Or install editable for reuse in another project: `pip install -e /path/to/property_shared`.
 
 ### Core imports (no HTTP)
+Convenience imports from `property_core`:
+```python
+from property_core import PricePaidDataClient, EPCClient, RightmoveLocationAPI, fetch_listings
+```
+
 - PPD:
-  - `from property_core.ppd_client import PricePaidDataClient`
+  - `from property_core import PricePaidDataClient`
   - Examples:
     - `client.get_comps_summary(postcode="SW1A 1AA", months=24, limit=20, search_level="sector")`
     - `client.sparql_search(postcode_prefix="SW1A", limit=10)`
     - `client.form_search(postcode_prefix="B1", street="Broad Street", limit=5)` (address-form; requires ≥2 fields)
     - `client.get_transaction_record("<transaction_id>")`
 - EPC:
-  - `from property_core.epc_client import EPCClient`
+  - `from property_core import EPCClient`
   - Requires `EPC_API_EMAIL`/`EPC_API_KEY` in env; call `client.search_by_postcode("SW1A 1AA", address="10 Downing Street")`
 - Rightmove:
-  - `from property_core.rightmove_location import RightmoveLocationAPI`
-  - `from property_core.rightmove_scraper import fetch_listings`
+  - `from property_core import RightmoveLocationAPI, fetch_listings`
   - Examples:
     - `api = RightmoveLocationAPI(); url = api.build_search_url("SW1A 1AA", property_type="sale", radius=0.25)`
     - `fetch_listings(url, max_pages=1, rate_limit_seconds=0.6)`
