@@ -5,14 +5,10 @@ FROM apify/actor-python-playwright:3.11
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the actor code
+# Copy the actor code (including planning_scraper.py)
 COPY . ./
 
-# Copy property_core from parent directory
-COPY ../../property_core ./property_core/
-
-# Install playwright browsers
-RUN playwright install chromium
+# Playwright browsers are pre-installed in the base image
 
 # Run the actor
 CMD ["python", "main.py"]

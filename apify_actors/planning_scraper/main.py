@@ -30,10 +30,8 @@ except ImportError:
     APIFY_AVAILABLE = False
     Actor = None
 
-# Import the planning scraper
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from property_core.planning_scraper import (
+# Import the planning scraper (local copy for Apify deployment)
+from planning_scraper import (
     scrape_planning_application,
     scrape_planning_search,
     EXAMPLE_COUNCILS,
