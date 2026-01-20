@@ -1,0 +1,187 @@
+{
+  "_description": "Verified UK council planning portals for the planning scraper",
+  "_updated": "2026-01-20",
+  "_notes": "Each council tested with vision scraper. Status: verified = working, untested = not yet tested",
+
+  "councils": [
+    {
+      "name": "Derbyshire Dales District Council",
+      "code": "derbyshire-dales",
+      "system": "idox",
+      "base_url": "https://planning.derbyshiredales.gov.uk/online-applications/",
+      "search_url": "https://planning.derbyshiredales.gov.uk/online-applications/search.do?action=weeklyList&searchType=Application",
+      "example_app": "https://planning.derbyshiredales.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=T93CE7FUMBL00",
+      "status": "verified",
+      "verified_date": "2026-01-20",
+      "notes": "Weekly list requires submit to show results. keyVal format: T93XXXXXXXX00"
+    },
+    {
+      "name": "Sheffield City Council",
+      "code": "sheffield",
+      "system": "idox",
+      "base_url": "https://planningapps.sheffield.gov.uk/online-applications/",
+      "search_url": "https://planningapps.sheffield.gov.uk/online-applications/search.do?action=weeklyList",
+      "example_app": "https://planningapps.sheffield.gov.uk/online-applications/applicationDetails.do?keyVal=T8SHIENYGAV00&activeTab=summary",
+      "status": "verified",
+      "verified_date": "2026-01-20",
+      "notes": "Idox - 9 screenshots, all tabs detected"
+    },
+    {
+      "name": "Birmingham City Council",
+      "code": "birmingham",
+      "system": "northgate",
+      "base_url": "https://eplanning.birmingham.gov.uk/Northgate/PlanningExplorer/",
+      "search_url": "https://eplanning.birmingham.gov.uk/Northgate/PlanningExplorer/GeneralSearch.aspx",
+      "example_app": "https://eplanning.birmingham.gov.uk/Northgate/PlanningExplorer/Generic/StdDetails.aspx?PT=Planning+Applications+On-Line&TYPE=PL/PlanningPK.xml&PARAM0=1346734&XSLT=/Northgate/PlanningExplorer/SiteFiles/Skins/Birmingham/xslt/PL/PLDetails.xslt&FT=Planning+Application+Details&PUBLIC=Y&XMLSIDE=&DAURI=PLANNING",
+      "status": "verified",
+      "verified_date": "2026-01-20",
+      "notes": "Northgate - 3 screenshots, single-page layout, uses PARAM0 for app ID"
+    },
+    {
+      "name": "London Borough of Havering",
+      "code": "havering",
+      "system": "ocella",
+      "base_url": "https://development.havering.gov.uk/OcellaWeb/planningSearch",
+      "example_app": "https://development.havering.gov.uk/OcellaWeb/planningDetails?reference=P2025.21",
+      "status": "verified",
+      "verified_date": "2026-01-20",
+      "notes": "OcellaWeb - 1 screenshot (single page), detected as generic, full extraction"
+    },
+    {
+      "name": "Salford City Council",
+      "code": "salford",
+      "system": "arcus",
+      "base_url": "https://salfordcitycouncil.my.site.com/pr/s/register-view?c__r=Arcus_BE_Public_Register",
+      "example_app": "https://salfordcitycouncil.my.site.com/pr/s/planning-application/a0kSq0000051DJhIAM/not20250034",
+      "status": "verified",
+      "verified_date": "2026-01-20",
+      "notes": "Arcus/Salesforce - 3 screenshots, system correctly detected, full extraction"
+    }
+  ],
+
+  "untested": [
+    {
+      "name": "London Borough of Hillingdon",
+      "code": "hillingdon",
+      "system": "ocella",
+      "base_url": "https://planning.hillingdon.gov.uk/OcellaWeb/planningSearch",
+      "status": "untested",
+      "notes": "Should work - same OcellaWeb system as Havering"
+    },
+    {
+      "name": "South Holland District Council",
+      "code": "south-holland",
+      "system": "ocella",
+      "base_url": "https://planning.sholland.gov.uk/OcellaWeb/planningSearch",
+      "status": "untested",
+      "notes": "Should work - same OcellaWeb system as Havering"
+    },
+    {
+      "name": "Great Yarmouth Borough Council",
+      "code": "great-yarmouth",
+      "system": "ocella",
+      "base_url": "https://planning.great-yarmouth.gov.uk/OcellaWeb/planningSearch",
+      "status": "untested",
+      "notes": "Should work - same OcellaWeb system as Havering"
+    },
+    {
+      "name": "Erewash Borough Council",
+      "code": "erewash",
+      "base_url": "https://www.erewash.gov.uk/planning",
+      "status": "untested",
+      "notes": "Unknown system - needs investigation"
+    },
+    {
+      "name": "Derbyshire County Council",
+      "code": "derbyshire-county",
+      "base_url": "https://planning.derbyshire.gov.uk/",
+      "status": "untested",
+      "notes": "Unknown system - needs investigation"
+    },
+    {
+      "name": "Leeds City Council",
+      "code": "leeds",
+      "system": "idox",
+      "base_url": "https://publicaccess.leeds.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "Should work - same Idox system as Sheffield"
+    },
+    {
+      "name": "Manchester City Council",
+      "code": "manchester",
+      "system": "idox",
+      "base_url": "https://pa.manchester.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "Should work - same Idox system as Sheffield"
+    },
+    {
+      "name": "City of Westminster",
+      "code": "westminster",
+      "system": "idox",
+      "base_url": "https://idoxpa.westminster.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "Should work - same Idox system as Sheffield"
+    },
+    {
+      "name": "Bristol City Council",
+      "code": "bristol",
+      "system": "idox",
+      "base_url": "https://pa.bristol.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "Should work - same Idox system as Sheffield"
+    },
+    {
+      "name": "Liverpool City Council",
+      "code": "liverpool",
+      "system": "northgate",
+      "base_url": "https://northgate.liverpool.gov.uk/PlanningExplorer17/",
+      "status": "untested",
+      "notes": "Should work - same Northgate system as Birmingham"
+    },
+    {
+      "name": "Newcastle City Council",
+      "code": "newcastle",
+      "system": "idox",
+      "base_url": "https://publicaccess.newcastle.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "Should work - same Idox system as Sheffield"
+    }
+  ],
+
+  "systems": {
+    "idox": {
+      "description": "Idox Public Access - most common UK planning portal system (~60-70% market share)",
+      "verified_count": 2,
+      "estimated_councils": 200,
+      "tab_selectors": [
+        "a[href*='activeTab=summary']",
+        "a[href*='activeTab=details']",
+        "a[href*='activeTab=dates']",
+        "a[href*='activeTab=map']",
+        "a[href*='activeTab=constraints']",
+        "a[href*='activeTab=documents']",
+        "a[href*='activeTab=relatedCases']"
+      ],
+      "app_url_pattern": "applicationDetails.do?activeTab=summary&keyVal={keyVal}"
+    },
+    "northgate": {
+      "description": "NEC Northgate Planning Explorer",
+      "verified_count": 1,
+      "estimated_councils": 50,
+      "notes": "Single-page layout, vision scraper handles without tab clicking"
+    },
+    "ocella": {
+      "description": "OcellaWeb planning system",
+      "verified_count": 1,
+      "estimated_councils": 15,
+      "notes": "Single-page layout, used by London boroughs and district councils",
+      "url_pattern": "/OcellaWeb/planningDetails?reference={ref}"
+    },
+    "arcus": {
+      "description": "Arcus Built Environment on Salesforce",
+      "verified_count": 1,
+      "estimated_councils": 20,
+      "notes": "Modern cloud-based system, correctly detected, growing market share"
+    }
+  }
+}

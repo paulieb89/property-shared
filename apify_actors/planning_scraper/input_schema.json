@@ -1,0 +1,57 @@
+{
+    "title": "UK Planning Portal Scraper Input",
+    "description": "Configure the planning portal scraper",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "mode": {
+            "title": "Scrape Mode",
+            "type": "string",
+            "description": "How to run the scraper",
+            "enum": ["single", "search", "batch"],
+            "default": "single",
+            "enumTitles": [
+                "Single Application - Scrape one planning application URL",
+                "Search Results - Extract applications from a search results page",
+                "Batch - Scrape multiple application URLs"
+            ]
+        },
+        "url": {
+            "title": "Application URL",
+            "type": "string",
+            "description": "URL of a single planning application (for 'single' mode)",
+            "editor": "textfield",
+            "example": "https://eplanning.birmingham.gov.uk/Northgate/PlanningExplorer/Generic/StdDetails.aspx?PT=Planning"
+        },
+        "searchUrl": {
+            "title": "Search Results URL",
+            "type": "string",
+            "description": "URL of planning search results page (for 'search' mode)",
+            "editor": "textfield"
+        },
+        "urls": {
+            "title": "Application URLs",
+            "type": "array",
+            "description": "List of planning application URLs (for 'batch' mode)",
+            "editor": "stringList",
+            "items": {
+                "type": "string"
+            }
+        },
+        "maxResults": {
+            "title": "Max Results",
+            "type": "integer",
+            "description": "Maximum applications to extract from search results",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 100
+        },
+        "saveScreenshots": {
+            "title": "Save Screenshots",
+            "type": "boolean",
+            "description": "Save raw screenshots to key-value store (useful for debugging)",
+            "default": false
+        }
+    },
+    "required": []
+}

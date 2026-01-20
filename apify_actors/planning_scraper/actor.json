@@ -1,0 +1,20 @@
+{
+    "actorSpecification": 1,
+    "name": "uk-planning-portal-scraper",
+    "title": "UK Planning Portal Scraper",
+    "description": "Scrape planning applications from any UK council portal. Uses vision AI to handle 300+ different council systems (Idox, Arcus, NEC, etc.) with a single universal scraper.",
+    "version": "0.1.0",
+    "buildTag": "latest",
+    "meta": {
+        "templateId": "python-playwright"
+    },
+    "input": "./input_schema.json",
+    "dockerfile": "./Dockerfile",
+    "storages": {
+        "dataset": {
+            "actorSpecification": 1,
+            "title": "Planning Applications",
+            "description": "Extracted planning application data"
+        }
+    }
+}

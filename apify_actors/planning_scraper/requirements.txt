@@ -1,0 +1,11 @@
+# Apify SDK
+apify>=1.0.0
+
+# Browser automation
+playwright>=1.40.0
+
+# OpenAI for vision extraction
+openai>=1.0.0
+
+# Core dependencies
+httpx>=0.25.0
