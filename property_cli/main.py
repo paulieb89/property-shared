@@ -270,6 +270,142 @@ def rightmove_listings(
         typer.echo(f"...and {len(listings) - 20} more")
 
 
+planning = typer.Typer(help="Planning portal commands")
+app.add_typer(planning, name="planning")
+
+
+@planning.command("probe")
+def planning_probe(
+    url: str = typer.Argument(..., help="URL to probe"),
+    timeout: int = typer.Option(30000, help="Timeout in milliseconds"),
+    save_screenshot: Optional[str] = typer.Option(None, help="Save screenshot to this path"),
+    proxy: Optional[str] = typer.Option(None, envvar="PLAYWRIGHT_PROXY_URL", help="Proxy URL (or set PLAYWRIGHT_PROXY_URL)"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """Quick connectivity probe to diagnose access issues (blocks, captchas, etc)."""
+    http = _maybe_http_client(api_url)
+    if http:
+        data = http.post("/v1/planning/probe", json={"url": url, "timeout_ms": timeout})
+    else:
+        # Set proxy env var if provided via CLI
+        if proxy:
+            os.environ["PLAYWRIGHT_PROXY_URL"] = proxy
+        from property_core.planning_scraper import probe_connectivity
+        data = probe_connectivity(url=url, timeout_ms=timeout)
+
+    # Extract and save screenshot if requested
+    screenshot_b64 = data.pop("screenshot_base64", None)
+    if save_screenshot and screenshot_b64:
+        import base64
+        from pathlib import Path
+        Path(save_screenshot).write_bytes(base64.b64decode(screenshot_b64))
+        rprint(f"[green]Screenshot saved to {save_screenshot}[/green]")
+
+    # Show results
+    rprint(f"\n[bold]Probe Results for:[/bold] {data.get('url', url)}")
+    rprint(f"  Success: {'[green]Yes[/green]' if data.get('success') else '[red]No[/red]'}")
+    rprint(f"  Status: {data.get('status_code')}")
+    rprint(f"  Load time: {data.get('load_time_ms')}ms")
+    rprint(f"  Page title: {data.get('page_title', 'N/A')}")
+    proxy_used = data.get('proxy_used')
+    rprint(f"  Proxy: {proxy_used[:50] + '...' if proxy_used and len(proxy_used) > 50 else proxy_used or '[dim]none[/dim]'}")
+
+    if data.get("blocking_indicators"):
+        rprint("\n[yellow]Blocking indicators:[/yellow]")
+        for indicator in data["blocking_indicators"]:
+            rprint(f"  - {indicator}")
+
+    if data.get("error"):
+        rprint(f"\n[red]Error:[/red] {data['error']}")
+
+    if data.get("html_snippet"):
+        rprint(f"\n[dim]HTML snippet (first 500 chars):[/dim]")
+        rprint(data["html_snippet"][:500])
+
+
+@planning.command("scrape")
+def planning_scrape(
+    url: str = typer.Argument(..., help="Planning application URL"),
+    save_screenshots: bool = typer.Option(False, help="Save screenshots to ./output"),
+    output_dir: Optional[str] = typer.Option(None, help="Output directory for screenshots"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """Scrape a planning application from any UK council portal."""
+    http = _maybe_http_client(api_url)
+    if http:
+        data = http.post(
+            "/v1/planning/scrape",
+            json={"url": url, "save_screenshots": save_screenshots},
+        )
+        _echo_json(data)
+    else:
+        from pathlib import Path
+        from property_core.planning_scraper import scrape_planning_application
+
+        out = Path(output_dir) if output_dir else (Path("./output") if save_screenshots else None)
+        result = scrape_planning_application(
+            url=url,
+            output_dir=out,
+            save_screenshots=save_screenshots,
+        )
+        _echo_json(result)
+
+
+@planning.command("councils")
+def planning_councils(
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """List verified UK council planning portals."""
+    http = _maybe_http_client(api_url)
+    if http:
+        data = http.get("/v1/planning/councils")
+    else:
+        from pathlib import Path
+        councils_file = Path(__file__).parent.parent / "property_core" / "planning_councils.json"
+        if councils_file.exists():
+            data = json.load(open(councils_file))
+        else:
+            data = {"councils": [], "untested": []}
+
+    table = Table(title="Verified Councils")
+    table.add_column("Code")
+    table.add_column("Name")
+    table.add_column("System")
+    for c in data.get("councils", []):
+        table.add_row(c.get("code", ""), c.get("name", ""), c.get("system", ""))
+    rprint(table)
+
+    if data.get("untested"):
+        rprint(f"\n[dim]+ {len(data['untested'])} untested councils[/dim]")
+
+
+@planning.command("council")
+def planning_council(
+    code: str = typer.Argument(..., help="Council code (e.g., sheffield)"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """Get details for a specific council."""
+    http = _maybe_http_client(api_url)
+    if http:
+        data = http.get(f"/v1/planning/council/{code}")
+        _echo_json(data)
+    else:
+        from pathlib import Path
+        councils_file = Path(__file__).parent.parent / "property_core" / "planning_councils.json"
+        if not councils_file.exists():
+            typer.echo("Councils database not found")
+            raise typer.Exit(code=1)
+
+        data = json.load(open(councils_file))
+        for council in data.get("councils", []) + data.get("untested", []):
+            if council.get("code") == code:
+                _echo_json(council)
+                return
+
+        typer.echo(f"Council '{code}' not found")
+        raise typer.Exit(code=1)
+
+
 if __name__ == "__main__":
     app()
 
@@ -279,9 +415,14 @@ class HTTPClient:
         if httpx is None:
             raise RuntimeError("Install api extras to use HTTP mode (uv sync --extra api)")
         self.base_url = base_url.rstrip("/")
-        self.client = httpx.Client(timeout=15)
+        self.client = httpx.Client(timeout=120)  # Planning scrapes can take 30-60s
 
     def get(self, path: str, params: Optional[dict[str, object]] = None) -> dict:
         resp = self.client.get(f"{self.base_url}{path}", params=params)
+        resp.raise_for_status()
+        return resp.json()
+
+    def post(self, path: str, json: Optional[dict[str, object]] = None) -> dict:
+        resp = self.client.post(f"{self.base_url}{path}", json=json)
         resp.raise_for_status()
         return resp.json()

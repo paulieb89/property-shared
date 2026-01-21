@@ -369,11 +369,127 @@ def detect_council_system(url: str, page: "Page") -> str:
     return "generic"
 
 
+def _get_proxy_config() -> Optional[dict]:
+    """Get proxy configuration from environment."""
+    proxy_url = os.getenv("PLAYWRIGHT_PROXY_URL")
+    if not proxy_url:
+        return None
+
+    # Support full URL format: http://user:pass@host:port
+    return {"server": proxy_url}
+
+
+def probe_connectivity(
+    url: str,
+    timeout_ms: int = 30000,
+    use_proxy: bool = True,
+) -> dict:
+    """
+    Quick connectivity probe to diagnose blocking/access issues.
+
+    Returns screenshot and HTML on success or failure for diagnosis.
+    """
+    if sync_playwright is None:
+        raise ImportError("playwright not installed")
+
+    proxy_config = _get_proxy_config() if use_proxy else None
+
+    result = {
+        "url": url,
+        "success": False,
+        "page_title": None,
+        "status_code": None,
+        "load_time_ms": None,
+        "screenshot_base64": None,
+        "html_snippet": None,
+        "blocking_indicators": [],
+        "error": None,
+        "proxy_used": proxy_config["server"] if proxy_config else None,
+    }
+
+    import time
+    start = time.time()
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                viewport={"width": 1280, "height": 800},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                proxy=proxy_config,
+            )
+            page = context.new_page()
+
+            # Capture response status
+            response = page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            result["status_code"] = response.status if response else None
+            result["load_time_ms"] = int((time.time() - start) * 1000)
+
+            # Wait a bit for JS
+            page.wait_for_timeout(2000)
+
+            # Capture page info
+            result["page_title"] = page.title()
+
+            # Get HTML snippet (first 5000 chars)
+            html = page.content()
+            result["html_snippet"] = html[:5000] if html else None
+
+            # Take screenshot
+            screenshot = page.screenshot()
+            result["screenshot_base64"] = base64.b64encode(screenshot).decode()
+
+            # Check for blocking indicators
+            html_lower = html.lower() if html else ""
+            title_lower = result["page_title"].lower() if result["page_title"] else ""
+
+            blocking_checks = [
+                ("captcha" in html_lower or "recaptcha" in html_lower, "CAPTCHA detected"),
+                ("blocked" in title_lower or "blocked" in html_lower[:500], "Blocked message detected"),
+                ("access denied" in html_lower[:500], "Access denied"),
+                ("403" in title_lower or "forbidden" in html_lower[:500], "403 Forbidden"),
+                ("cloudflare" in html_lower, "Cloudflare protection"),
+                ("just a moment" in html_lower, "Cloudflare challenge page"),
+                ("verify you are human" in html_lower, "Human verification required"),
+                ("bot" in html_lower[:1000] and "detect" in html_lower[:1000], "Bot detection"),
+                (result["status_code"] == 403, "HTTP 403 status"),
+                (result["status_code"] == 429, "HTTP 429 rate limited"),
+                (result["status_code"] and result["status_code"] >= 500, f"HTTP {result['status_code']} server error"),
+            ]
+
+            for check, message in blocking_checks:
+                if check:
+                    result["blocking_indicators"].append(message)
+
+            # Check if we actually got planning content
+            planning_indicators = [
+                "planning" in html_lower,
+                "application" in html_lower,
+                "reference" in html_lower,
+                "applicant" in html_lower,
+            ]
+            if sum(planning_indicators) >= 2:
+                result["success"] = True
+            elif not result["blocking_indicators"]:
+                result["blocking_indicators"].append("No planning content found - may be blocked or wrong URL")
+
+            browser.close()
+
+    except Exception as e:
+        result["error"] = str(e)
+        result["load_time_ms"] = int((time.time() - start) * 1000)
+        if "timeout" in str(e).lower():
+            result["blocking_indicators"].append("Page load timeout - likely blocked or very slow")
+
+    return result
+
+
 def scrape_planning_application(
     url: str,
     output_dir: Optional[Path] = None,
     custom_tab_selectors: Optional[list[str]] = None,
     save_screenshots: bool = False,
+    proxy_url: Optional[str] = None,
 ) -> dict:
     """
     Scrape a planning application from any UK council portal.
@@ -383,6 +499,7 @@ def scrape_planning_application(
         output_dir: Where to save results (optional)
         custom_tab_selectors: Override tab selectors for specific council
         save_screenshots: Save raw screenshots to output_dir
+        proxy_url: Optional proxy URL (e.g., from Apify proxy or PLAYWRIGHT_PROXY_URL env)
 
     Returns:
         dict with extracted planning data
@@ -394,18 +511,29 @@ def scrape_planning_application(
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Get proxy from parameter or environment
+    proxy_url = proxy_url or os.getenv("PLAYWRIGHT_PROXY_URL")
+    proxy_config = {"server": proxy_url} if proxy_url else None
+
     all_images = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # Configure proxy if provided
+        if proxy_config:
+            print(f"Using proxy: {proxy_url[:60] if proxy_url else 'none'}...")
+            browser = p.chromium.launch(headless=True)
+        else:
+            browser = p.chromium.launch(headless=True)
+
         context = browser.new_context(
             viewport={"width": DEFAULT_VIEWPORT[0], "height": DEFAULT_VIEWPORT[1]},
+            proxy=proxy_config,
         )
         page = context.new_page()
 
         print(f"Loading {url}")
-        page.goto(url, wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(2000)
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(3000)  # Give dynamic content time to load
 
         # Dismiss cookie popups
         dismiss_consent_popup(page)
@@ -479,7 +607,7 @@ def scrape_planning_search(
         page = context.new_page()
 
         print(f"Loading search results: {search_url}")
-        page.goto(search_url, wait_until="networkidle", timeout=60000)
+        page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(2000)
 
         dismiss_consent_popup(page)

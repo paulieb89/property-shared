@@ -44,9 +44,9 @@ async def main():
 
     if not APIFY_AVAILABLE:
         print("Running in local mode (Apify SDK not available)")
-        # Local test mode
+        # Local test mode - use a real application URL
         test_input = {
-            "url": "https://eplanning.birmingham.gov.uk/Northgate/PlanningExplorer/Generic/StdDetails.aspx?PT=Planning%20Applications",
+            "url": "https://planningapps.sheffield.gov.uk/online-applications/applicationDetails.do?keyVal=T8SHIENYGAV00&activeTab=summary",
             "mode": "single",
         }
         await run_scraper(test_input, local_mode=True)
@@ -58,6 +58,31 @@ async def main():
 
         mode = actor_input.get("mode", "single")
         save_screenshots = actor_input.get("saveScreenshots", False)
+
+        # Set up proxy if configured
+        proxy_config = actor_input.get("proxyConfiguration")
+        proxy_url = None
+
+        # Custom proxy URL takes priority
+        custom_proxy = actor_input.get("customProxyUrl")
+        if custom_proxy:
+            proxy_url = custom_proxy
+            print(f"Using custom proxy: {proxy_url[:40]}...")
+        elif proxy_config and proxy_config.get("useApifyProxy"):
+            # Use Apify SDK's ProxyConfiguration for proper proxy setup
+            try:
+                groups = proxy_config.get("apifyProxyGroups", [])
+                country = proxy_config.get("apifyProxyCountry")
+
+                proxy_cfg = await Actor.create_proxy_configuration(
+                    groups=groups if groups else None,
+                    country_code=country if country else None,
+                )
+                proxy_url = await proxy_cfg.new_url()
+                print(f"Using Apify proxy: {proxy_url[:60]}...")
+            except Exception as e:
+                print(f"Failed to create proxy config: {e}")
+                proxy_url = None  # Continue without proxy
 
         if mode == "single":
             # Single application scrape
@@ -73,6 +98,7 @@ async def main():
                 url=url,
                 output_dir=output_dir,
                 save_screenshots=save_screenshots,
+                proxy_url=proxy_url,
             )
 
             await Actor.push_data(result)
@@ -92,6 +118,7 @@ async def main():
                 scrape_planning_search,
                 search_url=search_url,
                 max_results=max_results,
+                proxy_url=proxy_url,
             )
 
             for result in results:
@@ -116,6 +143,7 @@ async def main():
                         url=url,
                         output_dir=output_dir,
                         save_screenshots=save_screenshots,
+                        proxy_url=proxy_url,
                     )
                     await Actor.push_data(result)
                 except Exception as e:

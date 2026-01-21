@@ -78,7 +78,6 @@ Install in another project: `pip install /path/to/property_shared` or add to dep
 from property_core import PricePaidDataClient, EPCClient, RightmoveLocationAPI, fetch_listings
 
 # Service layer (includes validation/limits, Pydantic schemas)
-from app.services.ppd_service import PPDService
 from app.services.epc_service import EPCService
 from app.services.rightmove_service import RightmoveService
 ```

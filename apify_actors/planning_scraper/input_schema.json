@@ -21,7 +21,7 @@
             "type": "string",
             "description": "URL of a single planning application (for 'single' mode)",
             "editor": "textfield",
-            "example": "https://eplanning.birmingham.gov.uk/Northgate/PlanningExplorer/Generic/StdDetails.aspx?PT=Planning"
+            "example": "https://planningapps.sheffield.gov.uk/online-applications/applicationDetails.do?keyVal=T8SHIENYGAV00&activeTab=summary"
         },
         "searchUrl": {
             "title": "Search Results URL",
@@ -51,6 +51,22 @@
             "type": "boolean",
             "description": "Save raw screenshots to key-value store (useful for debugging)",
             "default": false
+        },
+        "proxyConfiguration": {
+            "title": "Proxy Configuration",
+            "type": "object",
+            "description": "Apify Proxy settings. Note: UK council sites often block cloud IPs - consider using your own residential proxy instead.",
+            "editor": "proxy",
+            "sectionCaption": "Proxy settings",
+            "sectionDescription": "UK council sites block most datacenter and cloud IPs. For best results, use your own residential proxy (customProxyUrl below)."
+        },
+        "customProxyUrl": {
+            "title": "Custom Proxy URL (Recommended)",
+            "type": "string",
+            "description": "Your own proxy URL (e.g., http://user:pass@proxy.example.com:8080). UK councils block cloud IPs - a residential proxy from your home network or a dedicated proxy service works best.",
+            "editor": "textfield",
+            "sectionCaption": "Bring Your Own Proxy",
+            "sectionDescription": "UK government planning portals actively block cloud datacenter IPs. For reliable scraping, provide your own residential proxy. Options: 1) Run a proxy on your home network, 2) Use a premium residential proxy service, 3) Set up a VPS with residential IP."
         }
     },
     "required": []

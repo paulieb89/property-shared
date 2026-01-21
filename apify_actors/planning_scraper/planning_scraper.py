@@ -374,6 +374,7 @@ def scrape_planning_application(
     output_dir: Optional[Path] = None,
     custom_tab_selectors: Optional[list[str]] = None,
     save_screenshots: bool = False,
+    proxy_url: Optional[str] = None,
 ) -> dict:
     """
     Scrape a planning application from any UK council portal.
@@ -383,6 +384,7 @@ def scrape_planning_application(
         output_dir: Where to save results (optional)
         custom_tab_selectors: Override tab selectors for specific council
         save_screenshots: Save raw screenshots to output_dir
+        proxy_url: Optional proxy URL (e.g., from Apify proxy)
 
     Returns:
         dict with extracted planning data
@@ -398,14 +400,37 @@ def scrape_planning_application(
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
+
+        # Configure proxy at context level (required for authenticated proxies)
+        proxy_config = None
+        if proxy_url:
+            # Parse proxy URL to extract credentials if present
+            # Format: http://username:password@host:port
+            from urllib.parse import urlparse
+            parsed = urlparse(proxy_url)
+            if parsed.username and parsed.password:
+                # Authenticated proxy - extract credentials
+                server_url = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8000}"
+                proxy_config = {
+                    "server": server_url,
+                    "username": parsed.username,
+                    "password": parsed.password,
+                }
+                print(f"Proxy config: server={server_url}, username={parsed.username[:30]}...")
+            else:
+                # Simple proxy URL without credentials
+                proxy_config = {"server": proxy_url}
+                print(f"Proxy config: server={proxy_url[:60]}...")
+
         context = browser.new_context(
             viewport={"width": DEFAULT_VIEWPORT[0], "height": DEFAULT_VIEWPORT[1]},
+            proxy=proxy_config,
         )
         page = context.new_page()
 
         print(f"Loading {url}")
-        page.goto(url, wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(2000)
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(3000)  # Give dynamic content time to load
 
         # Dismiss cookie popups
         dismiss_consent_popup(page)
@@ -456,6 +481,7 @@ def scrape_planning_search(
     search_url: str,
     max_results: int = 20,
     output_dir: Optional[Path] = None,
+    proxy_url: Optional[str] = None,
 ) -> list[dict]:
     """
     Scrape planning search results page to get list of applications.
@@ -464,6 +490,7 @@ def scrape_planning_search(
         search_url: Planning search results URL
         max_results: Maximum applications to extract
         output_dir: Where to save results
+        proxy_url: Optional proxy URL (e.g., from Apify proxy)
 
     Returns:
         list of application summaries with links
@@ -475,11 +502,20 @@ def scrape_planning_search(
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(viewport={"width": 1920, "height": 1080})
+
+        # Configure proxy at context level
+        proxy_config = {"server": proxy_url} if proxy_url else None
+        if proxy_config:
+            print(f"Proxy config: server={proxy_url[:60]}...")
+
+        context = browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            proxy=proxy_config,
+        )
         page = context.new_page()
 
         print(f"Loading search results: {search_url}")
-        page.goto(search_url, wait_until="networkidle", timeout=60000)
+        page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(2000)
 
         dismiss_consent_popup(page)

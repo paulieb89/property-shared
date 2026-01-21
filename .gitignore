@@ -241,3 +241,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Planning scraper test output
+output/
