@@ -18,6 +18,7 @@ Output:
     Planning application data including reference, address, proposal,
     status, decision, constraints, documents, and more.
 """
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -67,7 +68,8 @@ async def main():
             await Actor.set_status_message(f"Scraping: {url[:50]}...")
 
             output_dir = Path("./output") if save_screenshots else None
-            result = scrape_planning_application(
+            result = await asyncio.to_thread(
+                scrape_planning_application,
                 url=url,
                 output_dir=output_dir,
                 save_screenshots=save_screenshots,
@@ -86,7 +88,8 @@ async def main():
 
             await Actor.set_status_message(f"Searching: {search_url[:50]}...")
 
-            results = scrape_planning_search(
+            results = await asyncio.to_thread(
+                scrape_planning_search,
                 search_url=search_url,
                 max_results=max_results,
             )
@@ -108,7 +111,8 @@ async def main():
                 await Actor.set_status_message(f"Scraping {i+1}/{len(urls)}: {url[:40]}...")
 
                 try:
-                    result = scrape_planning_application(
+                    result = await asyncio.to_thread(
+                        scrape_planning_application,
                         url=url,
                         output_dir=output_dir,
                         save_screenshots=save_screenshots,
