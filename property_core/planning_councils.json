@@ -145,6 +145,22 @@
       "base_url": "https://publicaccess.newcastle.gov.uk/online-applications/",
       "status": "untested",
       "notes": "Should work - same Idox system as Sheffield"
+    },
+    {
+      "name": "South Derbyshire District Council",
+      "code": "south-derbyshire",
+      "system": "custom",
+      "base_url": "https://planning.southderbyshire.gov.uk/",
+      "status": "untested",
+      "notes": "Custom Laravel system - NOT Idox. May need different scraping approach."
+    },
+    {
+      "name": "North West Leicestershire District Council",
+      "code": "north-west-leicestershire",
+      "system": "unknown",
+      "base_url": "https://www.nwleics.gov.uk/pages/view_planning_applications",
+      "status": "untested",
+      "notes": "Unknown system - portal URL not found. May use embedded system."
     }
   ],
 
