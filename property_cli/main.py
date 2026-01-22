@@ -558,6 +558,55 @@ def planning_council(
         raise typer.Exit(code=1)
 
 
+@planning.command("search")
+def planning_search(
+    postcode: list[str] = typer.Argument(..., help="UK postcode (can include spaces)"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """Search for planning applications by postcode.
+
+    Returns the council search URLs for this postcode. For Idox councils
+    (most common), provides a direct search URL you can open in a browser.
+    """
+    postcode_value = _join_tokens(postcode)
+    http = _maybe_http_client(api_url)
+    if http:
+        data = http.get("/v1/planning/search", params={"postcode": postcode_value})
+    else:
+        from app.services.planning_service import PlanningService
+        service = PlanningService()
+        data = service.search(postcode_value)
+
+    # Display results
+    rprint(f"\n[bold]Planning Search for:[/bold] {data.get('postcode', postcode_value)}")
+
+    if not data.get("council_found"):
+        rprint(f"\n[yellow]No planning portal found for this area.[/yellow]")
+        la = data.get("local_authority")
+        if la:
+            rprint(f"Local authority: {la.get('name')}")
+        rprint("\n[dim]Use 'planning councils' to see available councils.[/dim]")
+        return
+
+    council = data.get("council", {})
+    rprint(f"\n[bold]Council:[/bold] {council.get('name')}")
+    rprint(f"  System: {council.get('system')}")
+    rprint(f"  Status: {council.get('status')}")
+
+    urls = data.get("search_urls", {})
+    if urls.get("direct_search"):
+        rprint(f"\n[bold green]Direct Search URL:[/bold green]")
+        rprint(f"  {urls['direct_search']}")
+    if urls.get("search_page"):
+        rprint(f"\n[bold]Search Page:[/bold]")
+        rprint(f"  {urls['search_page']}")
+    if urls.get("instructions"):
+        rprint(f"\n[dim]{urls['instructions']}[/dim]")
+
+    if data.get("note"):
+        rprint(f"\n[yellow]Note:[/yellow] {data['note']}")
+
+
 @planning.command("council-for-postcode")
 def planning_council_for_postcode(
     postcode: list[str] = typer.Argument(..., help="UK postcode (can include spaces)"),

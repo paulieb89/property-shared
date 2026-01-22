@@ -106,6 +106,24 @@ def probe_url(request: ProbeRequest) -> ProbeResponse:
         raise HTTPException(status_code=502, detail=f"Probe failed: {e}") from e
 
 
+@router.get("/search")
+def search_by_postcode(
+    postcode: str = Query(..., min_length=2, description="UK postcode"),
+) -> dict[str, Any]:
+    """Search for planning applications by postcode.
+
+    Looks up the council for this postcode and returns search URLs.
+    For Idox councils (most common), provides a direct search URL.
+    For other systems, provides the search page and instructions.
+
+    Note: Actual scraping of search results requires UK residential IP.
+    """
+    try:
+        return service.search(postcode)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Planning search failed: {e}") from e
+
+
 @router.get("/council-for-postcode")
 def council_for_postcode(
     postcode: str = Query(..., min_length=2, description="UK postcode"),

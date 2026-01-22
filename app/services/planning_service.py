@@ -6,8 +6,76 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 from property_core.postcode_client import PostcodeClient
+
+
+# Search URL patterns for different council systems
+SEARCH_URL_PATTERNS: Dict[str, Dict[str, str]] = {
+    "idox": {
+        "postcode": "{base_url}search.do?action=simple&searchType=Application&PostCode={postcode}",
+        "weekly_list": "{base_url}search.do?action=weeklyList&searchType=Application",
+        "advanced": "{base_url}search.do?action=advanced&searchType=Application",
+    },
+    "northgate": {
+        "search_page": "{base_url}GeneralSearch.aspx",
+    },
+    "ocella": {
+        "search_page": "{base_url}",
+    },
+    "arcus": {
+        "search_page": "{base_url}",
+    },
+}
+
+
+def _build_search_url(council: Dict[str, Any], postcode: str) -> Dict[str, Any]:
+    """Build search URLs for a council based on its system type."""
+    system = council.get("system", "").lower()
+    base_url = council.get("base_url", "")
+    search_url = council.get("search_url")
+    postcode_clean = postcode.replace(" ", "").upper()
+
+    result: Dict[str, Any] = {
+        "search_page": search_url or base_url,
+        "direct_search": None,
+        "instructions": None,
+    }
+
+    patterns = SEARCH_URL_PATTERNS.get(system, {})
+
+    if system == "idox":
+        # Idox supports direct postcode search via URL
+        if "postcode" in patterns:
+            result["direct_search"] = patterns["postcode"].format(
+                base_url=base_url,
+                postcode=quote(postcode_clean),
+            )
+            result["instructions"] = (
+                "Use the direct_search URL to search by postcode. "
+                "Results will show planning applications in this area."
+            )
+    elif system == "northgate":
+        result["search_page"] = patterns.get("search_page", "").format(base_url=base_url) or base_url
+        result["instructions"] = (
+            f"Visit the search page and enter postcode '{postcode}' in the search form. "
+            "Northgate systems require form submission."
+        )
+    elif system == "ocella":
+        result["instructions"] = (
+            f"Visit the search page and enter postcode '{postcode}' in the search form."
+        )
+    elif system == "arcus":
+        result["instructions"] = (
+            f"Visit the search page and use the location filter with postcode '{postcode}'."
+        )
+    else:
+        result["instructions"] = (
+            f"Visit the planning portal and search for postcode '{postcode}'."
+        )
+
+    return result
 
 
 def _normalize_name(name: str) -> str:
@@ -150,4 +218,41 @@ class PlanningService:
             "councils": data.get("councils", []),
             "untested": data.get("untested", []),
             "systems": data.get("systems", {}),
+        }
+
+    def search(self, postcode: str) -> Dict[str, Any]:
+        """Search for planning applications by postcode.
+
+        Returns the council info and search URLs. For Idox councils (most common),
+        a direct search URL is provided. For other systems, instructions are given.
+
+        Note: Actual scraping of search results requires residential IP.
+        """
+        # First, look up the council for this postcode
+        council_result = self.council_for_postcode(postcode)
+
+        if not council_result.get("council"):
+            return {
+                "postcode": council_result.get("postcode", postcode),
+                "local_authority": council_result.get("local_authority"),
+                "council_found": False,
+                "error": "No planning portal found for this local authority",
+                "search_urls": None,
+            }
+
+        council = council_result["council"]
+        search_urls = _build_search_url(council, postcode)
+
+        return {
+            "postcode": council_result.get("postcode", postcode),
+            "local_authority": council_result.get("local_authority"),
+            "council_found": True,
+            "council": {
+                "name": council.get("name"),
+                "code": council.get("code"),
+                "system": council.get("system"),
+                "status": council.get("status"),
+            },
+            "search_urls": search_urls,
+            "note": "Planning portal scraping requires UK residential IP. Councils block datacenter IPs.",
         }

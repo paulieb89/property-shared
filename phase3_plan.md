@@ -225,7 +225,7 @@ All new endpoints go under `/v1/`. Breaking changes to existing endpoints:
 - [x] CLI has full parity with API
 - [x] User can search PPD comps with subject property context
 - [x] User can look up EPC by certificate hash
-- [ ] User can find planning apps by postcode (residential IP)
+- [x] User can find planning apps by postcode (residential IP)
 - [ ] User can get all property data in one call
 
 ## Out of Scope (Phase 4+)
