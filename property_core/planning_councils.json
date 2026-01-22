@@ -1,6 +1,6 @@
 {
   "_description": "Verified UK council planning portals for the planning scraper",
-  "_updated": "2026-01-20",
+  "_updated": "2026-01-22",
   "_notes": "Each council tested with vision scraper. Status: verified = working, untested = not yet tested",
 
   "councils": [
@@ -65,6 +65,15 @@
       "status": "verified",
       "verified_date": "2026-01-22",
       "notes": "Idox - works like Sheffield, vision-guided form filling successful"
+    },
+    {
+      "name": "Bristol City Council",
+      "code": "bristol",
+      "system": "idox",
+      "base_url": "https://pa.bristol.gov.uk/online-applications/",
+      "status": "verified",
+      "verified_date": "2026-01-22",
+      "notes": "Idox - vision-guided postcode search successful"
     }
   ],
 
@@ -124,14 +133,6 @@
       "notes": "Should work - same Idox system as Sheffield"
     },
     {
-      "name": "Bristol City Council",
-      "code": "bristol",
-      "system": "idox",
-      "base_url": "https://pa.bristol.gov.uk/online-applications/",
-      "status": "untested",
-      "notes": "Should work - same Idox system as Sheffield"
-    },
-    {
       "name": "Liverpool City Council",
       "code": "liverpool",
       "system": "northgate",
@@ -142,10 +143,10 @@
     {
       "name": "Newcastle City Council",
       "code": "newcastle",
-      "system": "idox",
-      "base_url": "https://publicaccess.newcastle.gov.uk/online-applications/",
+      "system": "custom",
+      "base_url": "https://portal.newcastle.gov.uk/planning/index.html",
       "status": "untested",
-      "notes": "Should work - same Idox system as Sheffield"
+      "notes": "Custom Citizen portal - NOT Idox. May need different scraping approach."
     },
     {
       "name": "South Derbyshire District Council",
@@ -168,7 +169,7 @@
   "systems": {
     "idox": {
       "description": "Idox Public Access - most common UK planning portal system (~60-70% market share)",
-      "verified_count": 2,
+      "verified_count": 4,
       "estimated_councils": 200,
       "tab_selectors": [
         "a[href*='activeTab=summary']",
