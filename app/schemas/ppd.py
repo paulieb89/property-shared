@@ -39,6 +39,16 @@ class PPDCompsQuery(BaseModel):
     property_type: Optional[str] = None
     months: int
     search_level: str
+    address: Optional[str] = None
+
+
+class SubjectProperty(BaseModel):
+    """Subject property details for comps context."""
+    address: str
+    postcode: str
+    last_sale: Optional[PPDTransaction] = None
+    transaction_count: int = 0
+    transaction_history: List[PPDTransaction] = Field(default_factory=list)
 
 
 class PPDCompsResponse(BaseModel):
@@ -51,6 +61,7 @@ class PPDCompsResponse(BaseModel):
     max: Optional[int] = None
     thin_market: bool
     transactions: List[PPDTransaction] = Field(default_factory=list)
+    subject_property: Optional[SubjectProperty] = None
 
 
 class PPDDownloadURLResponse(BaseModel):

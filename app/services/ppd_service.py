@@ -22,6 +22,7 @@ from app.schemas.ppd import (
     PPDTransaction,
     PPDTransactionRecord,
     PPDTransactionRecordResponse,
+    SubjectProperty,
 )
 
 DEFAULT_LIMIT = 50
@@ -291,8 +292,12 @@ class PPDService:
         months: int,
         limit: int,
         search_level: str,
+        address: Optional[str] = None,
     ) -> PPDCompsResponse:
-        """Return comparable sales and summary stats for a postcode."""
+        """Return comparable sales and summary stats for a postcode.
+
+        If address is provided, also returns subject_property with transaction history.
+        """
         if limit <= 0:
             limit = DEFAULT_LIMIT
         if limit > MAX_LIMIT:
@@ -311,8 +316,18 @@ class PPDService:
             property_type=raw["query"]["property_type"],
             months=raw["query"]["months"],
             search_level=raw["query"]["search_level"],
+            address=address,
         )
         transactions = _parse_comps_transactions(raw.get("transactions", []))
+
+        # If address provided, search for subject property transactions
+        subject_property = None
+        if address:
+            subject_property = self._find_subject_property(postcode, address)
+            # Filter out subject property transactions from comps
+            if subject_property and subject_property.transaction_history:
+                subject_ids = {t.transaction_id for t in subject_property.transaction_history}
+                transactions = [t for t in transactions if t.transaction_id not in subject_ids]
 
         return PPDCompsResponse(
             query=query,
@@ -323,7 +338,85 @@ class PPDService:
             max=raw["max"],
             thin_market=raw["thin_market"],
             transactions=transactions,
+            subject_property=subject_property,
         )
+
+    def _find_subject_property(
+        self, postcode: str, address: str
+    ) -> Optional[SubjectProperty]:
+        """Search for a specific property by postcode and address."""
+        # Parse address to extract building number/name
+        # Common formats: "10 Downing Street", "Rose Cottage", "Flat 2, 10 High Street"
+        address_clean = address.strip()
+
+        # Try to extract PAON (building number/name) from start of address
+        parts = address_clean.split(",")
+        first_part = parts[0].strip()
+
+        # Split first part into potential PAON and street
+        words = first_part.split()
+        paon = None
+        street = None
+
+        if words:
+            # If first word is a number or looks like a building number, use it as PAON
+            if words[0].isdigit() or (len(words[0]) <= 4 and any(c.isdigit() for c in words[0])):
+                paon = words[0]
+                street = " ".join(words[1:]) if len(words) > 1 else None
+            else:
+                # Might be a building name like "Rose Cottage"
+                street = first_part
+
+        try:
+            # Search for this specific property
+            raw = self.client.form_search(
+                postcode=postcode,
+                paon=paon,
+                street=street,
+                limit=50,  # Get full history
+            )
+            bindings = raw.get("results", {}).get("bindings", [])
+            transactions = _parse_sparql_bindings(bindings)
+
+            if not transactions:
+                # Try with just postcode and full address as street
+                raw = self.client.form_search(
+                    postcode=postcode,
+                    street=address_clean,
+                    limit=50,
+                )
+                bindings = raw.get("results", {}).get("bindings", [])
+                transactions = _parse_sparql_bindings(bindings)
+
+            if transactions:
+                # Sort by date descending
+                transactions.sort(key=lambda t: t.date or "", reverse=True)
+
+                # Build formatted address from first transaction
+                first = transactions[0]
+                addr_parts = []
+                if first.paon:
+                    addr_parts.append(first.paon)
+                if first.saon:
+                    addr_parts.append(first.saon)
+                if first.street:
+                    addr_parts.append(first.street)
+                if first.town:
+                    addr_parts.append(first.town)
+                formatted_address = ", ".join(addr_parts) if addr_parts else address_clean
+
+                return SubjectProperty(
+                    address=formatted_address,
+                    postcode=first.postcode or postcode,
+                    last_sale=transactions[0] if transactions else None,
+                    transaction_count=len(transactions),
+                    transaction_history=transactions,
+                )
+        except Exception:
+            # If search fails, return None (don't fail the whole comps request)
+            pass
+
+        return None
 
     def transaction_record(
         self,

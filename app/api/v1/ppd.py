@@ -119,8 +119,12 @@ def comps(
     months: int = Query(24, ge=1, le=120),
     limit: int = Query(50, ge=1, le=200),
     search_level: Literal["postcode", "sector", "district"] = "sector",
+    address: Optional[str] = Query(None, description="Subject property address for context"),
 ) -> PPDCompsResponse:
-    """Get comparable sales summary for a postcode (sector/district supported)."""
+    """Get comparable sales summary for a postcode (sector/district supported).
+
+    If address is provided, returns subject_property with its transaction history.
+    """
     try:
         return service.comps(
             postcode=postcode,
@@ -128,6 +132,7 @@ def comps(
             months=months,
             limit=limit,
             search_level=search_level,
+            address=address,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"PPD comps failed: {exc}") from exc

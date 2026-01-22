@@ -12,6 +12,15 @@
 - PPD transactions: `uv run --extra cli property-cli ppd search --postcode-prefix SW1A --limit 10`
 - PPD transaction record: `uv run --extra cli property-cli ppd transaction <transaction_id> --include-raw`
 - PPD address search: `uv run --extra cli property-cli ppd search --postcode-prefix B1 --limit 5` (API has `/v1/ppd/address-search` for form-style filters)
+# Search by address fields (requires at least 2)
+property-cli ppd address-search --postcode "SW1A 2AA" --street "Downing"
+property-cli ppd address-search --town "London" --street "Baker" --paon "221B"
+
+# Get bulk download URLs
+property-cli ppd download-url --kind complete          # Full dataset
+property-cli ppd download-url --kind year --year 2024  # Year archive
+property-cli ppd download-url --kind monthly           # Latest monthly
+
 - Rightmove search URL: `uv run --extra cli property-cli rightmove search-url "SW1A 1AA" --property-type sale --radius 0.25`
 - Rightmove listings: `uv run --extra cli property-cli rightmove listings "<search_url>" --max-pages 1`
 - EPC search (requires creds): `uv run --extra cli property-cli epc search "SW1A 1AA" --address "10 Downing Street" --include-raw`

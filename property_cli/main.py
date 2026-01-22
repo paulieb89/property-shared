@@ -76,32 +76,41 @@ def ppd_comps(
     months: int = typer.Option(24, help="Lookback months"),
     limit: int = typer.Option(50, help="Max transactions"),
     search_level: str = typer.Option("sector", help="postcode|sector|district"),
+    address: Optional[str] = typer.Option(None, help="Subject property address for context"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
+    """Get comparable sales summary for a postcode.
+
+    If --address is provided, also returns subject property transaction history.
+    """
     postcode_value = _join_tokens(postcode)
     http = _maybe_http_client(api_url)
     if http:
-        data = http.get(
-            "/v1/ppd/comps",
-            params={
-                "postcode": postcode_value,
-                "property_type": property_type,
-                "months": months,
-                "limit": limit,
-                "search_level": search_level,
-            },
-        )
+        params: dict[str, object] = {
+            "postcode": postcode_value,
+            "months": months,
+            "limit": limit,
+            "search_level": search_level,
+        }
+        if property_type:
+            params["property_type"] = property_type
+        if address:
+            params["address"] = address
+        data = http.get("/v1/ppd/comps", params=params)
         _echo_json(data)
     else:
-        client = PricePaidDataClient()
-        data = client.get_comps_summary(
+        # Use service layer for full functionality including subject_property
+        from app.services.ppd_service import PPDService
+        service = PPDService()
+        result = service.comps(
             postcode=postcode_value,
             property_type=property_type,
             months=months,
             limit=limit,
             search_level=search_level,
+            address=address,
         )
-        _echo_json(data)
+        _echo_json(result.model_dump())
 
 
 @ppd.command("transaction")
