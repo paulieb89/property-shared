@@ -56,6 +56,15 @@
       "status": "verified",
       "verified_date": "2026-01-20",
       "notes": "Arcus/Salesforce - 3 screenshots, system correctly detected, full extraction"
+    },
+    {
+      "name": "Leeds City Council",
+      "code": "leeds",
+      "system": "idox",
+      "base_url": "https://publicaccess.leeds.gov.uk/online-applications/",
+      "status": "verified",
+      "verified_date": "2026-01-22",
+      "notes": "Idox - works like Sheffield, vision-guided form filling successful"
     }
   ],
 
@@ -99,20 +108,12 @@
       "notes": "Unknown system - needs investigation"
     },
     {
-      "name": "Leeds City Council",
-      "code": "leeds",
-      "system": "idox",
-      "base_url": "https://publicaccess.leeds.gov.uk/online-applications/",
-      "status": "untested",
-      "notes": "Should work - same Idox system as Sheffield"
-    },
-    {
       "name": "Manchester City Council",
       "code": "manchester",
       "system": "idox",
       "base_url": "https://pa.manchester.gov.uk/online-applications/",
-      "status": "untested",
-      "notes": "Should work - same Idox system as Sheffield"
+      "status": "blocked",
+      "notes": "reCAPTCHA protection on search button - automated scraping blocked"
     },
     {
       "name": "City of Westminster",
