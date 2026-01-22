@@ -7,7 +7,10 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel, HttpUrl
 
+from app.services.planning_service import PlanningService
+
 router = APIRouter(prefix="/planning", tags=["planning"])
+service = PlanningService()
 
 
 class PlanningScraperRequest(BaseModel):
@@ -103,44 +106,32 @@ def probe_url(request: ProbeRequest) -> ProbeResponse:
         raise HTTPException(status_code=502, detail=f"Probe failed: {e}") from e
 
 
+@router.get("/council-for-postcode")
+def council_for_postcode(
+    postcode: str = Query(..., min_length=2, description="UK postcode"),
+) -> dict[str, Any]:
+    """Look up the planning council for a UK postcode.
+
+    Uses postcodes.io to identify the local authority, then matches to our
+    councils database. Returns council info if found, otherwise returns
+    local authority info for reference.
+    """
+    try:
+        return service.council_for_postcode(postcode)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Postcode lookup failed: {e}") from e
+
+
 @router.get("/councils")
 def list_councils() -> dict[str, Any]:
     """List verified UK council planning portals."""
-    import json
-    from pathlib import Path
-
-    councils_file = Path(__file__).parent.parent.parent.parent / "property_core" / "planning_councils.json"
-    if not councils_file.exists():
-        return {"councils": [], "untested": [], "systems": {}}
-
-    with open(councils_file) as f:
-        data = json.load(f)
-
-    return {
-        "verified_count": len(data.get("councils", [])),
-        "untested_count": len(data.get("untested", [])),
-        "councils": data.get("councils", []),
-        "untested": data.get("untested", []),
-        "systems": data.get("systems", {}),
-    }
+    return service.list_councils()
 
 
 @router.get("/council/{code}")
 def get_council(code: str) -> dict[str, Any]:
     """Get details for a specific council by code."""
-    import json
-    from pathlib import Path
-
-    councils_file = Path(__file__).parent.parent.parent.parent / "property_core" / "planning_councils.json"
-    if not councils_file.exists():
-        raise HTTPException(status_code=404, detail="Councils database not found")
-
-    with open(councils_file) as f:
-        data = json.load(f)
-
-    # Search verified and untested
-    for council in data.get("councils", []) + data.get("untested", []):
-        if council.get("code") == code:
-            return council
-
-    raise HTTPException(status_code=404, detail=f"Council '{code}' not found")
+    council = service.get_council(code)
+    if not council:
+        raise HTTPException(status_code=404, detail=f"Council '{code}' not found")
+    return council

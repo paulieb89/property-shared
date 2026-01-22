@@ -558,6 +558,45 @@ def planning_council(
         raise typer.Exit(code=1)
 
 
+@planning.command("council-for-postcode")
+def planning_council_for_postcode(
+    postcode: list[str] = typer.Argument(..., help="UK postcode (can include spaces)"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """Look up the planning council for a UK postcode."""
+    postcode_value = _join_tokens(postcode)
+    http = _maybe_http_client(api_url)
+    if http:
+        data = http.get("/v1/planning/council-for-postcode", params={"postcode": postcode_value})
+    else:
+        from app.services.planning_service import PlanningService
+        service = PlanningService()
+        data = service.council_for_postcode(postcode_value)
+
+    # Display results
+    rprint(f"\n[bold]Postcode:[/bold] {data.get('postcode', postcode_value)}")
+
+    la = data.get("local_authority")
+    if la:
+        rprint(f"\n[bold]Local Authority:[/bold]")
+        rprint(f"  Name: {la.get('name')}")
+        rprint(f"  Code: {la.get('code')}")
+        rprint(f"  Region: {la.get('region')}")
+
+    council = data.get("council")
+    if council:
+        rprint(f"\n[bold green]Planning Portal Found:[/bold green]")
+        rprint(f"  Name: {council.get('name')}")
+        rprint(f"  Code: {council.get('code')}")
+        rprint(f"  System: {council.get('system')}")
+        rprint(f"  Status: {council.get('status')}")
+        if council.get("base_url"):
+            rprint(f"  URL: {council.get('base_url')}")
+    else:
+        rprint(f"\n[yellow]No planning portal found in database for this local authority.[/yellow]")
+        rprint("[dim]Use 'planning councils' to see available councils.[/dim]")
+
+
 if __name__ == "__main__":
     app()
 

@@ -70,6 +70,10 @@ property-cli rightmove listings "<search_url>" --max-pages 1
 **Note:** Planning scraper only works from UK residential IPs. Councils block datacenter IPs.
 
 ```bash
+# Look up council for a postcode
+property-cli planning council-for-postcode "SW1A 2AA"
+property-cli planning council-for-postcode "S1 2HH"  # Sheffield
+
 # List verified councils
 property-cli planning councils
 
@@ -106,6 +110,7 @@ property-cli planning scrape "https://planningapps.sheffield.gov.uk/..." --save-
 - `GET /v1/rightmove/listings?search_url=<url>&max_pages=1`
 
 ### Planning
+- `GET /v1/planning/council-for-postcode?postcode=SW1A%202AA` — Look up council for postcode
 - `GET /v1/planning/councils` — List all councils
 - `GET /v1/planning/council/{code}` — Council details
 - `POST /v1/planning/probe` — Connectivity diagnostics
