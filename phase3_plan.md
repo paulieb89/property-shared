@@ -222,9 +222,9 @@ All new endpoints go under `/v1/`. Breaking changes to existing endpoints:
 
 ## Success Criteria
 
-- [ ] CLI has full parity with API
-- [ ] User can search PPD comps with subject property context
-- [ ] User can look up EPC by certificate hash
+- [x] CLI has full parity with API
+- [x] User can search PPD comps with subject property context
+- [x] User can look up EPC by certificate hash
 - [ ] User can find planning apps by postcode (residential IP)
 - [ ] User can get all property data in one call
 

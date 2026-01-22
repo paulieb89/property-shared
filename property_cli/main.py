@@ -258,24 +258,48 @@ app.add_typer(epc, name="epc")
 
 @epc.command("search")
 def epc_search(
-    postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
-    address: Optional[str] = typer.Option(None),
+    postcode: Optional[list[str]] = typer.Argument(None, help="Postcode (can include spaces)"),
+    address: Optional[str] = typer.Option(None, help="Address filter (e.g., '10 Downing Street')"),
+    q: Optional[str] = typer.Option(None, help="Combined query (e.g., '10 Downing Street, SW1A 2AA')"),
     include_raw: bool = typer.Option(False, help="Show raw EPC payload"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
-    postcode_value = _join_tokens(postcode)
+    """Search for EPC by postcode or combined address query.
+
+    Use --q for combined address input: '10 Downing Street, SW1A 2AA'
+    """
     http = _maybe_http_client(api_url)
     if http:
-        data = http.get(
-            "/v1/epc/search",
-            params={
-                "postcode": postcode_value,
-                "address": address,
-                "include_raw": include_raw,
-            },
-        )
+        params: dict[str, object] = {"include_raw": include_raw}
+        if q:
+            params["q"] = q
+        else:
+            if not postcode:
+                typer.echo("Provide postcode argument or --q parameter")
+                raise typer.Exit(code=1)
+            params["postcode"] = _join_tokens(postcode)
+            if address:
+                params["address"] = address
+        data = http.get("/v1/epc/search", params=params)
         _echo_json(data)
         return
+
+    # Core mode: parse q if provided
+    if q:
+        import re
+        postcode_re = re.compile(r"([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\s*$", re.IGNORECASE)
+        match = postcode_re.search(q)
+        if match:
+            postcode_value = match.group(1).upper()
+            address = q[: match.start()].strip().rstrip(",").strip() or None
+        else:
+            typer.echo("Could not parse postcode from query. Use format: '10 Downing Street, SW1A 2AA'")
+            raise typer.Exit(code=1)
+    else:
+        if not postcode:
+            typer.echo("Provide postcode argument or --q parameter")
+            raise typer.Exit(code=1)
+        postcode_value = _join_tokens(postcode)
 
     client = EPCClient()
     if not client.is_configured():
@@ -286,6 +310,37 @@ def epc_search(
     result = asyncio.run(client.search_by_postcode(postcode_value, address=address))
     if not result:
         typer.echo("No EPC found")
+        raise typer.Exit(code=1)
+    record, raw = result
+    output = {"record": record, "raw": raw if include_raw else None}
+    _echo_json(output)
+
+
+@epc.command("certificate")
+def epc_certificate(
+    certificate_hash: str = typer.Argument(..., help="EPC certificate hash (lmk-key)"),
+    include_raw: bool = typer.Option(False, help="Show raw EPC payload"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """Get EPC certificate by hash (lmk-key)."""
+    http = _maybe_http_client(api_url)
+    if http:
+        data = http.get(
+            f"/v1/epc/certificate/{certificate_hash}",
+            params={"include_raw": include_raw},
+        )
+        _echo_json(data)
+        return
+
+    client = EPCClient()
+    if not client.is_configured():
+        typer.echo("EPC not configured (set EPC_API_EMAIL/EPC_API_KEY)")
+        raise typer.Exit(code=1)
+    import asyncio
+
+    result = asyncio.run(client.get_certificate(certificate_hash))
+    if not result:
+        typer.echo("No EPC found for this certificate hash")
         raise typer.Exit(code=1)
     record, raw = result
     output = {"record": record, "raw": raw if include_raw else None}

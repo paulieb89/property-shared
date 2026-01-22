@@ -141,6 +141,35 @@ class EPCClient:
             "certificate_hash": cert.get("lmk-key"),
         }
 
+    async def get_certificate(
+        self, certificate_hash: str
+    ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+        """Get EPC certificate by lmk-key (certificate hash).
+
+        Returns:
+            Tuple of (normalized_record, raw_response_json) or None.
+        """
+        if not self.is_configured():
+            return None
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            try:
+                resp = await client.get(
+                    f"{self.BASE_URL}/domestic/certificate/{certificate_hash}",
+                    headers={"Accept": "application/json", **self._auth_header()},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                rows = data.get("rows", [])
+                if not rows:
+                    return None
+
+                return (self._parse_certificate(rows[0]), data)
+
+            except (httpx.HTTPError, KeyError, ValueError):
+                return None
+
     async def search_by_postcode(
         self, postcode: str, address: str | None = None
     ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:

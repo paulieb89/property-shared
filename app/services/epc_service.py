@@ -25,6 +25,19 @@ class EPCService:
     def is_configured(self) -> bool:
         return self.client.is_configured()
 
+    async def get_certificate(
+        self,
+        certificate_hash: str,
+        include_raw: bool = False,
+    ) -> EPCRecordResponse | None:
+        """Get EPC certificate by lmk-key hash."""
+        result = await self.client.get_certificate(certificate_hash)
+        if result is None:
+            return None
+        record_dict, raw = result
+        record = EPCData.model_validate(record_dict)
+        return EPCRecordResponse(record=record, raw=raw if include_raw else None)
+
     async def search(
         self,
         postcode: str,

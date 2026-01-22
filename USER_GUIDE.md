@@ -44,8 +44,15 @@ property-cli ppd download-url --kind monthly           # Latest monthly update
 Requires `EPC_API_EMAIL` and `EPC_API_KEY` in `.env`.
 
 ```bash
+# Search by postcode (returns first/best match)
 property-cli epc search "SW1A 1AA"
 property-cli epc search "SW1A 1AA" --address "10 Downing Street" --include-raw
+
+# Combined address query (parses postcode from end)
+property-cli epc search --q "10 Downing Street, SW1A 2AA"
+
+# Direct lookup by certificate hash (lmk-key)
+property-cli epc certificate <certificate_hash>
 ```
 
 ### Rightmove
@@ -91,6 +98,8 @@ property-cli planning scrape "https://planningapps.sheffield.gov.uk/..." --save-
 
 ### EPC
 - `GET /v1/epc/search?postcode=SW1A%201AA&address=10%20Downing%20Street` (requires creds)
+- `GET /v1/epc/search?q=10%20Downing%20Street,%20SW1A%202AA` (combined address query)
+- `GET /v1/epc/certificate/{certificate_hash}` (direct lookup by lmk-key)
 
 ### Rightmove
 - `GET /v1/rightmove/search-url?postcode=SW1A%201AA&property_type=sale&radius=0.25`
