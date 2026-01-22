@@ -155,6 +155,94 @@ def ppd_search(
         _echo_json(res.get("results", {}))
 
 
+@ppd.command("address-search")
+def ppd_address_search(
+    paon: Optional[str] = typer.Option(None, help="Building name/number (e.g., '10' or 'Rose Cottage')"),
+    saon: Optional[str] = typer.Option(None, help="Secondary address (e.g., 'Flat 2')"),
+    street: Optional[str] = typer.Option(None, help="Street name"),
+    town: Optional[str] = typer.Option(None, help="Town or city"),
+    county: Optional[str] = typer.Option(None, help="County"),
+    postcode: Optional[str] = typer.Option(None, help="Full postcode"),
+    postcode_prefix: Optional[str] = typer.Option(None, help="Postcode prefix (e.g., 'SW1A')"),
+    limit: int = typer.Option(25, help="Max results (max 50)"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """Search PPD by address fields (requires at least 2 fields)."""
+    # Count provided fields
+    provided = [v for v in (paon, saon, street, town, county, postcode, postcode_prefix) if v]
+    if len(provided) < 2:
+        typer.echo("Provide at least two address fields (e.g., --postcode SW1A --street 'Downing Street')")
+        raise typer.Exit(code=1)
+
+    http = _maybe_http_client(api_url)
+    if http:
+        params: dict[str, object] = {"limit": limit}
+        if paon:
+            params["paon"] = paon
+        if saon:
+            params["saon"] = saon
+        if street:
+            params["street"] = street
+        if town:
+            params["town"] = town
+        if county:
+            params["county"] = county
+        if postcode:
+            params["postcode"] = postcode
+        if postcode_prefix:
+            params["postcode_prefix"] = postcode_prefix
+        data = http.get("/v1/ppd/address-search", params=params)
+        _echo_json(data)
+    else:
+        client = PricePaidDataClient()
+        result = client.form_search(
+            paon=paon,
+            saon=saon,
+            street=street,
+            town=town,
+            county=county,
+            postcode=postcode,
+            postcode_prefix=postcode_prefix,
+            limit=limit,
+        )
+        _echo_json(result)
+
+
+@ppd.command("download-url")
+def ppd_download_url(
+    kind: str = typer.Option("monthly", help="Dataset: complete, year, or monthly"),
+    year: Optional[int] = typer.Option(None, help="Year (required for 'year' kind)"),
+    part: Optional[int] = typer.Option(None, help="Part 1 or 2 (optional for 'year' kind)"),
+    fmt: str = typer.Option("csv", help="Format: csv or txt"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """Get Land Registry bulk download URL."""
+    http = _maybe_http_client(api_url)
+    if http:
+        params: dict[str, object] = {"kind": kind, "fmt": fmt}
+        if year is not None:
+            params["year"] = year
+        if part is not None:
+            params["part"] = part
+        data = http.get("/v1/ppd/download-url", params=params)
+        typer.echo(data.get("url"))
+    else:
+        client = PricePaidDataClient()
+        if kind == "complete":
+            url = client.complete_url(fmt=fmt)
+        elif kind == "monthly":
+            url = client.monthly_change_url(fmt=fmt)
+        elif kind == "year":
+            if not year:
+                typer.echo("--year is required for 'year' kind")
+                raise typer.Exit(code=1)
+            url = client.year_url(year=year, part=part, fmt=fmt)
+        else:
+            typer.echo(f"Unknown kind: {kind}. Use: complete, year, or monthly")
+            raise typer.Exit(code=1)
+        typer.echo(url)
+
+
 epc = typer.Typer(help="EPC commands")
 app.add_typer(epc, name="epc")
 
