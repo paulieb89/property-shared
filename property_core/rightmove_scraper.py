@@ -52,6 +52,11 @@ class Listing:
     agent_branch: Optional[str]
     first_visible_date: Optional[str]
     images: List[str]
+    # Rental-specific fields (None for sales)
+    let_available_date: Optional[str] = None
+    price_frequency: Optional[str] = None  # "monthly", "weekly"
+    students: Optional[bool] = None
+    transaction_type: Optional[str] = None  # "rent" or "buy"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -149,6 +154,11 @@ def _to_listing(data: Dict[str, Any]) -> Listing:
         agent_branch=customer.get("branchLandingPageUrl"),
         first_visible_date=data.get("firstVisibleDate"),
         images=_extract_images(data),
+        # Rental-specific fields
+        let_available_date=data.get("letAvailableDate"),
+        price_frequency=price_info.get("frequency"),
+        students=data.get("students"),
+        transaction_type=data.get("transactionType"),
     )
 
 

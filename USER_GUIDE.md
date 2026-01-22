@@ -58,12 +58,17 @@ property-cli epc certificate <certificate_hash>
 ### Rightmove
 
 ```bash
-# Build a search URL from postcode
+# Build a search URL from postcode (sales)
 property-cli rightmove search-url "SW1A 1AA" --property-type sale --radius 0.25
+
+# Build a search URL for rentals
+property-cli rightmove search-url "SW1A 1AA" --property-type rent --radius 0.25
 
 # Fetch listings from a search URL
 property-cli rightmove listings "<search_url>" --max-pages 1
 ```
+
+**Rental listings** include additional fields: `let_available_date`, `price_frequency` (monthly/weekly), `students`, `transaction_type`.
 
 ### Planning (UK Council Portals)
 
@@ -109,7 +114,8 @@ property-cli planning scrape "https://planningapps.sheffield.gov.uk/..." --save-
 - `GET /v1/epc/certificate/{certificate_hash}` (direct lookup by lmk-key)
 
 ### Rightmove
-- `GET /v1/rightmove/search-url?postcode=SW1A%201AA&property_type=sale&radius=0.25`
+- `GET /v1/rightmove/search-url?postcode=SW1A%201AA&property_type=sale&radius=0.25` — Sales
+- `GET /v1/rightmove/search-url?postcode=SW1A%201AA&property_type=rent&radius=0.25` — Rentals
 - `GET /v1/rightmove/listings?search_url=<url>&max_pages=1`
 
 ### Planning
@@ -154,10 +160,16 @@ client.get_transaction_record("<transaction_id>")
 epc = EPCClient()
 await epc.search_by_postcode("SW1A 1AA", address="10 Downing Street")
 
-# Rightmove
+# Rightmove - Sales
 api = RightmoveLocationAPI()
 url = api.build_search_url("SW1A 1AA", property_type="sale", radius=0.25)
 listings = fetch_listings(url, max_pages=1, rate_limit_seconds=0.6)
+
+# Rightmove - Rentals
+url = api.build_search_url("SW1A 1AA", property_type="rent", radius=0.25)
+rentals = fetch_listings(url, max_pages=1)
+for r in rentals:
+    print(f"£{r.price} {r.price_frequency} - {r.address} (available: {r.let_available_date})")
 
 # Planning (residential IP only)
 from property_core.planning_scraper import scrape_planning_application

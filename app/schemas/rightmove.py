@@ -23,6 +23,11 @@ class RightmoveListing(BaseModel):
     agent_branch: Optional[str] = None
     first_visible_date: Optional[str] = None
     images: List[str] = Field(default_factory=list)
+    # Rental-specific fields (None for sales)
+    let_available_date: Optional[str] = None
+    price_frequency: Optional[str] = None  # "monthly", "weekly" for rentals
+    students: Optional[bool] = None
+    transaction_type: Optional[str] = None  # "rent" or "buy"
 
 
 class RightmoveSearchURLResponse(BaseModel):
