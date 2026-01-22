@@ -580,6 +580,236 @@ def scrape_planning_application(
     return result
 
 
+def _vision_find_form_action(images: list[dict], postcode: str) -> dict:
+    """Ask Vision how to fill and submit the search form."""
+    prompt = f"""Analyze this planning portal search page. I need to search for postcode "{postcode}".
+
+Return JSON with instructions:
+{{
+    "has_search_form": true/false,
+    "has_results": true/false,
+    "search_field_placeholder": "text shown in search input if visible",
+    "search_button_text": "text on the search button (e.g., 'Search', 'Find', 'Go')",
+    "field_selector_hint": "CSS-like description of the input field (e.g., 'input near Search button', 'text input below postcode label')",
+    "notes": "any other observations about the page"
+}}
+
+If the page already shows search results (list of applications), set has_results=true.
+If it shows a search form, set has_search_form=true and describe how to fill it."""
+
+    return extract_with_vision(images, prompt, max_images=2)
+
+
+def search_planning_by_postcode(
+    portal_url: str,
+    postcode: str,
+    max_results: int = 20,
+    output_dir: Optional[Path] = None,
+) -> list[dict]:
+    """
+    Search a planning portal by postcode using vision-guided form filling.
+
+    This function can handle both:
+    - Pages that show a search form (will fill and submit)
+    - Pages that already show results (will extract directly)
+
+    Args:
+        portal_url: Planning portal search page URL
+        postcode: UK postcode to search for
+        max_results: Maximum applications to extract
+        output_dir: Where to save results
+
+    Returns:
+        list of application summaries with links
+    """
+    if sync_playwright is None:
+        raise ImportError("playwright not installed")
+
+    all_images = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1920, "height": 1080})
+        page = context.new_page()
+
+        print(f"Loading planning portal: {portal_url}")
+        page.goto(portal_url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(2000)
+        dismiss_consent_popup(page)
+
+        # Take initial screenshot to understand the page
+        initial_screenshot = [{
+            "name": "initial",
+            "media_type": "image/jpeg",
+            "data": screenshot_to_base64(page.screenshot())
+        }]
+
+        # Ask Vision what to do
+        print("Analyzing page with Vision...")
+        form_analysis = _vision_find_form_action(initial_screenshot, postcode)
+        print(f"  Analysis: {form_analysis}")
+
+        # Check if we need to fill a form
+        if form_analysis.get("has_search_form") and not form_analysis.get("has_results"):
+            print(f"Filling search form with postcode: {postcode}")
+
+            # Try common Idox selectors first
+            search_filled = False
+            idox_selectors = [
+                "input[name='searchCriteria']",
+                "input#simpleSearchString",
+                "input.search-input",
+                "input[type='text']",
+            ]
+
+            for selector in idox_selectors:
+                try:
+                    field = page.locator(selector).first
+                    if field.count() > 0 and field.is_visible():
+                        field.fill(postcode)
+                        search_filled = True
+                        print(f"  Filled field: {selector}")
+                        break
+                except Exception:
+                    continue
+
+            if not search_filled:
+                # Fallback: try to find any visible text input
+                try:
+                    inputs = page.locator("input[type='text']:visible")
+                    if inputs.count() > 0:
+                        inputs.first.fill(postcode)
+                        search_filled = True
+                        print("  Filled first visible text input")
+                except Exception as e:
+                    print(f"  Could not fill form: {e}")
+
+            # Click search button
+            if search_filled:
+                button_clicked = False
+                button_selectors = [
+                    "button:has-text('Search')",
+                    "input[type='submit'][value*='Search']",
+                    "input[type='submit']",
+                    "button[type='submit']",
+                    ".button:has-text('Search')",
+                    "a:has-text('Search')",
+                ]
+
+                for selector in button_selectors:
+                    try:
+                        btn = page.locator(selector).first
+                        if btn.count() > 0 and btn.is_visible():
+                            btn.click()
+                            button_clicked = True
+                            print(f"  Clicked: {selector}")
+                            break
+                    except Exception:
+                        continue
+
+                if button_clicked:
+                    # Wait for results to load
+                    print("Waiting for results...")
+                    page.wait_for_timeout(3000)
+                    # Wait for either results table or "no results" message
+                    try:
+                        page.wait_for_selector("table, .searchresults, .results, .no-results", timeout=10000)
+                    except Exception:
+                        pass
+                    page.wait_for_timeout(1000)
+
+        # Now capture results
+        print("Capturing results...")
+        all_images.extend(scroll_and_screenshot(page, "results", max_scrolls=5))
+
+        # Extract links from the page before closing browser
+        print("Extracting application links...")
+        page_links = []  # List of (text, href) tuples
+        try:
+            # Get all links that look like application detail links
+            links = page.locator("a[href*='applicationDetails'], a[href*='keyVal'], a[href*='ApplicationNumber'], a[href*='refval']").all()
+            for link in links:
+                try:
+                    href = link.get_attribute("href")
+                    text = link.inner_text().strip()
+                    if href:
+                        page_links.append((text, href))
+                except Exception:
+                    continue
+            print(f"  Found {len(page_links)} application links")
+            if page_links:
+                print(f"  Sample: {page_links[0]}")
+        except Exception as e:
+            print(f"  Could not extract links: {e}")
+
+        # Get base URL for relative links
+        base_url = page.url.rsplit('/', 1)[0] if '/' in page.url else page.url
+
+        browser.close()
+
+    # Extract applications from results
+    search_prompt = f"""Extract planning application summaries from these search results.
+
+Return JSON array with up to {max_results} applications:
+[
+    {{
+        "reference": "application reference (e.g., 12/02736/HOARD)",
+        "address": "site address",
+        "description": "short description",
+        "status": "status if shown (Decided, Pending, etc.)"
+    }}
+]
+
+Only extract applications visible in the screenshots. Return empty array if no results shown or if this is still showing a search form."""
+
+    extracted = extract_with_vision(all_images, search_prompt)
+
+    # Match extracted applications with links we found
+    if isinstance(extracted, list):
+        import re
+        for idx, app in enumerate(extracted):
+            ref = app.get("reference", "")
+            link = None
+
+            # Try to find matching link by:
+            # 1. Exact reference match in link text
+            # 2. Reference appears in link text
+            # 3. Reference appears in href (URL encoded)
+            # 4. Position-based match (nth application = nth link)
+            for link_text, href in page_links:
+                # Normalize reference for comparison
+                ref_normalized = ref.replace("/", "").replace(" ", "").upper()
+                text_normalized = link_text.replace("/", "").replace(" ", "").upper()
+
+                if ref in link_text or ref_normalized in text_normalized:
+                    link = href
+                    break
+                # Check if reference is in the URL (often URL-encoded)
+                if ref.replace("/", "%2F") in href or ref.replace("/", "") in href:
+                    link = href
+                    break
+
+            # Fallback: match by position if we have same number of links as results
+            if not link and idx < len(page_links):
+                link = page_links[idx][1]
+
+            # Make absolute URL if relative
+            if link:
+                if link.startswith("/"):
+                    link = base_url.split("/online-applications")[0] + link
+                elif not link.startswith("http"):
+                    link = base_url + "/" + link
+            app["link"] = link
+
+    if output_dir:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        with open(output_dir / "search_results.json", "w") as f:
+            json.dump(extracted, f, indent=2)
+
+    return extracted if isinstance(extracted, list) else []
+
+
 def scrape_planning_search(
     search_url: str,
     max_results: int = 20,
@@ -587,6 +817,9 @@ def scrape_planning_search(
 ) -> list[dict]:
     """
     Scrape planning search results page to get list of applications.
+
+    Note: This assumes the URL already shows results. For form-based search,
+    use search_planning_by_postcode() instead.
 
     Args:
         search_url: Planning search results URL
