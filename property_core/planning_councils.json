@@ -2,7 +2,6 @@
   "_description": "Verified UK council planning portals for the planning scraper",
   "_updated": "2026-01-22",
   "_notes": "Each council tested with vision scraper. Status: verified = working, untested = not yet tested",
-
   "councils": [
     {
       "name": "Derbyshire Dales District Council",
@@ -76,7 +75,6 @@
       "notes": "Idox - vision-guided postcode search successful"
     }
   ],
-
   "untested": [
     {
       "name": "London Borough of Hillingdon",
@@ -163,9 +161,911 @@
       "base_url": "https://www.nwleics.gov.uk/pages/view_planning_applications",
       "status": "untested",
       "notes": "Unknown system - portal URL not found. May use embedded system."
+    },
+    {
+      "name": "Aberdeen",
+      "code": "aberdeen",
+      "system": "idox",
+      "base_url": "https://publicaccess.aberdeencity.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess.aberdeencity.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Adur and Worthing",
+      "code": "adur-and-worthing",
+      "system": "idox",
+      "base_url": "https://planning.adur-worthing.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planning.adur-worthing.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Allerdale",
+      "code": "allerdale",
+      "system": "custom",
+      "base_url": "https://planning.allerdale.gov.uk/portal/servlets/ApplicationSearchServlet",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Amber Valley",
+      "code": "amber-valley",
+      "system": "custom",
+      "base_url": "https://www.ambervalley.gov.uk/environment-and-planning/planning/development-management/planning-applications/view-a-planning-application.aspx",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Arun",
+      "code": "arun",
+      "system": "custom",
+      "base_url": "https://www.arun.gov.uk/weekly-lists",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Ashfield",
+      "code": "ashfield",
+      "system": "custom",
+      "base_url": "https://www2.ashfield.gov.uk/cfusion/Planning/plan_findfile.cfm",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Ashford",
+      "code": "ashford",
+      "system": "custom",
+      "base_url": "http://planning.ashford.gov.uk/planning/Default.aspx?new=true",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Aylesbury Vale",
+      "code": "aylesbury-vale",
+      "system": "idox",
+      "base_url": "https://publicaccess.aylesburyvaledc.gov.uk/online-applications//",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess.aylesburyvaledc.gov.uk/online-applications//search.do?action=advanced&searchType=Application"
+    },
+    {
+      "name": "Babergh",
+      "code": "babergh",
+      "system": "idox",
+      "base_url": "https://planning.baberghmidsuffolk.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planning.baberghmidsuffolk.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Barking and Dagenham",
+      "code": "barking-and-dagenham",
+      "system": "idox",
+      "base_url": "http://paplan.lbbd.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://paplan.lbbd.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Barnet",
+      "code": "barnet",
+      "system": "idox",
+      "base_url": "https://publicaccess.barnet.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess.barnet.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Bedford",
+      "code": "bedford",
+      "system": "idox",
+      "base_url": "http://www.publicaccess.bedford.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://www.publicaccess.bedford.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Bexley",
+      "code": "bexley",
+      "system": "idox",
+      "base_url": "http://pa.bexley.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://pa.bexley.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Blackpool",
+      "code": "blackpool",
+      "system": "idox",
+      "base_url": "https://idoxpa.blackpool.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://idoxpa.blackpool.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Bolton",
+      "code": "bolton",
+      "system": "custom",
+      "base_url": "https://www.planningpa.bolton.gov.uk/online-applications-17/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://www.planningpa.bolton.gov.uk/online-applications-17/search.do?action=advanced"
+    },
+    {
+      "name": "Bracknell Forest",
+      "code": "bracknell-forest",
+      "system": "idox",
+      "base_url": "https://planapp.bracknell-forest.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planapp.bracknell-forest.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Bradford",
+      "code": "bradford",
+      "system": "idox",
+      "base_url": "https://planning.bradford.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planning.bradford.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Brent",
+      "code": "brent",
+      "system": "idox",
+      "base_url": "https://pa.brent.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://pa.brent.gov.uk/online-applications/search.do?action=advanced&searchType=Application"
+    },
+    {
+      "name": "Brighton and Hove",
+      "code": "brighton-and-hove",
+      "system": "idox",
+      "base_url": "https://planningapps.brighton-hove.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planningapps.brighton-hove.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Bromley",
+      "code": "bromley",
+      "system": "idox",
+      "base_url": "https://searchapplications.bromley.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://searchapplications.bromley.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Bury",
+      "code": "bury",
+      "system": "idox",
+      "base_url": "https://planning.bury.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planning.bury.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Calderdale",
+      "code": "calderdale",
+      "system": "idox",
+      "base_url": "https://portal.calderdale.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://portal.calderdale.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Camden",
+      "code": "camden",
+      "system": "northgate",
+      "base_url": "https://planningrecords.camden.gov.uk/Northgate/PlanningExplorer/GeneralSearch.aspx",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Cardiff",
+      "code": "cardiff",
+      "system": "idox",
+      "base_url": "https://planningonline.cardiff.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planningonline.cardiff.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Cheshire West and Chester",
+      "code": "cheshire-west-and-chester",
+      "system": "idox",
+      "base_url": "https://pa.cheshirewestandchester.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://pa.cheshirewestandchester.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "City of London",
+      "code": "city-of-london",
+      "system": "idox",
+      "base_url": "http://www.planning2.cityoflondon.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://www.planning2.cityoflondon.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Croydon",
+      "code": "croydon",
+      "system": "idox",
+      "base_url": "http://publicaccess2.croydon.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://publicaccess2.croydon.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Cornwall",
+      "code": "cornwall",
+      "system": "idox",
+      "base_url": "http://planning.cornwall.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://planning.cornwall.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "County Durham",
+      "code": "county-durham",
+      "system": "idox",
+      "base_url": "https://publicaccess.durham.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess.durham.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Darlington",
+      "code": "darlington",
+      "system": "idox",
+      "base_url": "https://publicaccess.darlington.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess.darlington.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Doncaster",
+      "code": "doncaster",
+      "system": "idox",
+      "base_url": "https://planning.doncaster.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planning.doncaster.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Ealing",
+      "code": "ealing",
+      "system": "idox",
+      "base_url": "https://pam.ealing.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://pam.ealing.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "East Riding of Yorkshire",
+      "code": "east-riding-of-yorkshire",
+      "system": "custom",
+      "base_url": "https://newplanningaccess.eastriding.gov.uk/newplanningaccess/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://newplanningaccess.eastriding.gov.uk/newplanningaccess/search.do?action=advanced"
+    },
+    {
+      "name": "Edinburgh",
+      "code": "edinburgh",
+      "system": "idox",
+      "base_url": "https://citydev-portal.edinburgh.gov.uk/idoxpa-web/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://citydev-portal.edinburgh.gov.uk/idoxpa-web/search.do?action=advanced"
+    },
+    {
+      "name": "Enfield",
+      "code": "enfield",
+      "system": "idox",
+      "base_url": "https://planningandbuildingcontrol.enfield.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planningandbuildingcontrol.enfield.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Epsom and Ewell",
+      "code": "epsom-and-ewell",
+      "system": "idox",
+      "base_url": "http://eplanning.epsom-ewell.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://eplanning.epsom-ewell.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Gateshead",
+      "code": "gateshead",
+      "system": "idox",
+      "base_url": "https://public.gateshead.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://public.gateshead.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Glasgow",
+      "code": "glasgow",
+      "system": "idox",
+      "base_url": "https://publicaccess.glasgow.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess.glasgow.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Greenwich",
+      "code": "greenwich",
+      "system": "idox",
+      "base_url": "https://planning.royalgreenwich.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planning.royalgreenwich.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Hackney",
+      "code": "hackney",
+      "system": "northgate",
+      "base_url": "http://planning.hackney.gov.uk/Northgate/PlanningExplorer/generalsearch.aspx",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Halton",
+      "code": "halton",
+      "system": "custom",
+      "base_url": "https://webapp.halton.gov.uk/planningapps/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Hammersmith and Fulham",
+      "code": "hammersmith-and-fulham",
+      "system": "idox",
+      "base_url": "http://public-access.lbhf.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://public-access.lbhf.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Haringey",
+      "code": "haringey",
+      "system": "custom",
+      "base_url": "http://www.planningservices.haringey.gov.uk/portal/servlets/ApplicationSearchServlet",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Harrow",
+      "code": "harrow",
+      "system": "custom",
+      "base_url": "http://www.harrow.gov.uk/planningsearch/lg/plansearch.page?org.apache.shale.dialog.DIALOG_NAME=planningsearch&Param=lg.Planning&searchType=detailed",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Hounslow",
+      "code": "hounslow",
+      "system": "custom",
+      "base_url": "http://planning.hounslow.gov.uk/planning_search.aspx",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Hull",
+      "code": "hull",
+      "system": "custom",
+      "base_url": "https://www.hullcc.gov.uk/padcbc/publicaccess-live/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://www.hullcc.gov.uk/padcbc/publicaccess-live/search.do?action=advanced"
+    },
+    {
+      "name": "Islington",
+      "code": "islington",
+      "system": "northgate",
+      "base_url": "https://planning.islington.gov.uk/northgate/planningexplorer/generalsearch.aspx",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Kensington and Chelsea",
+      "code": "kensington-and-chelsea",
+      "system": "custom",
+      "base_url": "https://www.rbkc.gov.uk/planning/searches/default.aspx?adv=1#advancedSearch",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Kingston upon Thames",
+      "code": "kingston-upon-thames",
+      "system": "idox",
+      "base_url": "https://publicaccess.kingston.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess.kingston.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Knowsley",
+      "code": "knowsley",
+      "system": "idox",
+      "base_url": "https://planapp.knowsley.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planapp.knowsley.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Lambeth",
+      "code": "lambeth",
+      "system": "idox",
+      "base_url": "https://planning.lambeth.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planning.lambeth.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Lewisham",
+      "code": "lewisham",
+      "system": "idox",
+      "base_url": "http://planning.lewisham.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://planning.lewisham.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "London Legacy Development Corporation",
+      "code": "london-legacy-development-corporation",
+      "system": "custom",
+      "base_url": "http://planningregister.londonlegacy.co.uk/swift/apas/run/wphappcriteria.display",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Merton",
+      "code": "merton",
+      "system": "northgate",
+      "base_url": "https://planning.merton.gov.uk/Northgate/PlanningExplorerAA/GeneralSearch.aspx",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Milton Keynes",
+      "code": "milton-keynes",
+      "system": "idox",
+      "base_url": "https://publicaccess2.milton-keynes.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess2.milton-keynes.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Newcastle upon Tyne",
+      "code": "newcastle-upon-tyne",
+      "system": "idox",
+      "base_url": "https://publicaccessapplications.newcastle.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccessapplications.newcastle.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Newham",
+      "code": "newham",
+      "system": "idox",
+      "base_url": "https://pa.newham.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://pa.newham.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "North East Lincolnshire",
+      "code": "north-east-lincolnshire",
+      "system": "idox",
+      "base_url": "http://planninganddevelopment.nelincs.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://planninganddevelopment.nelincs.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "North Lincolnshire",
+      "code": "north-lincolnshire",
+      "system": "custom",
+      "base_url": "http://www.planning.northlincs.gov.uk/plan/search/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "North Somerset",
+      "code": "north-somerset",
+      "system": "idox",
+      "base_url": "https://planning.n-somerset.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planning.n-somerset.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Northern Ireland",
+      "code": "northern-ireland",
+      "system": "custom",
+      "base_url": "http://epicpublic.planningni.gov.uk/publicaccess/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://epicpublic.planningni.gov.uk/publicaccess/search.do?action=advanced&searchType=Application"
+    },
+    {
+      "name": "North Tyneside",
+      "code": "north-tyneside",
+      "system": "idox",
+      "base_url": "https://idoxpublicaccess.northtyneside.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://idoxpublicaccess.northtyneside.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Northumberland",
+      "code": "northumberland",
+      "system": "idox",
+      "base_url": "https://publicaccess.northumberland.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess.northumberland.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Nottingham",
+      "code": "nottingham",
+      "system": "idox",
+      "base_url": "http://publicaccess.nottinghamcity.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://publicaccess.nottinghamcity.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Old Oak and Park Royal Development Corporation",
+      "code": "old-oak-and-park-royal-development-corporation",
+      "system": "custom",
+      "base_url": "http://planningregister.opdc.london.gov.uk/swift/apas/run/wphappcriteria.display",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Oldham",
+      "code": "oldham",
+      "system": "idox",
+      "base_url": "http://planningpa.oldham.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://planningpa.oldham.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Peterborough",
+      "code": "peterborough",
+      "system": "idox",
+      "base_url": "https://planpa.peterborough.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planpa.peterborough.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Plymouth",
+      "code": "plymouth",
+      "system": "idox",
+      "base_url": "https://planning.plymouth.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planning.plymouth.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Poole",
+      "code": "poole",
+      "system": "idox",
+      "base_url": "https://boppa.poole.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://boppa.poole.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Portsmouth",
+      "code": "portsmouth",
+      "system": "idox",
+      "base_url": "http://publicaccess.portsmouth.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://publicaccess.portsmouth.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Redbridge",
+      "code": "redbridge",
+      "system": "custom",
+      "base_url": "http://planning.redbridge.gov.uk/swiftlg/apas/run/wphappcriteria.display",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Richmond",
+      "code": "richmond",
+      "system": "custom",
+      "base_url": "http://www2.richmond.gov.uk/PlanData2/Planning_Report.aspx",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Rochdale",
+      "code": "rochdale",
+      "system": "idox",
+      "base_url": "http://publicaccess.rochdale.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://publicaccess.rochdale.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Rutland",
+      "code": "rutland",
+      "system": "idox",
+      "base_url": "https://publicaccess.rutland.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess.rutland.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Sefton",
+      "code": "sefton",
+      "system": "idox",
+      "base_url": "https://pa.sefton.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://pa.sefton.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Solihull",
+      "code": "solihull",
+      "system": "idox",
+      "base_url": "https://publicaccess.solihull.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess.solihull.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Southend-on-Sea",
+      "code": "southend-on-sea",
+      "system": "idox",
+      "base_url": "https://publicaccess.southend.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess.southend.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "South Downs",
+      "code": "south-downs",
+      "system": "idox",
+      "base_url": "https://planningpublicaccess.southdowns.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planningpublicaccess.southdowns.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Southampton",
+      "code": "southampton",
+      "system": "idox",
+      "base_url": "https://planningpublicaccess.southampton.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planningpublicaccess.southampton.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "South Gloucestershire",
+      "code": "south-gloucestershire",
+      "system": "idox",
+      "base_url": "https://developments.southglos.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://developments.southglos.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "South Tyneside",
+      "code": "south-tyneside",
+      "system": "northgate",
+      "base_url": "http://planning.southtyneside.info/Northgate/PlanningExplorer/GeneralSearch.aspx",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Southwark",
+      "code": "southwark",
+      "system": "idox",
+      "base_url": "https://planning.southwark.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planning.southwark.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "St. Helens",
+      "code": "st-helens",
+      "system": "idox",
+      "base_url": "https://publicaccess.sthelens.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess.sthelens.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Stockport",
+      "code": "stockport",
+      "system": "custom",
+      "base_url": "http://planning.stockport.gov.uk/PlanningData-live/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://planning.stockport.gov.uk/PlanningData-live/search.do?action=advanced"
+    },
+    {
+      "name": "Stockton-on-Tees",
+      "code": "stockton-on-tees",
+      "system": "idox",
+      "base_url": "https://www.developmentmanagement.stockton.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://www.developmentmanagement.stockton.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Stoke-on-Trent",
+      "code": "stoke-on-trent",
+      "system": "idox",
+      "base_url": "https://planning.stoke.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planning.stoke.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Sunderland",
+      "code": "sunderland",
+      "system": "idox",
+      "base_url": "https://www.sunderland.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://www.sunderland.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Sutton",
+      "code": "sutton",
+      "system": "idox",
+      "base_url": "https://planningregister.sutton.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planningregister.sutton.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Swindon",
+      "code": "swindon",
+      "system": "custom",
+      "base_url": "https://pa1.swindon.gov.uk/publicaccess/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://pa1.swindon.gov.uk/publicaccess/search.do?action=advanced"
+    },
+    {
+      "name": "Tameside",
+      "code": "tameside",
+      "system": "custom",
+      "base_url": "https://public.tameside.gov.uk/plan/f422planapp.asp",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Thurrock",
+      "code": "thurrock",
+      "system": "idox",
+      "base_url": "https://regs.thurrock.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://regs.thurrock.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Torbay",
+      "code": "torbay",
+      "system": "custom",
+      "base_url": "https://www.torbay.gov.uk/newpublicaccess/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://www.torbay.gov.uk/newpublicaccess/search.do?action=advanced"
+    },
+    {
+      "name": "Tower Hamlets",
+      "code": "tower-hamlets",
+      "system": "idox",
+      "base_url": "https://development.towerhamlets.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://development.towerhamlets.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Trafford",
+      "code": "trafford",
+      "system": "idox",
+      "base_url": "https://publicaccess.trafford.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess.trafford.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Wakefield",
+      "code": "wakefield",
+      "system": "idox",
+      "base_url": "https://planning.wakefield.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planning.wakefield.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Waltham Forest",
+      "code": "waltham-forest",
+      "system": "custom",
+      "base_url": "http://planning.walthamforest.gov.uk/application-search?civica.query.ReceivedDateFrom=20%2F05%2F2018&civica.query.ReceivedDateTo=26%2F05%2F2018",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Wandsworth",
+      "code": "wandsworth",
+      "system": "northgate",
+      "base_url": "https://planning1.wandsworth.gov.uk/Northgate/PlanningExplorer/GeneralSearch.aspx",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "West Berkshire",
+      "code": "west-berkshire",
+      "system": "idox",
+      "base_url": "https://publicaccess.westberks.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://publicaccess.westberks.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Wigan",
+      "code": "wigan",
+      "system": "custom",
+      "base_url": "https://apps.wigan.gov.uk/planapps/PlanAppsAppSearch.asp",
+      "status": "untested",
+      "notes": "From uk_planning_scraper"
+    },
+    {
+      "name": "Windsor and Maidenhead",
+      "code": "windsor-and-maidenhead",
+      "system": "idox",
+      "base_url": "http://publicaccess.rbwm.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://publicaccess.rbwm.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Wirral",
+      "code": "wirral",
+      "system": "idox",
+      "base_url": "https://planning.wirral.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planning.wirral.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "Wolverhampton",
+      "code": "wolverhampton",
+      "system": "idox",
+      "base_url": "http://planningonline.wolverhampton.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "http://planningonline.wolverhampton.gov.uk/online-applications/search.do?action=advanced"
+    },
+    {
+      "name": "York",
+      "code": "york",
+      "system": "idox",
+      "base_url": "https://planningaccess.york.gov.uk/online-applications/",
+      "status": "untested",
+      "notes": "From uk_planning_scraper",
+      "search_url": "https://planningaccess.york.gov.uk/online-applications/search.do?action=advanced"
     }
   ],
-
   "systems": {
     "idox": {
       "description": "Idox Public Access - most common UK planning portal system (~60-70% market share)",
@@ -201,5 +1101,7 @@
       "estimated_councils": 20,
       "notes": "Modern cloud-based system, correctly detected, growing market share"
     }
-  }
+  },
+  "_imported_from": "https://github.com/adrianshort/uk_planning_scraper",
+  "_import_date": "2026-01-22"
 }
