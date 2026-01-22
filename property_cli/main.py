@@ -607,6 +607,91 @@ def planning_search(
         rprint(f"\n[yellow]Note:[/yellow] {data['note']}")
 
 
+@planning.command("applications")
+def planning_applications(
+    postcode: list[str] = typer.Argument(..., help="UK postcode (can include spaces)"),
+    max_results: int = typer.Option(20, "--max", help="Maximum results to return"),
+    output: Optional[str] = typer.Option(None, "-o", "--output", help="Output JSON file path"),
+) -> None:
+    """Scrape planning applications for a postcode using vision-guided search.
+
+    Uses AI vision to navigate council planning portals and extract applications.
+    Requires UK residential IP for best results (council portals block datacenters).
+
+    Example:
+        property-cli planning applications "S1 2HH"
+        property-cli planning applications "SW1A 1AA" --max 10 -o results.json
+    """
+    from pathlib import Path
+    from app.services.planning_service import PlanningService
+    from property_core.planning_scraper import search_planning_by_postcode
+
+    postcode_value = _join_tokens(postcode)
+
+    # First find the council portal URL
+    rprint(f"\n[bold]Finding planning portal for:[/bold] {postcode_value}")
+    service = PlanningService()
+    search_data = service.search(postcode_value)
+
+    if not search_data.get("council_found"):
+        rprint(f"[red]No planning portal found for this area.[/red]")
+        raise typer.Exit(code=1)
+
+    council = search_data.get("council", {})
+    urls = search_data.get("search_urls", {})
+
+    rprint(f"[bold]Council:[/bold] {council.get('name')} ({council.get('system')})")
+
+    # Get the search page URL
+    portal_url = urls.get("search_page") or urls.get("direct_search")
+    if not portal_url:
+        rprint("[red]No search URL available for this council.[/red]")
+        raise typer.Exit(code=1)
+
+    rprint(f"[dim]Portal: {portal_url}[/dim]\n")
+
+    # Run the vision-guided search
+    try:
+        results = search_planning_by_postcode(
+            portal_url=portal_url,
+            postcode=postcode_value,
+            max_results=max_results,
+        )
+    except Exception as e:
+        rprint(f"[red]Scraping failed: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    if not results:
+        rprint("[yellow]No planning applications found.[/yellow]")
+        return
+
+    # Display results
+    rprint(f"\n[bold green]Found {len(results)} applications:[/bold green]\n")
+
+    table = Table()
+    table.add_column("Reference", style="cyan")
+    table.add_column("Address")
+    table.add_column("Description")
+    table.add_column("Status")
+
+    for app in results:
+        table.add_row(
+            app.get("reference", ""),
+            app.get("address", "")[:40] + "..." if len(app.get("address", "")) > 40 else app.get("address", ""),
+            app.get("description", "")[:50] + "..." if len(app.get("description", "")) > 50 else app.get("description", ""),
+            app.get("status", ""),
+        )
+    rprint(table)
+
+    # Save to file if requested
+    if output:
+        with open(output, "w") as f:
+            json.dump(results, f, indent=2)
+        rprint(f"\n[dim]Full results saved to: {output}[/dim]")
+    else:
+        rprint(f"\n[dim]Use -o results.json to save full data with links[/dim]")
+
+
 @planning.command("council-for-postcode")
 def planning_council_for_postcode(
     postcode: list[str] = typer.Argument(..., help="UK postcode (can include spaces)"),
@@ -644,6 +729,106 @@ def planning_council_for_postcode(
     else:
         rprint(f"\n[yellow]No planning portal found in database for this local authority.[/yellow]")
         rprint("[dim]Use 'planning councils' to see available councils.[/dim]")
+
+
+# =============================================================================
+# Report Commands
+# =============================================================================
+
+report = typer.Typer(help="Property report commands")
+app.add_typer(report, name="report")
+
+
+@report.command("generate")
+def report_generate(
+    address: list[str] = typer.Argument(..., help="Address with postcode, e.g. '10 Downing Street SW1A 2AA'"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Output file path"),
+    html: bool = typer.Option(False, "--html", help="Output as HTML (default is JSON)"),
+    no_rentals: bool = typer.Option(False, "--no-rentals", help="Skip rental market analysis"),
+    no_sales: bool = typer.Option(False, "--no-sales", help="Skip current sales market"),
+    months: int = typer.Option(24, "--months", help="PPD lookback period in months"),
+    radius: float = typer.Option(0.5, "--radius", help="Search radius in miles for Rightmove"),
+) -> None:
+    """Generate a comprehensive property intelligence report.
+
+    Example:
+        property-cli report generate "10 Downing Street, SW1A 2AA"
+        property-cli report generate "SW1A 2AA" -o report.json
+        property-cli report generate "SW1A 2AA" -o report.html --html
+    """
+    import asyncio
+    import json
+    from app.services.report_service import PropertyReportService
+
+    address_query = _join_tokens(address)
+    service = PropertyReportService()
+
+    rprint(f"\n[bold]Generating property report for:[/bold] {address_query}")
+    rprint("[dim]Fetching data from multiple sources...[/dim]\n")
+
+    try:
+        report_data = asyncio.run(
+            service.generate_report(
+                address_query,
+                include_rentals=not no_rentals,
+                include_sales_market=not no_sales,
+                ppd_months=months,
+                search_radius=radius,
+            )
+        )
+    except ValueError as e:
+        rprint(f"[red]Error:[/red] {e}")
+        raise typer.Exit(code=1)
+
+    # Display summary
+    rprint(f"[bold green]Report Generated[/bold green] (ID: {report_data.report_id})")
+    rprint(f"Address: {report_data.query_address or 'N/A'}")
+    rprint(f"Postcode: {report_data.query_postcode}")
+
+    # Key insights
+    if report_data.key_insights:
+        rprint("\n[bold]Key Insights:[/bold]")
+        for insight in report_data.key_insights:
+            rprint(f"  - {insight}")
+
+    # Data sources
+    rprint("\n[bold]Data Sources:[/bold]")
+    for src in report_data.sources:
+        status = "[green]OK[/green]" if src.available else "[yellow]N/A[/yellow]"
+        if src.error:
+            status = f"[red]{src.error}[/red]"
+        rprint(f"  {src.name}: {status} ({src.records_found} records)")
+
+    # Value estimate
+    if report_data.estimated_value_low and report_data.estimated_value_high:
+        rprint(f"\n[bold]Estimated Value Range:[/bold] £{report_data.estimated_value_low:,} - £{report_data.estimated_value_high:,}")
+
+    # Output to file if requested
+    if output:
+        if html:
+            from pathlib import Path
+            from jinja2 import Environment, FileSystemLoader
+
+            # Find template directory
+            template_dir = Path(__file__).parent.parent / "app" / "templates"
+            if not template_dir.exists():
+                rprint("[red]Error: Template directory not found[/red]")
+                raise typer.Exit(code=1)
+
+            env = Environment(loader=FileSystemLoader(str(template_dir)))
+            template = env.get_template("report.html")
+            html_content = template.render(report=report_data)
+
+            with open(output, "w") as f:
+                f.write(html_content)
+            rprint(f"\n[bold green]HTML report saved to: {output}[/bold green]")
+        else:
+            report_dict = report_data.model_dump(mode="json")
+            with open(output, "w") as f:
+                json.dump(report_dict, f, indent=2, default=str)
+            rprint(f"\n[dim]Full report saved to: {output}[/dim]")
+    else:
+        rprint("\n[dim]Use -o report.json or -o report.html --html to save report[/dim]")
 
 
 if __name__ == "__main__":

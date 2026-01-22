@@ -45,7 +45,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["property_core", "app", "property_cli"]
-include = ["app/web/templates/**"]
+include = ["app/web/templates/**", "app/templates/**"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"
