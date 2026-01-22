@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Property Report - {{ report.query_postcode }}</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --success: #16a34a;
+            --warning: #d97706;
+            --danger: #dc2626;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-600: #4b5563;
+            --gray-800: #1f2937;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: var(--gray-800);
+            background: var(--gray-100);
+            padding: 2rem;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            padding: 2rem;
+            background: linear-gradient(135deg, var(--primary), #1e40af);
+            color: white;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+        }
+        .header h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .header .address { font-size: 1.25rem; opacity: 0.9; }
+        .header .meta { font-size: 0.875rem; opacity: 0.7; margin-top: 0.5rem; }
+
+        h2 { font-size: 1.125rem; margin-bottom: 1rem; color: var(--gray-800); }
+
+        .insights {
+            background: #eff6ff;
+            border-left: 4px solid var(--primary);
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            border-radius: 0 8px 8px 0;
+        }
+        .insights h3 { font-size: 1rem; margin-bottom: 0.5rem; color: var(--primary); }
+        .insights ul { list-style: none; }
+        .insights li { padding: 0.25rem 0; }
+        .insights li:before { content: "→ "; color: var(--primary); }
+
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+        }
+        .stat {
+            text-align: center;
+            padding: 1rem;
+            background: var(--gray-100);
+            border-radius: 8px;
+        }
+        .stat-value { font-size: 1.5rem; font-weight: 700; color: var(--primary); }
+        .stat-label { font-size: 0.75rem; color: var(--gray-600); text-transform: uppercase; }
+
+        .value-range {
+            text-align: center;
+            padding: 1.5rem;
+            background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+        .value-range .range { font-size: 1.5rem; font-weight: 700; color: var(--success); }
+        .value-range .label { font-size: 0.875rem; color: var(--gray-600); }
+
+        .yield-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .yield-strong { background: #dcfce7; color: var(--success); }
+        .yield-average { background: #fef3c7; color: var(--warning); }
+        .yield-weak { background: #fee2e2; color: var(--danger); }
+
+        .sources {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.5rem;
+        }
+        .source {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            background: var(--gray-100);
+            border-radius: 6px;
+            font-size: 0.875rem;
+        }
+        .source-ok { color: var(--success); }
+        .source-na { color: var(--gray-600); }
+        .source-err { color: var(--danger); }
+
+        .disclaimer {
+            font-size: 0.75rem;
+            color: var(--gray-600);
+            text-align: center;
+            margin-top: 2rem;
+            padding: 1rem;
+            border-top: 1px solid var(--gray-200);
+        }
+
+        .epc-rating {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 48px;
+            height: 48px;
+            border-radius: 8px;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: white;
+        }
+        .epc-A { background: #1a8f3c; }
+        .epc-B { background: #3da34a; }
+        .epc-C { background: #8dc63f; }
+        .epc-D { background: #ffd500; color: #333; }
+        .epc-E { background: #f5a623; }
+        .epc-F { background: #ed8b00; }
+        .epc-G { background: #d32f2f; }
+
+        @media print {
+            body { background: white; padding: 0; }
+            .card { box-shadow: none; border: 1px solid var(--gray-200); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Property Intelligence Report</h1>
+            <div class="address">
+                {% if report.query_address %}{{ report.query_address }}, {% endif %}{{ report.query_postcode }}
+            </div>
+            <div class="meta">
+                Report ID: {{ report.report_id }} | Generated: {{ report.generated_at.strftime('%d %B %Y at %H:%M') }}
+            </div>
+        </div>
+
+        {% if report.key_insights %}
+        <div class="insights">
+            <h3>Key Insights</h3>
+            <ul>
+                {% for insight in report.key_insights %}
+                <li>{{ insight }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        {% if report.estimated_value_low and report.estimated_value_high %}
+        <div class="card">
+            <h2>Estimated Value Range</h2>
+            <div class="value-range">
+                <div class="range">£{{ "{:,}".format(report.estimated_value_low) }} - £{{ "{:,}".format(report.estimated_value_high) }}</div>
+                <div class="label">Based on area median and comparable sales</div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if report.market_analysis %}
+        <div class="card">
+            <h2>Market Analysis ({{ report.market_analysis.period_months }} months)</h2>
+            <div class="stat-grid">
+                <div class="stat">
+                    <div class="stat-value">£{{ "{:,}".format(report.market_analysis.median_price or 0) }}</div>
+                    <div class="stat-label">Median Price</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">{{ report.market_analysis.transaction_count }}</div>
+                    <div class="stat-label">Transactions</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">£{{ "{:,}".format(report.market_analysis.min_price or 0) }}</div>
+                    <div class="stat-label">Min Price</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">£{{ "{:,}".format(report.market_analysis.max_price or 0) }}</div>
+                    <div class="stat-label">Max Price</div>
+                </div>
+            </div>
+            <p style="margin-top: 1rem; font-size: 0.875rem; color: var(--gray-600);">
+                Postcode sector: {{ report.market_analysis.postcode_sector }}
+                {% if report.market_analysis.thin_market %} | <span style="color: var(--warning);">Thin market warning</span>{% endif %}
+            </p>
+        </div>
+        {% endif %}
+
+        {% if report.sale_history and report.sale_history.transactions %}
+        <div class="card">
+            <h2>Sale History</h2>
+            <p>{{ report.sale_history.address }}</p>
+            <table style="width: 100%; margin-top: 1rem; font-size: 0.875rem;">
+                <thead>
+                    <tr style="text-align: left; border-bottom: 2px solid var(--gray-200);">
+                        <th style="padding: 0.5rem;">Date</th>
+                        <th style="padding: 0.5rem;">Price</th>
+                        <th style="padding: 0.5rem;">Type</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sale in report.sale_history.transactions %}
+                    <tr style="border-bottom: 1px solid var(--gray-200);">
+                        <td style="padding: 0.5rem;">{{ sale.date }}</td>
+                        <td style="padding: 0.5rem; font-weight: 600;">£{{ "{:,}".format(sale.price) }}</td>
+                        <td style="padding: 0.5rem;">{{ sale.property_type or 'N/A' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% if report.energy_performance %}
+        <div class="card">
+            <h2>Energy Performance</h2>
+            <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+                <div class="epc-rating epc-{{ report.energy_performance.rating }}">
+                    {{ report.energy_performance.rating }}
+                </div>
+                <div>
+                    <div style="font-weight: 600;">Current Rating: {{ report.energy_performance.rating }} ({{ report.energy_performance.score }})</div>
+                    {% if report.energy_performance.potential_rating %}
+                    <div style="font-size: 0.875rem; color: var(--gray-600);">
+                        Potential: {{ report.energy_performance.potential_rating }} ({{ report.energy_performance.potential_score }})
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="stat-grid">
+                {% if report.energy_performance.floor_area_sqm %}
+                <div class="stat">
+                    <div class="stat-value">{{ report.energy_performance.floor_area_sqm|int }}</div>
+                    <div class="stat-label">Floor Area (m²)</div>
+                </div>
+                {% endif %}
+                {% if report.energy_performance.total_annual_cost %}
+                <div class="stat">
+                    <div class="stat-value">£{{ "{:,}".format(report.energy_performance.total_annual_cost) }}</div>
+                    <div class="stat-label">Annual Energy Cost</div>
+                </div>
+                {% endif %}
+                {% if report.energy_performance.potential_savings %}
+                <div class="stat">
+                    <div class="stat-value">£{{ "{:,}".format(report.energy_performance.potential_savings) }}</div>
+                    <div class="stat-label">Potential Savings</div>
+                </div>
+                {% endif %}
+            </div>
+            {% if report.energy_performance.property_type or report.energy_performance.construction_age %}
+            <p style="margin-top: 1rem; font-size: 0.875rem; color: var(--gray-600);">
+                {{ report.energy_performance.property_type or '' }}
+                {% if report.energy_performance.construction_age %}({{ report.energy_performance.construction_age }}){% endif %}
+            </p>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if report.rental_analysis %}
+        <div class="card">
+            <h2>Rental Market</h2>
+            <div class="stat-grid">
+                <div class="stat">
+                    <div class="stat-value">{{ report.rental_analysis.rental_listings_count }}</div>
+                    <div class="stat-label">Listings Found</div>
+                </div>
+                {% if report.rental_analysis.median_rent_monthly %}
+                <div class="stat">
+                    <div class="stat-value">£{{ "{:,}".format(report.rental_analysis.median_rent_monthly) }}</div>
+                    <div class="stat-label">Median Rent (pcm)</div>
+                </div>
+                {% endif %}
+                {% if report.rental_analysis.gross_yield_pct %}
+                <div class="stat">
+                    <div class="stat-value">{{ "%.1f"|format(report.rental_analysis.gross_yield_pct) }}%</div>
+                    <div class="stat-label">Gross Yield</div>
+                </div>
+                {% endif %}
+            </div>
+            {% if report.rental_analysis.yield_assessment %}
+            <p style="margin-top: 1rem;">
+                Yield assessment:
+                <span class="yield-badge yield-{{ report.rental_analysis.yield_assessment }}">
+                    {{ report.rental_analysis.yield_assessment }}
+                </span>
+            </p>
+            {% endif %}
+            {% if report.rental_analysis.rent_range_low and report.rental_analysis.rent_range_high %}
+            <p style="margin-top: 0.5rem; font-size: 0.875rem; color: var(--gray-600);">
+                Rent range: £{{ "{:,}".format(report.rental_analysis.rent_range_low) }} - £{{ "{:,}".format(report.rental_analysis.rent_range_high) }} pcm
+                (within {{ report.rental_analysis.search_radius_miles }} miles)
+            </p>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if report.current_market %}
+        <div class="card">
+            <h2>Current Sales Market</h2>
+            <div class="stat-grid">
+                <div class="stat">
+                    <div class="stat-value">{{ report.current_market.for_sale_count }}</div>
+                    <div class="stat-label">For Sale</div>
+                </div>
+                {% if report.current_market.median_asking_price %}
+                <div class="stat">
+                    <div class="stat-value">£{{ "{:,}".format(report.current_market.median_asking_price) }}</div>
+                    <div class="stat-label">Median Asking</div>
+                </div>
+                {% endif %}
+                {% if report.current_market.asking_range_low %}
+                <div class="stat">
+                    <div class="stat-value">£{{ "{:,}".format(report.current_market.asking_range_low) }}</div>
+                    <div class="stat-label">From</div>
+                </div>
+                {% endif %}
+                {% if report.current_market.asking_range_high %}
+                <div class="stat">
+                    <div class="stat-value">£{{ "{:,}".format(report.current_market.asking_range_high) }}</div>
+                    <div class="stat-label">Up to</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card">
+            <h2>Data Sources</h2>
+            <div class="sources">
+                {% for src in report.sources %}
+                <div class="source">
+                    {% if src.available and not src.error %}
+                    <span class="source-ok">✓</span>
+                    {% elif src.error %}
+                    <span class="source-err">✗</span>
+                    {% else %}
+                    <span class="source-na">○</span>
+                    {% endif %}
+                    <span>{{ src.name }} ({{ src.records_found }})</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="disclaimer">
+            {{ report.disclaimer }}
+        </div>
+    </div>
+</body>
+</html>

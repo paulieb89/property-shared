@@ -642,8 +642,17 @@ def planning_applications(
 
     rprint(f"[bold]Council:[/bold] {council.get('name')} ({council.get('system')})")
 
-    # Get the search page URL
-    portal_url = urls.get("search_page") or urls.get("direct_search")
+    # Get the search page URL - prefer simple search for postcode queries
+    # direct_search has postcode pre-filled, search_page is often weekly list
+    portal_url = urls.get("direct_search") or urls.get("search_page")
+
+    # For Idox councils, ensure we use simple search (not weeklyList)
+    if council.get("system") == "idox" and portal_url:
+        # Convert weeklyList or other URLs to simple search
+        if "weeklyList" in portal_url or "action=simple" not in portal_url:
+            base = portal_url.split("/search.do")[0] if "/search.do" in portal_url else portal_url.rstrip("/")
+            portal_url = f"{base}/search.do?action=simple"
+
     if not portal_url:
         rprint("[red]No search URL available for this council.[/red]")
         raise typer.Exit(code=1)
