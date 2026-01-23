@@ -811,31 +811,235 @@
       "notes": "Idox newplanningaccess system - 3 applications found",
       "search_url": "https://newplanningaccess.eastriding.gov.uk/newplanningaccess/search.do?action=advanced",
       "verified_date": "2026-01-22"
+    },
+    {
+      "name": "Cheshire West and Chester",
+      "code": "cheshire-west-chester",
+      "system": "idox",
+      "base_url": "https://pa.cheshirewestandchester.gov.uk/online-applications/",
+      "search_url": "https://pa.cheshirewestandchester.gov.uk/online-applications/search.do?action=simple&searchType=Application",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "CH2 1AA",
+      "notes": "Idox Public Access - 4 results for CH1 1AA"
+    },
+    {
+      "name": "Aylesbury Vale",
+      "code": "aylesbury-vale",
+      "system": "idox",
+      "base_url": "https://publicaccess.aylesburyvaledc.gov.uk/online-applications/",
+      "search_url": "https://publicaccess.aylesburyvaledc.gov.uk/online-applications/search.do?action=simple&searchType=Application",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "HP20 1AA",
+      "notes": "Idox Public Access - merged into Buckinghamshire Council 2020 but portal still active",
+      "postcodes_io_name": "Buckinghamshire"
+    },
+    {
+      "name": "Bury",
+      "code": "bury",
+      "system": "idox",
+      "base_url": "https://planning.bury.gov.uk/online-applications/",
+      "search_url": "https://planning.bury.gov.uk/online-applications/search.do?action=simple&searchType=Application",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "BL9 0SN",
+      "notes": "Idox Public Access - 3 results for BL9 0SN"
+    },
+    {
+      "name": "Croydon",
+      "code": "croydon",
+      "system": "idox",
+      "base_url": "https://publicaccess3.croydon.gov.uk/online-applications/",
+      "search_url": "https://publicaccess3.croydon.gov.uk/online-applications/search.do?action=simple&searchType=Application",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "CR0 1AA"
+    },
+    {
+      "name": "Oldham",
+      "code": "oldham",
+      "system": "idox",
+      "base_url": "https://planningpa.oldham.gov.uk/online-applications/",
+      "search_url": "https://planningpa.oldham.gov.uk/online-applications/search.do?action=simple&searchType=Application",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "OL1 1AA"
+    },
+    {
+      "name": "Stoke-on-Trent",
+      "code": "stoke-on-trent",
+      "system": "lar",
+      "base_url": "https://development.stoke.gov.uk/planning/",
+      "search_url": "https://development.stoke.gov.uk/planning/index.html?fa=search",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "ST4 1HH"
+    },
+    {
+      "name": "Wirral",
+      "code": "wirral",
+      "system": "lar",
+      "base_url": "https://online.wirral.gov.uk/planning/",
+      "search_url": "https://online.wirral.gov.uk/planning/index.html?fa=search",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "CH41 1AA"
+    },
+    {
+      "name": "Barking and Dagenham",
+      "code": "barking-and-dagenham",
+      "system": "lar",
+      "base_url": "https://online-befirst.lbbd.gov.uk/planning/",
+      "search_url": "https://online-befirst.lbbd.gov.uk/planning/index.html?fa=search",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "IG11 7QT"
+    },
+    {
+      "name": "Cardiff",
+      "code": "cardiff",
+      "system": "idox",
+      "base_url": "https://www.cardiffidoxcloud.wales/publicaccess/",
+      "search_url": "https://www.cardiffidoxcloud.wales/publicaccess/search.do?action=simple&searchType=Application",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "CF10 1AA"
+    },
+    {
+      "name": "Manchester City Council",
+      "code": "manchester-city-council",
+      "system": "idox",
+      "base_url": "https://pa.manchester.gov.uk/online-applications/",
+      "search_url": "https://pa.manchester.gov.uk/online-applications/search.do?action=simple&searchType=Application",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "M1 1AA",
+      "postcodes_io_name": "Manchester"
+    },
+    {
+      "name": "South Holland District Council",
+      "code": "south-holland-district-council",
+      "system": "ocella",
+      "base_url": "https://planning.sholland.gov.uk/OcellaWeb/planningSearch",
+      "search_url": "https://planning.sholland.gov.uk/OcellaWeb/planningSearch",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "PE11 1AA",
+      "notes": "OcellaWeb system - 2 results for PE11 1AA"
+    },
+    {
+      "name": "Great Yarmouth Borough Council",
+      "code": "great-yarmouth-borough-council",
+      "system": "ocella",
+      "base_url": "https://planning.great-yarmouth.gov.uk/OcellaWeb/planningSearch",
+      "search_url": "https://planning.great-yarmouth.gov.uk/OcellaWeb/planningSearch",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "NR30 1AA",
+      "notes": "OcellaWeb system - 3 results for NR30 1AA"
+    },
+    {
+      "name": "Merton",
+      "code": "merton",
+      "system": "northgate",
+      "base_url": "https://planning.merton.gov.uk/Northgate/PlanningExplorerAA/",
+      "search_url": "https://planning.merton.gov.uk/Northgate/PlanningExplorerAA/Generic/SearchProperty.aspx",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "SW19 1AA",
+      "notes": "Northgate PlanningExplorer - form fills correctly, two-step property lookup"
+    },
+    {
+      "name": "South Tyneside",
+      "code": "south-tyneside",
+      "system": "northgate",
+      "base_url": "https://planning.southtyneside.info/Northgate/PlanningExplorer/",
+      "search_url": "https://planning.southtyneside.info/Northgate/PlanningExplorer/GeneralSearch.aspx",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "NE33 1AA",
+      "notes": "Northgate PlanningExplorer - form fills correctly, two-step property lookup"
+    },
+    {
+      "name": "Tameside",
+      "code": "tameside",
+      "system": "idox",
+      "base_url": "https://publicaccess.tameside.gov.uk/online-applications/",
+      "search_url": "https://publicaccess.tameside.gov.uk/online-applications/search.do?action=simple&searchType=Application",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "OL6 6AA"
+    },
+    {
+      "name": "Stockport",
+      "code": "stockport",
+      "system": "idox",
+      "base_url": "https://planning.stockport.gov.uk/PlanningData-live/",
+      "search_url": "https://planning.stockport.gov.uk/PlanningData-live/",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "SK1 1AA"
+    },
+    {
+      "name": "Torbay",
+      "code": "torbay",
+      "system": "idox",
+      "base_url": "https://www.torbay.gov.uk/newpublicaccess/",
+      "search_url": "https://www.torbay.gov.uk/newpublicaccess/search.do?action=simple&searchType=Application",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "TQ2 5TF"
+    },
+    {
+      "name": "Newcastle City Council",
+      "code": "newcastle-city-council",
+      "system": "lar",
+      "base_url": "https://portal.newcastle.gov.uk/planning/",
+      "search_url": "https://portal.newcastle.gov.uk/planning/index.html?fa=search",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "NE6 1AA"
+    },
+    {
+      "name": "South Derbyshire District Council",
+      "code": "south-derbyshire-district-council",
+      "system": "custom",
+      "base_url": "https://planning.southderbyshire.gov.uk/",
+      "search_url": "https://planning.southderbyshire.gov.uk/",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "DE11 0AH",
+      "notes": "Custom Laravel system with input[type=search]"
+    },
+    {
+      "name": "Bedford",
+      "code": "bedford",
+      "system": "idox",
+      "base_url": "https://publicaccess.bedford.gov.uk/online-applications/",
+      "search_url": "https://publicaccess.bedford.gov.uk/online-applications/search.do?action=simple&searchType=Application",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "MK42 8PP"
+    },
+    {
+      "name": "Halton",
+      "code": "halton",
+      "system": "idox",
+      "base_url": "https://pa.halton.gov.uk/online-applications/",
+      "search_url": "https://pa.halton.gov.uk/online-applications/search.do?action=simple&searchType=Application",
+      "status": "verified",
+      "verified_date": "2026-01-23",
+      "test_postcode": "WA7 1AA"
     }
   ],
   "untested": [
     {
-      "name": "South Holland District Council",
-      "code": "south-holland",
-      "system": "ocella",
-      "base_url": "https://planning.sholland.gov.uk/OcellaWeb/planningSearch",
-      "status": "untested",
-      "notes": "Should work - same OcellaWeb system as Havering"
-    },
-    {
-      "name": "Great Yarmouth Borough Council",
-      "code": "great-yarmouth",
-      "system": "ocella",
-      "base_url": "https://planning.great-yarmouth.gov.uk/OcellaWeb/planningSearch",
-      "status": "untested",
-      "notes": "Should work - same OcellaWeb system as Havering"
-    },
-    {
       "name": "Erewash Borough Council",
       "code": "erewash",
       "base_url": "https://www.erewash.gov.uk/planning",
-      "status": "untested",
-      "notes": "Unknown system - needs investigation"
+      "status": "url_dead",
+      "notes": "Planning page returns 404"
     },
     {
       "name": "Derbyshire County Council",
@@ -843,30 +1047,6 @@
       "base_url": "https://planning.derbyshire.gov.uk/",
       "status": "untested",
       "notes": "Unknown system - needs investigation"
-    },
-    {
-      "name": "Manchester City Council",
-      "code": "manchester",
-      "system": "idox",
-      "base_url": "https://pa.manchester.gov.uk/online-applications/",
-      "status": "needs_investigation",
-      "notes": "reCAPTCHA protection on search button - automated scraping blocked"
-    },
-    {
-      "name": "Newcastle City Council",
-      "code": "newcastle",
-      "system": "custom",
-      "base_url": "https://portal.newcastle.gov.uk/planning/index.html",
-      "status": "untested",
-      "notes": "Custom Citizen portal - NOT Idox. May need different scraping approach."
-    },
-    {
-      "name": "South Derbyshire District Council",
-      "code": "south-derbyshire",
-      "system": "custom",
-      "base_url": "https://planning.southderbyshire.gov.uk/",
-      "status": "untested",
-      "notes": "Custom Laravel system - NOT Idox. May need different scraping approach."
     },
     {
       "name": "North West Leicestershire District Council",
@@ -881,8 +1061,8 @@
       "code": "allerdale",
       "system": "custom",
       "base_url": "https://planning.allerdale.gov.uk/portal/servlets/ApplicationSearchServlet",
-      "status": "untested",
-      "notes": "From uk_planning_scraper"
+      "status": "merged",
+      "notes": "Merged into Cumberland Council (Arcus system on Salesforce)"
     },
     {
       "name": "Amber Valley",
@@ -911,91 +1091,19 @@
     {
       "name": "Ashford",
       "code": "ashford",
-      "system": "custom",
-      "base_url": "http://planning.ashford.gov.uk/planning/Default.aspx?new=true",
-      "status": "untested",
-      "notes": "From uk_planning_scraper"
-    },
-    {
-      "name": "Aylesbury Vale",
-      "code": "aylesbury-vale",
-      "system": "idox",
-      "base_url": "https://publicaccess.aylesburyvaledc.gov.uk/online-applications//",
-      "status": "postcode_mapping_issue",
-      "notes": "From uk_planning_scraper",
-      "search_url": "https://publicaccess.aylesburyvaledc.gov.uk/online-applications//search.do?action=advanced&searchType=Application"
-    },
-    {
-      "name": "Barking and Dagenham",
-      "code": "barking-and-dagenham",
-      "system": "idox",
-      "base_url": "http://paplan.lbbd.gov.uk/online-applications/",
-      "status": "dns_failed",
-      "notes": "From uk_planning_scraper",
-      "search_url": "http://paplan.lbbd.gov.uk/online-applications/search.do?action=advanced"
-    },
-    {
-      "name": "Bedford",
-      "code": "bedford",
-      "system": "idox",
-      "base_url": "http://www.publicaccess.bedford.gov.uk/online-applications/",
-      "status": "no_test_postcode",
-      "notes": "From uk_planning_scraper",
-      "search_url": "http://www.publicaccess.bedford.gov.uk/online-applications/search.do?action=advanced"
+      "system": "arcus",
+      "base_url": "https://abcportal.ashford.gov.uk/pr/s/register-view?c__r=Arcus_BE_Public_Register",
+      "status": "url_moved",
+      "notes": "Arcus system on Salesforce - hard to scrape"
     },
     {
       "name": "Blackpool",
       "code": "blackpool",
       "system": "idox",
       "base_url": "https://idoxpa.blackpool.gov.uk/online-applications/",
-      "status": "postcode_mapping_issue",
-      "notes": "From uk_planning_scraper",
+      "status": "access_blocked",
+      "notes": "URL resolves but access is blocked/restricted",
       "search_url": "https://idoxpa.blackpool.gov.uk/online-applications/search.do?action=advanced"
-    },
-    {
-      "name": "Bury",
-      "code": "bury",
-      "system": "idox",
-      "base_url": "https://planning.bury.gov.uk/online-applications/",
-      "status": "postcode_mapping_issue",
-      "notes": "From uk_planning_scraper",
-      "search_url": "https://planning.bury.gov.uk/online-applications/search.do?action=advanced"
-    },
-    {
-      "name": "Cardiff",
-      "code": "cardiff",
-      "system": "idox",
-      "base_url": "https://planningonline.cardiff.gov.uk/online-applications/",
-      "status": "dns_failed",
-      "notes": "From uk_planning_scraper",
-      "search_url": "https://planningonline.cardiff.gov.uk/online-applications/search.do?action=advanced"
-    },
-    {
-      "name": "Cheshire West and Chester",
-      "code": "cheshire-west-and-chester",
-      "system": "idox",
-      "base_url": "https://pa.cheshirewestandchester.gov.uk/online-applications/",
-      "status": "postcode_mapping_issue",
-      "notes": "From uk_planning_scraper",
-      "search_url": "https://pa.cheshirewestandchester.gov.uk/online-applications/search.do?action=advanced"
-    },
-    {
-      "name": "Croydon",
-      "code": "croydon",
-      "system": "idox",
-      "base_url": "http://publicaccess2.croydon.gov.uk/online-applications/",
-      "status": "needs_investigation",
-      "notes": "From uk_planning_scraper",
-      "search_url": "http://publicaccess2.croydon.gov.uk/online-applications/search.do?action=advanced",
-      "postcodes_io_name": "Croydon"
-    },
-    {
-      "name": "Halton",
-      "code": "halton",
-      "system": "custom",
-      "base_url": "https://webapp.halton.gov.uk/planningapps/",
-      "status": "untested",
-      "notes": "From uk_planning_scraper"
     },
     {
       "name": "Haringey",
@@ -1038,14 +1146,6 @@
       "notes": "From uk_planning_scraper"
     },
     {
-      "name": "Merton",
-      "code": "merton",
-      "system": "northgate",
-      "base_url": "https://planning.merton.gov.uk/Northgate/PlanningExplorerAA/GeneralSearch.aspx",
-      "status": "untested",
-      "notes": "From uk_planning_scraper"
-    },
-    {
       "name": "North Lincolnshire",
       "code": "north-lincolnshire",
       "system": "custom",
@@ -1058,8 +1158,8 @@
       "code": "northern-ireland",
       "system": "custom",
       "base_url": "http://epicpublic.planningni.gov.uk/publicaccess/",
-      "status": "untested",
-      "notes": "From uk_planning_scraper",
+      "status": "timeout",
+      "notes": "URL times out - may have moved",
       "search_url": "http://epicpublic.planningni.gov.uk/publicaccess/search.do?action=advanced&searchType=Application"
     },
     {
@@ -1071,32 +1171,22 @@
       "notes": "From uk_planning_scraper"
     },
     {
-      "name": "Oldham",
-      "code": "oldham",
-      "system": "idox",
-      "base_url": "http://planningpa.oldham.gov.uk/online-applications/",
-      "status": "needs_investigation",
-      "notes": "From uk_planning_scraper",
-      "search_url": "http://planningpa.oldham.gov.uk/online-applications/search.do?action=advanced",
-      "postcodes_io_name": "Oldham"
-    },
-    {
       "name": "Poole",
       "code": "poole",
-      "system": "idox",
-      "base_url": "https://boppa.poole.gov.uk/online-applications/",
-      "status": "dns_failed",
-      "notes": "From uk_planning_scraper",
+      "system": "custom",
+      "base_url": "https://planning.bcpcouncil.gov.uk/",
+      "status": "custom_system",
+      "notes": "BCP Council - custom .NET system with disclaimer page, not Idox",
       "search_url": "https://boppa.poole.gov.uk/online-applications/search.do?action=advanced",
-      "postcodes_io_name": "Bournemouth, Christchurch and Poole"
+      "postcodes_io_name": "BCP Council"
     },
     {
       "name": "Redbridge",
       "code": "redbridge",
-      "system": "custom",
-      "base_url": "http://planning.redbridge.gov.uk/swiftlg/apas/run/wphappcriteria.display",
-      "status": "untested",
-      "notes": "From uk_planning_scraper"
+      "system": "idox",
+      "base_url": "https://planning.redbridge.gov.uk/online-applications/",
+      "status": "form_issue",
+      "notes": "Idox portal found but form selectors do not match"
     },
     {
       "name": "Richmond",
@@ -1105,49 +1195,6 @@
       "base_url": "http://www2.richmond.gov.uk/PlanData2/Planning_Report.aspx",
       "status": "untested",
       "notes": "From uk_planning_scraper"
-    },
-    {
-      "name": "South Tyneside",
-      "code": "south-tyneside",
-      "system": "northgate",
-      "base_url": "http://planning.southtyneside.info/Northgate/PlanningExplorer/GeneralSearch.aspx",
-      "status": "untested",
-      "notes": "From uk_planning_scraper"
-    },
-    {
-      "name": "Stockport",
-      "code": "stockport",
-      "system": "custom",
-      "base_url": "http://planning.stockport.gov.uk/PlanningData-live/",
-      "status": "untested",
-      "notes": "From uk_planning_scraper",
-      "search_url": "http://planning.stockport.gov.uk/PlanningData-live/search.do?action=advanced"
-    },
-    {
-      "name": "Stoke-on-Trent",
-      "code": "stoke-on-trent",
-      "system": "idox",
-      "base_url": "https://planning.stoke.gov.uk/online-applications/",
-      "status": "needs_investigation",
-      "notes": "From uk_planning_scraper",
-      "search_url": "https://planning.stoke.gov.uk/online-applications/search.do?action=advanced"
-    },
-    {
-      "name": "Tameside",
-      "code": "tameside",
-      "system": "custom",
-      "base_url": "https://public.tameside.gov.uk/plan/f422planapp.asp",
-      "status": "untested",
-      "notes": "From uk_planning_scraper"
-    },
-    {
-      "name": "Torbay",
-      "code": "torbay",
-      "system": "custom",
-      "base_url": "https://www.torbay.gov.uk/newpublicaccess/",
-      "status": "untested",
-      "notes": "From uk_planning_scraper",
-      "search_url": "https://www.torbay.gov.uk/newpublicaccess/search.do?action=advanced"
     },
     {
       "name": "Waltham Forest",
@@ -1162,18 +1209,8 @@
       "code": "wigan",
       "system": "custom",
       "base_url": "https://apps.wigan.gov.uk/planapps/PlanAppsAppSearch.asp",
-      "status": "untested",
-      "notes": "From uk_planning_scraper"
-    },
-    {
-      "name": "Wirral",
-      "code": "wirral",
-      "system": "idox",
-      "base_url": "https://planning.wirral.gov.uk/online-applications/",
-      "status": "needs_investigation",
-      "notes": "From uk_planning_scraper",
-      "search_url": "https://planning.wirral.gov.uk/online-applications/search.do?action=advanced",
-      "postcodes_io_name": "Wirral"
+      "status": "url_dead",
+      "notes": "Old URL returns 404"
     }
   ],
   "systems": {
