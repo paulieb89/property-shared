@@ -18,6 +18,12 @@ SEARCH_URL_PATTERNS: Dict[str, Dict[str, str]] = {
         "weekly_list": "{base_url}search.do?action=weeklyList&searchType=Application",
         "advanced": "{base_url}search.do?action=advanced&searchType=Application",
     },
+    "lar": {
+        "search_page": "{base_url}index.html?fa=search",
+    },
+    "agile": {
+        "search_page": "{base_url}",
+    },
     "northgate": {
         "search_page": "{base_url}GeneralSearch.aspx",
     },
@@ -56,6 +62,18 @@ def _build_search_url(council: Dict[str, Any], postcode: str) -> Dict[str, Any]:
                 "Use the direct_search URL to search by postcode. "
                 "Results will show planning applications in this area."
             )
+    elif system == "lar":
+        result["search_page"] = patterns.get("search_page", "").format(base_url=base_url) or base_url
+        result["instructions"] = (
+            f"Visit the search page and enter postcode '{postcode}' in the "
+            "SiteAddress[postcode] field, then click Search."
+        )
+    elif system == "agile":
+        result["search_page"] = patterns.get("search_page", "").format(base_url=base_url) or base_url
+        result["instructions"] = (
+            f"Visit the search page and enter postcode '{postcode}' in the "
+            "Quick Search field, then click Quick search."
+        )
     elif system == "northgate":
         result["search_page"] = patterns.get("search_page", "").format(base_url=base_url) or base_url
         result["instructions"] = (

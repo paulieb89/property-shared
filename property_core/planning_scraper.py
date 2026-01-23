@@ -5,18 +5,19 @@ Handles the fragmented UK planning system (300+ councils, multiple software vend
 by using vision to "read" any planning portal like a human would.
 
 Supported council systems:
-- Idox Public Access (most common)
+- Idox Public Access (most common, 76 councils)
+- LAR / Citizen Portal (Liverpool, Newcastle, Wirral, etc.)
+- Agile Applications (Islington)
+- Ocella (South Holland, Great Yarmouth, Havering)
+- Northgate PlanningExplorer (Wandsworth, Merton)
 - Arcus (NEC)
-- Uniform (NEC)
-- Ocella
-- Agile Planning
 - Custom council systems
 
 Usage:
     from property_core.planning_scraper import scrape_planning_application
 
     result = scrape_planning_application(
-        url="https://planning.birmingham.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=ABC123",
+        url="https://pa.manchester.gov.uk/online-applications/applicationDetails.do?activeTab=summary&keyVal=ABC123",
         output_dir=Path("./output/planning")
     )
 """
@@ -825,8 +826,14 @@ def search_planning_by_postcode(
         page = context.new_page()
 
         print(f"Loading planning portal: {portal_url}")
-        page.goto(portal_url, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(2000)
+        # System-specific wait strategy
+        if system in ("agile", "lar"):
+            # SPAs need longer to render
+            page.goto(portal_url, wait_until="networkidle", timeout=60000)
+            page.wait_for_timeout(4000)
+        else:
+            page.goto(portal_url, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(2000)
         dismiss_blocking_elements(page)
 
         # Take initial screenshot to understand the page
@@ -925,8 +932,28 @@ def search_planning_by_postcode(
         print("Extracting application links...")
         page_links = []  # List of (text, href) tuples
         try:
-            # Get all links that look like application detail links
-            links = page.locator("a[href*='applicationDetails'], a[href*='keyVal'], a[href*='ApplicationNumber'], a[href*='refval']").all()
+            # Build link selectors based on system type
+            link_selectors = [
+                # Idox
+                "a[href*='applicationDetails']",
+                "a[href*='keyVal']",
+                # LAR
+                "a[href*='fa=getApplication']",
+                "a[href*='planning/application']",
+                # Ocella
+                "a[href*='planningDetails']",
+                "a[href*='OcellaWeb']",
+                # Agile
+                "a[href*='application/']",
+                # Northgate
+                "a[href*='ApplicationNumber']",
+                "a[href*='refval']",
+                # Generic fallback - links in result tables
+                "table.searchresults a[href]",
+                ".results a[href]",
+            ]
+            selector_string = ", ".join(link_selectors)
+            links = page.locator(selector_string).all()
             for link in links:
                 try:
                     href = link.get_attribute("href")
@@ -1074,18 +1101,22 @@ Only extract applications visible in the screenshots. Return empty array if no r
     return extracted if isinstance(extracted, list) else []
 
 
-# Example council portal URLs for testing
+# Example council portal URLs for testing (one per system type)
 EXAMPLE_COUNCILS = {
-    "birmingham": "https://eplanning.birmingham.gov.uk/Northgate/PlanningExplorer/ApplicationSearch.aspx",
+    # Idox Public Access
     "manchester": "https://pa.manchester.gov.uk/online-applications/",
     "leeds": "https://publicaccess.leeds.gov.uk/online-applications/",
-    "bristol": "https://pa.bristol.gov.uk/online-applications/",
-    "liverpool": "https://northgate.liverpool.gov.uk/PlanningExplorer17/ApplicationSearch.aspx",
     "sheffield": "https://planningapps.sheffield.gov.uk/online-applications/",
-    "newcastle": "https://publicaccess.newcastle.gov.uk/online-applications/",
-    "westminster": "https://idoxpa.westminster.gov.uk/online-applications/",
-    "camden": "https://eplanning.camden.gov.uk/online-applications/",
-    "islington": "https://planning.islington.gov.uk/online-applications/",
+    # LAR / Citizen Portal
+    "wirral": "https://online.wirral.gov.uk/planning/index.html?fa=search",
+    "newcastle": "https://publicaccess.newcastle.gov.uk/planning/index.html?fa=search",
+    "barking": "https://online-befirst.lbbd.gov.uk/planning/index.html?fa=search",
+    # Agile Applications
+    "islington": "https://planning.agileapplications.co.uk/islington/search-applications/",
+    # Ocella
+    "south-holland": "https://planning.sholland.gov.uk/OcellaWeb/planningSearch",
+    # Northgate PlanningExplorer
+    "wandsworth": "https://planning.wandsworth.gov.uk/Northgate/PlanningExplorer/GeneralSearch.aspx",
 }
 
 

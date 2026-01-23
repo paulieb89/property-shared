@@ -723,7 +723,7 @@
       "verified_date": "2026-01-22",
       "notes": "Fixed with enhanced blocking element dismissal",
       "search_url": "http://www.planning2.cityoflondon.gov.uk/online-applications/search.do?action=advanced",
-      "postcodes_io_name": "Islington"
+      "postcodes_io_name": "City of London"
     },
     {
       "name": "Hull",
@@ -772,7 +772,8 @@
       "base_url": "https://developmentandhousing.hackney.gov.uk/planning/index.html?fa=search",
       "status": "verified",
       "notes": "LAR system (same as Liverpool) - requires dedicated postcode field",
-      "verified_date": "2026-01-22"
+      "verified_date": "2026-01-22",
+      "postcodes_io_name": "Hackney"
     },
     {
       "name": "Islington",
@@ -781,7 +782,8 @@
       "base_url": "https://planning.agileapplications.co.uk/islington/search-applications/",
       "status": "verified",
       "notes": "Agile Applications platform - 38 results found, needs cookie accept",
-      "verified_date": "2026-01-22"
+      "verified_date": "2026-01-22",
+      "postcodes_io_name": "Islington"
     },
     {
       "name": "Swindon",
@@ -874,7 +876,8 @@
       "search_url": "https://development.stoke.gov.uk/planning/index.html?fa=search",
       "status": "verified",
       "verified_date": "2026-01-23",
-      "test_postcode": "ST4 1HH"
+      "test_postcode": "ST4 1HH",
+      "postcodes_io_name": "Stoke-on-Trent"
     },
     {
       "name": "Wirral",
@@ -884,7 +887,8 @@
       "search_url": "https://online.wirral.gov.uk/planning/index.html?fa=search",
       "status": "verified",
       "verified_date": "2026-01-23",
-      "test_postcode": "CH41 1AA"
+      "test_postcode": "CH41 1AA",
+      "postcodes_io_name": "Wirral"
     },
     {
       "name": "Barking and Dagenham",
@@ -894,7 +898,8 @@
       "search_url": "https://online-befirst.lbbd.gov.uk/planning/index.html?fa=search",
       "status": "verified",
       "verified_date": "2026-01-23",
-      "test_postcode": "IG11 7QT"
+      "test_postcode": "IG11 7QT",
+      "postcodes_io_name": "Barking and Dagenham"
     },
     {
       "name": "Cardiff",
@@ -990,16 +995,6 @@
       "status": "verified",
       "verified_date": "2026-01-23",
       "test_postcode": "TQ2 5TF"
-    },
-    {
-      "name": "Newcastle City Council",
-      "code": "newcastle-city-council",
-      "system": "lar",
-      "base_url": "https://portal.newcastle.gov.uk/planning/",
-      "search_url": "https://portal.newcastle.gov.uk/planning/index.html?fa=search",
-      "status": "verified",
-      "verified_date": "2026-01-23",
-      "test_postcode": "NE6 1AA"
     },
     {
       "name": "South Derbyshire District Council",
