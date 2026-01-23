@@ -111,6 +111,25 @@ curl -X POST http://localhost:8000/v1/planning/search-results \
   -d '{"postcode": "M1 1AA", "portal_url": "https://pa.manchester.gov.uk/online-applications/search.do?action=simple", "system": "idox", "max_results": 5}'
 ```
 
+### Property Report
+
+```bash
+# Generate a comprehensive report (PPD + EPC + Rightmove)
+property-cli report generate "10 Downing Street, SW1A 2AA"
+
+# Save as JSON
+property-cli report generate "SW1A 2AA" -o report.json
+
+# Save as HTML
+property-cli report generate "SW1A 2AA" -o report.html --html
+
+# Customize search parameters
+property-cli report generate "SW1A 2AA" --months 36 --radius 0.25 --no-rentals
+
+# Via API
+property-cli report generate "SW1A 2AA" --api-url http://localhost:8000
+```
+
 ## API Endpoints
 
 ### Health & Meta
@@ -173,7 +192,7 @@ pip install -e /path/to/property_shared
 
 ### Core Imports (no HTTP)
 ```python
-from property_core import PricePaidDataClient, EPCClient, RightmoveLocationAPI, fetch_listings
+from property_core import PricePaidDataClient, EPCClient, RightmoveLocationAPI, fetch_listings, PostcodeClient
 
 # PPD
 client = PricePaidDataClient()

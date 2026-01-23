@@ -85,3 +85,4 @@ Generate a typed client from the running service OpenAPI:
 - PPD transactions (postcode/prefix): `uv run --extra cli property-cli ppd search --postcode-prefix SW1A --limit 10`
 - PPD transaction record: `uv run --extra cli property-cli ppd transaction 31C68072-E0B5-FEE3-E063-4804A8C04F37 --include-raw` (replace with a real transaction id)
 - EPC search (requires EPC_API_EMAIL/EPC_API_KEY set): `uv run --extra cli property-cli epc search "SW1A 1AA" --address "10 Downing Street" --include-raw`
+- Property report: `uv run --extra cli property-cli report generate "10 Downing Street, SW1A 2AA" -o report.html --html`
