@@ -142,7 +142,14 @@ class PlanningService:
         return data.get("councils", []) + data.get("untested", [])
 
     def _match_council(self, local_authority_name: str) -> Optional[Dict[str, Any]]:
-        """Try to match a local authority name to our councils database."""
+        """Try to match a local authority name to our councils database.
+
+        Matching priority:
+        1. Exact match on postcodes_io_name field (most reliable)
+        2. Exact match on council code
+        3. Normalized name match
+        4. Partial name match (fallback)
+        """
         if not local_authority_name:
             return None
 
@@ -150,7 +157,12 @@ class PlanningService:
         la_normalized = _normalize_name(local_authority_name)
         la_code = _name_to_code(local_authority_name)
 
-        # Try exact code match first
+        # Try exact postcodes_io_name match first (most reliable)
+        for council in councils:
+            if council.get("postcodes_io_name") == local_authority_name:
+                return council
+
+        # Try exact code match
         for council in councils:
             if council.get("code") == la_code:
                 return council
@@ -161,7 +173,7 @@ class PlanningService:
             if council_normalized == la_normalized:
                 return council
 
-        # Try partial match (contains)
+        # Try partial match (contains) - fallback
         for council in councils:
             council_normalized = _normalize_name(council.get("name", ""))
             if la_normalized in council_normalized or council_normalized in la_normalized:

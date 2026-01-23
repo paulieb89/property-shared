@@ -319,8 +319,12 @@ def dismiss_consent_popup(page: "Page") -> None:
         "button:has-text('I Accept')",
         "button:has-text('OK')",
         "button:has-text('Agree')",
+        "button:has-text('AGREE')",
         "#ccc-notify-accept",
         ".cookie-accept",
+        # Quantcast CMP (common on UK sites)
+        "button.css-47sehv",
+        "#qc-cmp2-ui button[mode='primary']",
     ]
 
     for selector in selectors:
@@ -336,6 +340,14 @@ def dismiss_consent_popup(page: "Page") -> None:
     # Nuclear option: remove overlays via JS
     try:
         page.evaluate("""
+            // Remove Quantcast CMP specifically
+            const qcContainer = document.getElementById('qc-cmp2-container');
+            if (qcContainer) qcContainer.remove();
+
+            // Remove Agile Applications cookie overlay (Islington etc.)
+            document.querySelectorAll('.sas-cookie-consent-overlay, .sas-cookie-consent').forEach(el => el.remove());
+
+            // Remove generic consent/cookie overlays
             document.querySelectorAll('[class*="consent"], [class*="cookie"], [id*="consent"], [id*="cookie"]').forEach(el => {
                 if (getComputedStyle(el).position === 'fixed' || getComputedStyle(el).position === 'sticky') {
                     el.remove();
@@ -345,6 +357,179 @@ def dismiss_consent_popup(page: "Page") -> None:
         """)
     except Exception:
         pass
+
+
+def dismiss_blocking_elements(page: "Page") -> None:
+    """Dismiss all common blocking elements on council sites.
+
+    Handles:
+    - Cookie consent popups
+    - Survey/feedback modals
+    - Announcement banners
+    - Chat widgets
+    - Loading overlays
+    - Newsletter popups
+    """
+    # First handle consent popups
+    dismiss_consent_popup(page)
+
+    # Survey/feedback popup buttons to click
+    survey_dismiss_selectors = [
+        "button:has-text('No thanks')",
+        "button:has-text('No, thanks')",
+        "button:has-text('Not now')",
+        "button:has-text('Maybe later')",
+        "button:has-text('Close')",
+        "button:has-text('Dismiss')",
+        "button:has-text('Skip')",
+        "[aria-label='Close']",
+        "[aria-label='Dismiss']",
+        ".modal-close",
+        ".popup-close",
+        ".survey-close",
+        ".feedback-close",
+    ]
+
+    for selector in survey_dismiss_selectors:
+        try:
+            btn = page.locator(selector).first
+            if btn.count() > 0 and btn.is_visible():
+                btn.click(timeout=1000)
+                page.wait_for_timeout(300)
+        except Exception:
+            pass
+
+    # Nuclear option: Remove blocking elements via JavaScript
+    try:
+        page.evaluate("""
+            // Remove survey/feedback widgets
+            const surveySelectors = [
+                '[class*="survey"]',
+                '[class*="feedback"]',
+                '[class*="hotjar"]',
+                '[class*="qualtrics"]',
+                '[id*="survey"]',
+                '[id*="feedback"]',
+                '[id*="hotjar"]',
+            ];
+            surveySelectors.forEach(selector => {
+                document.querySelectorAll(selector).forEach(el => el.remove());
+            });
+
+            // Remove chat widgets
+            const chatSelectors = [
+                '[class*="zendesk"]',
+                '[class*="intercom"]',
+                '[class*="livechat"]',
+                '[class*="chat-widget"]',
+                '[id*="zendesk"]',
+                '[id*="intercom"]',
+                '[id*="livechat"]',
+                'iframe[title*="chat"]',
+                'iframe[title*="Chat"]',
+            ];
+            chatSelectors.forEach(selector => {
+                document.querySelectorAll(selector).forEach(el => el.remove());
+            });
+
+            // Remove announcement/alert banners (fixed position)
+            const bannerSelectors = [
+                '[class*="announcement"]',
+                '[class*="alert-banner"]',
+                '[class*="notice-banner"]',
+                '[class*="site-banner"]',
+                '[role="alert"]',
+            ];
+            bannerSelectors.forEach(selector => {
+                document.querySelectorAll(selector).forEach(el => {
+                    const style = getComputedStyle(el);
+                    if (style.position === 'fixed' || style.position === 'sticky') {
+                        el.remove();
+                    }
+                });
+            });
+
+            // Remove loading overlays that might be stuck
+            const loadingSelectors = [
+                '[class*="loading-overlay"]',
+                '[class*="spinner-overlay"]',
+                '[class*="page-loading"]',
+                '.overlay:not([class*="content"])',
+            ];
+            loadingSelectors.forEach(selector => {
+                document.querySelectorAll(selector).forEach(el => {
+                    const style = getComputedStyle(el);
+                    if (style.position === 'fixed' && style.zIndex > 100) {
+                        el.remove();
+                    }
+                });
+            });
+
+            // Remove modal backdrops
+            document.querySelectorAll('.modal-backdrop, .overlay-backdrop').forEach(el => el.remove());
+
+            // Ensure body is scrollable
+            document.body.style.overflow = 'auto';
+            document.documentElement.style.overflow = 'auto';
+
+            // Remove any blur effects on main content
+            const main = document.querySelector('main, #main, .main-content, #content');
+            if (main) {
+                main.style.filter = 'none';
+                main.style.pointerEvents = 'auto';
+            }
+        """)
+    except Exception:
+        pass
+
+
+def detect_hard_blockers(page: "Page") -> Optional[str]:
+    """Detect blocking elements we cannot automatically bypass.
+
+    Returns:
+        String describing the blocker type, or None if no hard blocker detected.
+    """
+    try:
+        html = page.content().lower()
+
+        # reCAPTCHA - cannot be bypassed automatically
+        if "recaptcha" in html or "g-recaptcha" in html:
+            return "reCAPTCHA"
+
+        # hCaptcha
+        if "hcaptcha" in html or "h-captcha" in html:
+            return "hCaptcha"
+
+        # Cloudflare challenge
+        if "cloudflare" in html and ("challenge" in html or "ray id" in html):
+            return "Cloudflare challenge"
+
+        # Generic CAPTCHA
+        if "captcha" in html and ("verify" in html or "human" in html):
+            return "CAPTCHA verification"
+
+        # Bot detection messages
+        bot_indicators = [
+            "detected unusual traffic",
+            "please verify you are human",
+            "access denied",
+            "you have been blocked",
+            "automated access",
+            "bot detection",
+        ]
+        for indicator in bot_indicators:
+            if indicator in html:
+                return f"Bot detection: {indicator}"
+
+        # Check for challenge iframes
+        captcha_iframe = page.locator("iframe[src*='recaptcha'], iframe[src*='hcaptcha'], iframe[title*='challenge']")
+        if captcha_iframe.count() > 0:
+            return "CAPTCHA iframe detected"
+
+    except Exception:
+        pass
+
+    return None
 
 
 def detect_council_system(url: str, page: "Page") -> str:
@@ -535,8 +720,13 @@ def scrape_planning_application(
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(3000)  # Give dynamic content time to load
 
-        # Dismiss cookie popups
-        dismiss_consent_popup(page)
+        # Dismiss blocking elements (cookies, surveys, chat widgets, etc.)
+        dismiss_blocking_elements(page)
+
+        # Check for hard blockers we can't bypass
+        hard_blocker = detect_hard_blockers(page)
+        if hard_blocker:
+            print(f"WARNING: Hard blocker detected: {hard_blocker}")
 
         # Detect council system
         system = detect_council_system(url, page)
@@ -605,6 +795,7 @@ def search_planning_by_postcode(
     postcode: str,
     max_results: int = 20,
     output_dir: Optional[Path] = None,
+    system: Optional[str] = None,
 ) -> list[dict]:
     """
     Search a planning portal by postcode using vision-guided form filling.
@@ -618,6 +809,7 @@ def search_planning_by_postcode(
         postcode: UK postcode to search for
         max_results: Maximum applications to extract
         output_dir: Where to save results
+        system: Optional system type hint (idox, lar, agile, northgate, etc.)
 
     Returns:
         list of application summaries with links
@@ -635,7 +827,7 @@ def search_planning_by_postcode(
         print(f"Loading planning portal: {portal_url}")
         page.goto(portal_url, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(2000)
-        dismiss_consent_popup(page)
+        dismiss_blocking_elements(page)
 
         # Take initial screenshot to understand the page
         initial_screenshot = [{
@@ -653,16 +845,27 @@ def search_planning_by_postcode(
         if form_analysis.get("has_search_form") and not form_analysis.get("has_results"):
             print(f"Filling search form with postcode: {postcode}")
 
-            # Try common Idox selectors first
+            # Priority order: try postcode-specific fields before generic fallback
+            # This handles LAR, Northgate, Agile and custom multi-field forms
             search_filled = False
-            idox_selectors = [
+            postcode_field_selectors = [
+                # Explicit postcode fields (LAR systems like Liverpool/Hackney, Northgate)
+                "input[name*='postcode' i]",
+                "input[id*='postcode' i]",
+                "input[id*='Postcode']",
+                "input[placeholder*='Postcode']",
+                # Search-specific inputs (Agile platform like Islington)
+                "input[name='searchInput']",
+                "input[type='search']",
+                # Idox-specific selectors
                 "input[name='searchCriteria']",
                 "input#simpleSearchString",
                 "input.search-input",
+                # Generic fallback (last resort - first text input)
                 "input[type='text']",
             ]
 
-            for selector in idox_selectors:
+            for selector in postcode_field_selectors:
                 try:
                     field = page.locator(selector).first
                     if field.count() > 0 and field.is_visible():
@@ -673,27 +876,23 @@ def search_planning_by_postcode(
                 except Exception:
                     continue
 
-            if not search_filled:
-                # Fallback: try to find any visible text input
-                try:
-                    inputs = page.locator("input[type='text']:visible")
-                    if inputs.count() > 0:
-                        inputs.first.fill(postcode)
-                        search_filled = True
-                        print("  Filled first visible text input")
-                except Exception as e:
-                    print(f"  Could not fill form: {e}")
-
             # Click search button
             if search_filled:
+                # Dismiss any late-loading overlays (SPAs like Agile load consent after initial render)
+                dismiss_blocking_elements(page)
                 button_clicked = False
                 button_selectors = [
                     "button:has-text('Search')",
+                    "button:has-text('Quick search')",
+                    "button[type='search']",
                     "input[type='submit'][value*='Search']",
+                    "input[value='Search']",
                     "input[type='submit']",
                     "button[type='submit']",
                     ".button:has-text('Search')",
                     "a:has-text('Search')",
+                    "button:has-text('Find')",
+                    "button:has-text('Go')",
                 ]
 
                 for selector in button_selectors:
@@ -843,7 +1042,7 @@ def scrape_planning_search(
         page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(2000)
 
-        dismiss_consent_popup(page)
+        dismiss_blocking_elements(page)
         all_images.extend(scroll_and_screenshot(page, "search", max_scrolls=5))
 
         browser.close()
