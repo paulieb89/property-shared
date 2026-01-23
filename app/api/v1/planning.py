@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, HttpUrl
 
 from app.services.planning_service import PlanningService
@@ -153,3 +153,96 @@ def get_council(code: str) -> dict[str, Any]:
     if not council:
         raise HTTPException(status_code=404, detail=f"Council '{code}' not found")
     return council
+
+
+class SearchResultsRequest(BaseModel):
+    """Request to search for planning applications."""
+    postcode: str
+    portal_url: Optional[str] = None
+    system: Optional[str] = None
+    max_results: int = 10
+
+
+class PlanningApplication(BaseModel):
+    """Single planning application result."""
+    reference: Optional[str] = None
+    address: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    link: Optional[str] = None
+
+
+class SearchResultsResponse(BaseModel):
+    """Response with planning search results."""
+    postcode: str
+    council_name: Optional[str] = None
+    system: Optional[str] = None
+    portal_url: str
+    results: list[PlanningApplication]
+    count: int
+
+
+@router.post("/search-results", response_model=SearchResultsResponse)
+def search_results(request: SearchResultsRequest) -> SearchResultsResponse:
+    """
+    Search for planning applications by postcode.
+
+    Uses vision-guided browser automation to fill council search forms
+    and extract results. Takes 30-60 seconds.
+
+    Requires: Playwright, OpenAI API key, UK residential IP (or proxy).
+    """
+    try:
+        from property_core.planning_scraper import search_planning_by_postcode
+    except ImportError as e:
+        raise HTTPException(
+            status_code=501,
+            detail=f"Planning search not available: {e}. Install playwright and openai.",
+        ) from e
+
+    # Resolve portal_url from postcode if not provided
+    portal_url = request.portal_url
+    system = request.system
+    council_name = None
+
+    if not portal_url:
+        search_data = service.search(request.postcode)
+        if not search_data.get("council_found"):
+            raise HTTPException(
+                status_code=404,
+                detail=f"No council found for postcode '{request.postcode}'",
+            )
+        council = search_data["council"]
+        council_name = council.get("name")
+        system = system or council.get("system")
+        urls = search_data.get("search_urls", {})
+        portal_url = urls.get("direct_search") or urls.get("search_page")
+        # For Idox, use simple search form (not weeklyList)
+        if system == "idox" and portal_url:
+            if "weeklyList" in portal_url or "action=simple" not in portal_url:
+                base = portal_url.split("/search.do")[0] if "/search.do" in portal_url else portal_url.rstrip("/")
+                portal_url = f"{base}/search.do?action=simple"
+        if not portal_url:
+            raise HTTPException(
+                status_code=404,
+                detail="No search URL available for this council",
+            )
+
+    try:
+        results = search_planning_by_postcode(
+            portal_url=portal_url,
+            postcode=request.postcode,
+            max_results=request.max_results,
+            system=system,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Search failed: {e}") from e
+
+    return SearchResultsResponse(
+        postcode=request.postcode,
+        council_name=council_name,
+        system=system,
+        portal_url=portal_url,
+        results=[PlanningApplication(**app) for app in results],
+        count=len(results),
+    )

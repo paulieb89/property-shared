@@ -1,6 +1,6 @@
 # Property Shared API (scaffold)
 
-FastAPI service + pure-Python core library for shared property capabilities (PPD, EPC, Rightmove, Location scoring). Currently scaffolded with a health route and minimal settings/logging (no DB/Redis assumptions in this repo).
+FastAPI service + pure-Python core library for shared property capabilities (PPD, EPC, Rightmove, Planning). Currently scaffolded with a health route and minimal settings/logging (no DB/Redis assumptions in this repo).
 
 ## How to run
 ### Dev (uv)
@@ -15,6 +15,7 @@ FastAPI service + pure-Python core library for shared property capabilities (PPD
    - Rightmove: `curl 'http://localhost:8000/v1/rightmove/search-url?postcode=SW1A%201AA&radius=0.25'`
      then `curl 'http://localhost:8000/v1/rightmove/listings?search_url=<pasted_url>&max_pages=1'`
    - PPD address search: `curl 'http://localhost:8000/v1/ppd/address-search?postcode_prefix=B1&street=Broad%20Street&limit=5'`
+   - Planning search: `curl 'http://localhost:8000/v1/planning/search?postcode=SW1A%201AA'`
 
 ### Live integration tests
 Live tests make real network calls and are gated:
@@ -36,6 +37,8 @@ Generate a typed client from the running service OpenAPI:
 - `app/api/v1/` – versioned routers (health now; domain routers to follow)
 - `app/services/` – reserved for API service wrappers (will call into `property_core/`)
 - `app/schemas/` – Pydantic models (EPC, more to come)
+- `property_core/planning_scraper.py` – Vision-guided planning portal scraper (Playwright + OpenAI)
+- `property_core/planning_councils.json` – Verified council database (98 councils, 6 system types)
 - `property_core/ppd_client.py` – vendored PPD helper from `pp_data`
 - `app/tasks/`, `app/clients/`, `app/utils/` – API wrapper helpers (`app/utils/polite.py` for in-memory politeness)
 - `example_ref/` – reference-only example code copied from other projects
@@ -44,7 +47,7 @@ Generate a typed client from the running service OpenAPI:
 ## Local setup
 1) Create venv: `python -m venv .venv && source .venv/bin/activate`
 2) Install deps (later): `pip install fastapi uvicorn pydantic pydantic-settings httpx requests tenacity beautifulsoup4`
-3) Copy `.env.example` to `.env` and fill values (EPC/OpenAI keys if used)
+3) Copy `.env.example` to `.env` and fill values (EPC keys, OPENAI_API_KEY for planning scraper)
 4) Run: `uvicorn app.main:app --reload`
 
 ## Notes
@@ -63,6 +66,13 @@ Generate a typed client from the running service OpenAPI:
 - `GET /v1/epc/search?postcode&address?&include_raw=bool` → `{ record, raw? }` (returns 501-style response if EPC creds not configured)
 - `GET /v1/rightmove/search-url?postcode&property_type=sale|rent&radius?&min/max price/bedrooms?` → `{ url }`
 - `GET /v1/rightmove/listings?search_url&max_pages?` → `{ count, results: [ { id, url, price, currency, bedrooms, bathrooms, address, summary, property_type, agent_name, agent_branch, first_visible_date, images } ] }`
+- `GET /v1/planning/search?postcode` → `{ postcode, local_authority, council_found, council, search_urls }`
+- `GET /v1/planning/councils` → `{ verified_count, untested_count, councils, systems }`
+- `GET /v1/planning/council-for-postcode?postcode` → `{ postcode, local_authority, council, council_found }`
+- `GET /v1/planning/council/{code}` → council details
+- `POST /v1/planning/search-results` body: `{ postcode, portal_url?, system?, max_results? }` → `{ postcode, council_name, system, portal_url, results: [{ reference, address, description, status, link }], count }`
+- `POST /v1/planning/scrape` body: `{ url, save_screenshots? }` → `{ url, council_system, screenshots_captured, data }`
+- `POST /v1/planning/probe` body: `{ url, timeout_ms? }` → `{ url, success, page_title, blocking_indicators, error }`
 
 ## Rightmove CLI snippets
 - Build a search URL: `uv run --extra cli property-cli rightmove search-url --postcode SW1A 1AA --property-type sale --radius 0.25`

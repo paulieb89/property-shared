@@ -93,6 +93,22 @@ property-cli planning probe "https://planningapps.sheffield.gov.uk/..." --timeou
 
 # Scrape a planning application (uses OpenAI Vision)
 property-cli planning scrape "https://planningapps.sheffield.gov.uk/..." --save-screenshots
+
+# Search for actual planning applications (vision-guided, requires UK residential IP)
+property-cli planning applications "S1 2HH" --max-results 5
+```
+
+#### API usage for search-results
+```bash
+# By postcode (resolves council automatically)
+curl -X POST http://localhost:8000/v1/planning/search-results \
+  -H "Content-Type: application/json" \
+  -d '{"postcode": "M1 1AA", "max_results": 5}'
+
+# With explicit portal URL (skip council resolution)
+curl -X POST http://localhost:8000/v1/planning/search-results \
+  -H "Content-Type: application/json" \
+  -d '{"postcode": "M1 1AA", "portal_url": "https://pa.manchester.gov.uk/online-applications/search.do?action=simple", "system": "idox", "max_results": 5}'
 ```
 
 ## API Endpoints
@@ -120,11 +136,12 @@ property-cli planning scrape "https://planningapps.sheffield.gov.uk/..." --save-
 
 ### Planning
 - `GET /v1/planning/search?postcode=S1%202HH` — Search by postcode (returns search URLs)
+- `POST /v1/planning/search-results` — Search for planning applications (vision-guided, 30-60s)
 - `GET /v1/planning/council-for-postcode?postcode=SW1A%202AA` — Look up council for postcode
 - `GET /v1/planning/councils` — List all councils
 - `GET /v1/planning/council/{code}` — Council details
 - `POST /v1/planning/probe` — Connectivity diagnostics
-- `POST /v1/planning/scrape` — Scrape planning application
+- `POST /v1/planning/scrape` — Scrape planning application detail page
 
 ## Live Tests
 
@@ -171,9 +188,19 @@ rentals = fetch_listings(url, max_pages=1)
 for r in rentals:
     print(f"£{r.price} {r.price_frequency} - {r.address} (available: {r.let_available_date})")
 
-# Planning (residential IP only)
-from property_core.planning_scraper import scrape_planning_application
+# Planning (residential IP only, requires playwright + openai)
+from property_core.planning_scraper import scrape_planning_application, search_planning_by_postcode
+
+# Scrape a single application detail page
 result = scrape_planning_application("https://council.gov.uk/planning/app/123")
+
+# Search for applications by postcode (vision-guided form filling)
+results = search_planning_by_postcode(
+    portal_url="https://pa.manchester.gov.uk/online-applications/search.do?action=simple",
+    postcode="M1 1AA",
+    max_results=10,
+    system="idox",
+)
 ```
 
 ### Service Layer (with guardrails)
@@ -190,7 +217,8 @@ print(result.subject_property)  # Transaction history for the specific address
 
 ## Notes
 
-- **Planning scraper** requires UK residential IP — councils block all datacenter IPs.
+- **Planning scraper** requires UK residential IP — councils block all datacenter IPs. Set `PLAYWRIGHT_PROXY_URL` for proxy support.
+- **Planning search-results** endpoint takes 30-60 seconds (browser automation + vision extraction).
 - **Rightmove scraping** is polite by default (0.6s delay); respect rate limits.
 - **UKHPI endpoints** are not implemented yet.
 - **Location slice** was removed; projects can supply their own location intelligence.

@@ -8,8 +8,15 @@ Property Shared is a FastAPI service + pure-Python core library for UK property 
 - **PPD** (Price Paid Data) - Land Registry transactions via SPARQL/Linked Data API
 - **EPC** - Energy Performance Certificates (requires API credentials)
 - **Rightmove** - Property listings via scraping with built-in politeness
+- **Planning** - UK council planning applications via vision-guided browser automation (98 verified councils)
 
 ## Commands
+
+# Start .venv
+
+``bash
+act 
+```
 
 ```bash
 # Install dependencies (with dev extras)
@@ -42,10 +49,12 @@ property_core/          # Pure Python library (no FastAPI, no DB assumptions)
 ├── ppd_client.py       # Land Registry SPARQL + Linked Data API
 ├── epc_client.py       # EPC registry (async, needs EPC_API_EMAIL/EPC_API_KEY)
 ├── rightmove_scraper.py # Listings scraper with rate limiting
-└── rightmove_location.py # Search URL builder (uses location autocomplete)
+├── rightmove_location.py # Search URL builder (uses location autocomplete)
+├── planning_scraper.py # Vision-guided planning portal scraper (Playwright + OpenAI)
+└── planning_councils.json # Verified council database (98 councils, 6 system types)
 
 app/                    # FastAPI service wrapping property_core
-├── api/v1/             # Versioned routers: health, ppd, epc, rightmove, meta
+├── api/v1/             # Versioned routers: health, ppd, epc, rightmove, planning, meta
 ├── services/           # Service layer with validation/limits on top of core
 ├── schemas/            # Pydantic request/response models
 ├── core/config.py      # Settings via pydantic-settings (reads .env)
@@ -68,6 +77,8 @@ property_cli/           # Typer CLI with dual mode (core direct vs API)
 Copy `.env.example` to `.env`. Key variables:
 - `EPC_API_EMAIL` / `EPC_API_KEY` - Required for EPC endpoints
 - `RIGHTMOVE_DELAY_SECONDS` - Rate limit delay (default 0.6s)
+- `OPENAI_API_KEY` - Required for planning scraper (vision extraction)
+- `PLAYWRIGHT_PROXY_URL` - Optional residential proxy for planning scraper (councils block datacenter IPs)
 
 ## Using as a Library
 
@@ -77,7 +88,11 @@ Install in another project: `pip install /path/to/property_shared` or add to dep
 # Core clients (no HTTP, no FastAPI)
 from property_core import PricePaidDataClient, EPCClient, RightmoveLocationAPI, fetch_listings
 
+# Planning scraper (requires playwright, openai)
+from property_core.planning_scraper import scrape_planning_application, search_planning_by_postcode
+
 # Service layer (includes validation/limits, Pydantic schemas)
 from app.services.epc_service import EPCService
 from app.services.rightmove_service import RightmoveService
+from app.services.planning_service import PlanningService
 ```
