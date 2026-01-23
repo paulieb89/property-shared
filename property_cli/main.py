@@ -757,6 +757,7 @@ def report_generate(
     no_sales: bool = typer.Option(False, "--no-sales", help="Skip current sales market"),
     months: int = typer.Option(24, "--months", help="PPD lookback period in months"),
     radius: float = typer.Option(0.5, "--radius", help="Search radius in miles for Rightmove"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
     """Generate a comprehensive property intelligence report.
 
@@ -767,27 +768,45 @@ def report_generate(
     """
     import asyncio
     import json
-    from app.services.report_service import PropertyReportService
 
     address_query = _join_tokens(address)
-    service = PropertyReportService()
+    http = _maybe_http_client(api_url)
 
     rprint(f"\n[bold]Generating property report for:[/bold] {address_query}")
     rprint("[dim]Fetching data from multiple sources...[/dim]\n")
 
-    try:
-        report_data = asyncio.run(
-            service.generate_report(
-                address_query,
-                include_rentals=not no_rentals,
-                include_sales_market=not no_sales,
-                ppd_months=months,
-                search_radius=radius,
+    if http:
+        from app.schemas.report import PropertyReport
+
+        try:
+            data = http.post("/v1/property/report", json={
+                "address": address_query,
+                "include_rentals": not no_rentals,
+                "include_sales_market": not no_sales,
+                "ppd_months": months,
+                "search_radius": radius,
+            })
+        except Exception as e:
+            rprint(f"[red]Error:[/red] {e}")
+            raise typer.Exit(code=1)
+        report_data = PropertyReport(**data)
+    else:
+        from app.services.report_service import PropertyReportService
+
+        service = PropertyReportService()
+        try:
+            report_data = asyncio.run(
+                service.generate_report(
+                    address_query,
+                    include_rentals=not no_rentals,
+                    include_sales_market=not no_sales,
+                    ppd_months=months,
+                    search_radius=radius,
+                )
             )
-        )
-    except ValueError as e:
-        rprint(f"[red]Error:[/red] {e}")
-        raise typer.Exit(code=1)
+        except ValueError as e:
+            rprint(f"[red]Error:[/red] {e}")
+            raise typer.Exit(code=1)
 
     # Display summary
     rprint(f"[bold green]Report Generated[/bold green] (ID: {report_data.report_id})")
