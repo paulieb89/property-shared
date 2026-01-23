@@ -54,7 +54,7 @@ property_core/          # Pure Python library (no FastAPI, no DB assumptions)
 └── planning_councils.json # Verified council database (98 councils, 6 system types)
 
 app/                    # FastAPI service wrapping property_core
-├── api/v1/             # Versioned routers: health, ppd, epc, rightmove, planning, meta
+├── api/v1/             # Versioned routers: health, ppd, epc, rightmove, planning, property, meta
 ├── services/           # Service layer with validation/limits on top of core
 ├── schemas/            # Pydantic request/response models
 ├── core/config.py      # Settings via pydantic-settings (reads .env)
@@ -95,4 +95,5 @@ from property_core.planning_scraper import scrape_planning_application, search_p
 from app.services.epc_service import EPCService
 from app.services.rightmove_service import RightmoveService
 from app.services.planning_service import PlanningService
+from app.services.report_service import PropertyReportService
 ```

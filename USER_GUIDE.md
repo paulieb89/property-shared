@@ -143,6 +143,11 @@ curl -X POST http://localhost:8000/v1/planning/search-results \
 - `POST /v1/planning/probe` — Connectivity diagnostics
 - `POST /v1/planning/scrape` — Scrape planning application detail page
 
+### Property Report
+- `POST /v1/property/report` — Generate comprehensive property report (PPD + EPC + Rightmove)
+  - Returns JSON by default, or HTML with `?format=html`
+  - Body: `{ "address": "10 Downing Street, SW1A 2AA", "ppd_months": 24, "search_radius": 0.5 }`
+
 ## Live Tests
 
 Live tests make real network calls and are gated:

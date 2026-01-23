@@ -73,6 +73,7 @@ Generate a typed client from the running service OpenAPI:
 - `POST /v1/planning/search-results` body: `{ postcode, portal_url?, system?, max_results? }` → `{ postcode, council_name, system, portal_url, results: [{ reference, address, description, status, link }], count }`
 - `POST /v1/planning/scrape` body: `{ url, save_screenshots? }` → `{ url, council_system, screenshots_captured, data }`
 - `POST /v1/planning/probe` body: `{ url, timeout_ms? }` → `{ url, success, page_title, blocking_indicators, error }`
+- `POST /v1/property/report` body: `{ address, include_rentals?, include_sales_market?, ppd_months?, search_radius? }` → `PropertyReport { report_id, key_insights, estimated_value_low/high, sale_history, market_analysis, energy_performance, rental_analysis, current_market, sources }` (supports `?format=html`)
 
 ## Rightmove CLI snippets
 - Build a search URL: `uv run --extra cli property-cli rightmove search-url --postcode SW1A 1AA --property-type sale --radius 0.25`
