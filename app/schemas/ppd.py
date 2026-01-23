@@ -22,6 +22,8 @@ class PPDTransaction(BaseModel):
     street: Optional[str] = None
     town: Optional[str] = None
     county: Optional[str] = None
+    locality: Optional[str] = None
+    district: Optional[str] = None
 
 
 class PPDSearchResponse(BaseModel):
@@ -31,6 +33,7 @@ class PPDSearchResponse(BaseModel):
     offset: int
     results: List[PPDTransaction] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+    raw: Optional[List[dict[str, Any]]] = None
 
 
 class PPDCompsQuery(BaseModel):

@@ -59,16 +59,16 @@ Generate a typed client from the running service OpenAPI:
 - `GET /v1/health` → `{ "status": "ok" }`
 - `GET /v1/meta/integrations` → `{ environment, integrations: { ppd|rightmove|epc: { available, configured } } }`
 - `GET /v1/ppd/download-url?kind=complete|monthly|year&year?&part?&fmt=csv|txt` → `{ url }`
-- `GET /v1/ppd/transactions?postcode|postcode_prefix&limit&filters...` (one of postcode/postcode_prefix) → `{ count, limit, offset, results: [ { transaction_id, price, date, postcode, property_type, estate_type, transaction_category, new_build, paon, saon, street, town, county } ], warnings }`
-- `GET /v1/ppd/address-search?paon?&saon?&street?&town?&county?&postcode?&postcode_prefix?&limit` (requires ≥2 fields, limit≤50) → same shape as `/transactions`
+- `GET /v1/ppd/transactions?postcode|postcode_prefix&limit&filters...&include_raw=bool` (one of postcode/postcode_prefix) → `{ count, limit, offset, results: [ { transaction_id, price, date, postcode, property_type, estate_type, transaction_category, new_build, paon, saon, street, town, county, locality, district } ], warnings, raw? }`
+- `GET /v1/ppd/address-search?paon?&saon?&street?&town?&county?&postcode?&postcode_prefix?&limit&include_raw=bool` (requires ≥2 fields, limit≤50) → same shape as `/transactions`
 - `GET /v1/ppd/comps?postcode&property_type?&months?&limit?&search_level=postcode|sector|district` → `{ query, count, median, mean, min, max, thin_market, transactions: [PPDTransaction] }`
 - `GET /v1/ppd/transaction/{id}?view=all|basic&include_raw=bool` → `{ record: { transaction_id, price_paid, transaction_date, property/transaction metadata... }, raw? }`
 - `GET /v1/epc/search?postcode&address?&include_raw=bool` → `{ record, raw? }` (returns 501-style response if EPC creds not configured)
 - `GET /v1/rightmove/search-url?postcode&property_type=sale|rent&radius?&min/max price/bedrooms?` → `{ url }`
-- `GET /v1/rightmove/listings?search_url&max_pages?` → `{ count, results: [ { id, url, price, currency, bedrooms, bathrooms, address, summary, property_type, agent_name, agent_branch, first_visible_date, images } ] }`
+- `GET /v1/rightmove/listings?search_url&max_pages?&include_raw=bool` → `{ count, results: [ { id, url, price, currency, bedrooms, bathrooms, address, summary, property_type, agent_name, agent_branch, first_visible_date, images, raw? } ] }`
 - `GET /v1/planning/search?postcode` → `{ postcode, local_authority, council_found, council, search_urls }`
 - `GET /v1/planning/councils` → `{ verified_count, untested_count, councils, systems }`
-- `GET /v1/planning/council-for-postcode?postcode` → `{ postcode, local_authority, council, council_found }`
+- `GET /v1/planning/council-for-postcode?postcode&include_raw=bool` → `{ postcode, local_authority, council, council_found, postcode_data? }`
 - `GET /v1/planning/council/{code}` → council details
 - `POST /v1/planning/search-results` body: `{ postcode, portal_url?, system?, max_results? }` → `{ postcode, council_name, system, portal_url, results: [{ reference, address, description, status, link }], count }`
 - `POST /v1/planning/scrape` body: `{ url, save_screenshots? }` → `{ url, council_system, screenshots_captured, data }`

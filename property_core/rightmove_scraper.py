@@ -57,6 +57,8 @@ class Listing:
     price_frequency: Optional[str] = None  # "monthly", "weekly"
     students: Optional[bool] = None
     transaction_type: Optional[str] = None  # "rent" or "buy"
+    # Raw __NEXT_DATA__ property dict (populated when include_raw=True)
+    raw: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -70,6 +72,7 @@ def fetch_listings(
     rate_limit_seconds: float = 0.6,
     retry_attempts: int = 3,
     retry_backoff: float = 1.5,
+    include_raw: bool = False,
 ) -> List[Listing]:
     """Fetch listings from a Rightmove search URL across pages."""
     listings: List[Listing] = []
@@ -91,7 +94,7 @@ def fetch_listings(
             retry_backoff=retry_backoff,
         )
         properties = search_results.get("properties") or []
-        listings.extend(_to_listing(prop) for prop in properties)
+        listings.extend(_to_listing(prop, include_raw=include_raw) for prop in properties)
 
         pagination = search_results.get("pagination") or {}
         next_index = pagination.get("next")
@@ -136,7 +139,7 @@ def _extract_search_results(soup: BeautifulSoup) -> Dict[str, Any]:
         raise RightmoveError("Search results were not present in the page payload") from exc
 
 
-def _to_listing(data: Dict[str, Any]) -> Listing:
+def _to_listing(data: Dict[str, Any], *, include_raw: bool = False) -> Listing:
     price_info = data.get("price") or {}
     property_url = data.get("propertyUrl") or ""
     customer = data.get("customer") or {}
@@ -159,6 +162,7 @@ def _to_listing(data: Dict[str, Any]) -> Listing:
         price_frequency=price_info.get("frequency"),
         students=data.get("students"),
         transaction_type=data.get("transactionType"),
+        raw=data if include_raw else None,
     )
 
 

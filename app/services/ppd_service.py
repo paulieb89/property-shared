@@ -66,6 +66,8 @@ def _parse_sparql_bindings(bindings: Iterable[Dict[str, Any]]) -> List[PPDTransa
             street=_binding_value(binding, "street"),
             town=_binding_value(binding, "town"),
             county=_binding_value(binding, "county"),
+            locality=_binding_value(binding, "locality"),
+            district=_binding_value(binding, "district"),
         )
         results.append(transaction)
     return results
@@ -205,6 +207,7 @@ class PPDService:
         limit: int,
         offset: int,
         order_desc: bool,
+        include_raw: bool = False,
     ) -> PPDSearchResponse:
         """Search PPD via SPARQL with guardrails on limit/offset."""
         warnings: List[str] = []
@@ -241,6 +244,7 @@ class PPDService:
             offset=offset,
             results=results,
             warnings=warnings,
+            raw=bindings if include_raw else None,
         )
 
     def address_search(
@@ -254,6 +258,7 @@ class PPDService:
         postcode: Optional[str],
         postcode_prefix: Optional[str],
         limit: int,
+        include_raw: bool = False,
     ) -> PPDSearchResponse:
         """Address-form search with strict limits."""
         warnings: List[str] = []
@@ -282,6 +287,7 @@ class PPDService:
             offset=0,
             results=results,
             warnings=warnings,
+            raw=bindings if include_raw else None,
         )
 
     def comps(

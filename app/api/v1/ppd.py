@@ -48,6 +48,7 @@ def transactions(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     order_desc: bool = True,
+    include_raw: bool = Query(False, description="Include raw SPARQL bindings"),
 ) -> PPDSearchResponse:
     """Search PPD transactions using postcode or postcode prefix (district/sector)."""
     if bool(postcode) == bool(postcode_prefix):
@@ -72,6 +73,7 @@ def transactions(
             limit=limit,
             offset=offset,
             order_desc=order_desc,
+            include_raw=include_raw,
         )
     except Exception as exc:  # noqa: BLE001 - surface as 502 for upstream failures
         raise HTTPException(status_code=502, detail=f"PPD search failed: {exc}") from exc
@@ -87,6 +89,7 @@ def address_search(
     postcode: Optional[str] = Query(None, min_length=2),
     postcode_prefix: Optional[str] = Query(None, min_length=2),
     limit: int = Query(25, ge=1, le=50),
+    include_raw: bool = Query(False, description="Include raw SPARQL bindings"),
 ) -> PPDSearchResponse:
     """Web-form style address search (requires at least two fields)."""
     provided = [v for v in (paon, saon, street, town, county, postcode, postcode_prefix) if v]
@@ -105,6 +108,7 @@ def address_search(
             postcode=postcode,
             postcode_prefix=postcode_prefix,
             limit=limit,
+            include_raw=include_raw,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

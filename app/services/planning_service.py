@@ -199,14 +199,19 @@ class PlanningService:
 
         return None
 
-    def council_for_postcode(self, postcode: str) -> Dict[str, Any]:
+    def council_for_postcode(
+        self, postcode: str, *, include_raw: bool = False
+    ) -> Dict[str, Any]:
         """Look up the planning council for a UK postcode.
 
         Returns:
             Dict with postcode info and matched council (or None if not in database).
+            When include_raw=True, includes full postcodes.io data under 'postcode_data'.
         """
         # Look up postcode
-        la_info = self.postcode_client.get_local_authority(postcode)
+        la_info = self.postcode_client.get_local_authority(
+            postcode, include_raw=include_raw
+        )
         if not la_info:
             return {
                 "postcode": postcode,
@@ -220,7 +225,7 @@ class PlanningService:
         # Try to match to our councils database
         council = self._match_council(local_authority_name)
 
-        return {
+        result: Dict[str, Any] = {
             "postcode": la_info.get("postcode", postcode),
             "local_authority": {
                 "name": local_authority_name,
@@ -231,6 +236,9 @@ class PlanningService:
             "council": council,
             "council_found": council is not None,
         }
+        if include_raw:
+            result["postcode_data"] = la_info.get("raw")
+        return result
 
     def get_council(self, code: str) -> Optional[Dict[str, Any]]:
         """Get a council by code."""

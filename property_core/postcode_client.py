@@ -39,17 +39,21 @@ class PostcodeClient:
             except httpx.HTTPError:
                 return None
 
-    def get_local_authority(self, postcode: str) -> Optional[Dict[str, Any]]:
+    def get_local_authority(
+        self, postcode: str, *, include_raw: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """Get local authority info for a postcode.
 
         Returns:
             Dict with name, code, region, etc. or None if not found.
+            When include_raw=True, includes the full postcodes.io response
+            under the 'raw' key.
         """
         result = self.lookup(postcode)
         if not result:
             return None
 
-        return {
+        data: Dict[str, Any] = {
             "name": result.get("admin_district"),
             "code": result.get("codes", {}).get("admin_district"),
             "county": result.get("admin_county"),
@@ -59,3 +63,6 @@ class PostcodeClient:
             "latitude": result.get("latitude"),
             "longitude": result.get("longitude"),
         }
+        if include_raw:
+            data["raw"] = result
+        return data

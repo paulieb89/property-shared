@@ -70,6 +70,7 @@ property_cli/           # Typer CLI with dual mode (core direct vs API)
 
 - **Dual-mode CLI**: Commands call `property_core` directly by default (fast, offline-capable). Add `--api-url` to route through the HTTP API instead.
 - **Service layer guardrails**: `app/services/` enforces limits (MAX_LIMIT=200, FORM_MAX_LIMIT=50) and normalizes responses before returning to API.
+- **`include_raw` pattern**: All endpoints normalize data by default. Pass `include_raw=true` to get the original source data alongside normalized fields. EPC, PPD (transactions/address-search), Rightmove (listings), and Planning (council-for-postcode) all support this.
 - **Live test gating**: Tests making real network calls check `RUN_LIVE_TESTS=1` and skip gracefully on 503 or missing credentials.
 
 ## Environment Variables

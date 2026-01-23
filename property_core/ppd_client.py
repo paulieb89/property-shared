@@ -213,7 +213,7 @@ class PricePaidDataClient:
                 "",
                 "SELECT ?transactionId ?pricePaid ?transactionDate ?postcode "
                 "?propertyType ?estateType ?transactionCategory ?newBuild "
-                "?paon ?saon ?street ?town ?county",
+                "?paon ?saon ?street ?town ?county ?locality ?district",
                 "WHERE {",
                 # VALUES clauses first (most efficient)
                 *values_clauses,
@@ -235,6 +235,8 @@ class PricePaidDataClient:
                 "  OPTIONAL { ?addr lrcommon:street ?street }",
                 "  OPTIONAL { ?addr lrcommon:town ?town }",
                 "  OPTIONAL { ?addr lrcommon:county ?county }",
+                "  OPTIONAL { ?addr lrcommon:locality ?locality }",
+                "  OPTIONAL { ?addr lrcommon:district ?district }",
                 "",
                 # Filters
                 *filters,
@@ -329,7 +331,7 @@ class PricePaidDataClient:
                 "",
                 "SELECT ?transactionId ?pricePaid ?transactionDate ?postcode "
                 "?propertyType ?estateType ?transactionCategory ?newBuild "
-                "?paon ?saon ?street ?town ?county",
+                "?paon ?saon ?street ?town ?county ?locality ?district",
                 "WHERE {",
                 *values_clauses,
                 "  ?transaction lrppi:pricePaid ?pricePaid .",
@@ -345,6 +347,8 @@ class PricePaidDataClient:
                 "  OPTIONAL { ?addr lrcommon:street ?street }",
                 "  OPTIONAL { ?addr lrcommon:town ?town }",
                 "  OPTIONAL { ?addr lrcommon:county ?county }",
+                "  OPTIONAL { ?addr lrcommon:locality ?locality }",
+                "  OPTIONAL { ?addr lrcommon:district ?district }",
                 *filters,
                 "  BIND(STRAFTER(STR(?transaction), \"transaction/\") AS ?transactionId)",
                 "}",

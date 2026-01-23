@@ -43,10 +43,13 @@ async def search_url(
 async def listings(
     search_url: str = Query(..., min_length=10),
     max_pages: Optional[int] = Query(None, ge=1, le=20),
+    include_raw: bool = Query(False, description="Include raw __NEXT_DATA__ property dict"),
 ) -> RightmoveListingsResponse:
     """Fetch listing results from a Rightmove search URL."""
     try:
-        results = await service.listings(search_url=search_url, max_pages=max_pages)
+        results = await service.listings(
+            search_url=search_url, max_pages=max_pages, include_raw=include_raw
+        )
         return RightmoveListingsResponse(count=len(results), results=results)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Rightmove listings failed: {exc}") from exc

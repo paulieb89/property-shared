@@ -127,6 +127,7 @@ def search_by_postcode(
 @router.get("/council-for-postcode")
 def council_for_postcode(
     postcode: str = Query(..., min_length=2, description="UK postcode"),
+    include_raw: bool = Query(False, description="Include full postcodes.io response"),
 ) -> dict[str, Any]:
     """Look up the planning council for a UK postcode.
 
@@ -135,7 +136,7 @@ def council_for_postcode(
     local authority info for reference.
     """
     try:
-        return service.council_for_postcode(postcode)
+        return service.council_for_postcode(postcode, include_raw=include_raw)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Postcode lookup failed: {e}") from e
 

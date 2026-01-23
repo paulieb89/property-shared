@@ -28,6 +28,8 @@ class RightmoveListing(BaseModel):
     price_frequency: Optional[str] = None  # "monthly", "weekly" for rentals
     students: Optional[bool] = None
     transaction_type: Optional[str] = None  # "rent" or "buy"
+    # Raw __NEXT_DATA__ property dict (populated when include_raw=True)
+    raw: Optional[dict[str, Any]] = None
 
 
 class RightmoveSearchURLResponse(BaseModel):
