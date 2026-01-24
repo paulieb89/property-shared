@@ -32,16 +32,24 @@ Generate a typed client from the running service OpenAPI:
 
 ## Structure
 - `property_core/` – pure-Python core library (no FastAPI, no DB/Redis assumptions)
-- `app/main.py` – app factory, lifespan setup
-- `app/core/` – config + logging for the API wrapper
-- `app/api/v1/` – versioned routers (health now; domain routers to follow)
-- `app/services/` – reserved for API service wrappers (will call into `property_core/`)
-- `app/schemas/` – Pydantic models (EPC, more to come)
-- `property_core/planning_scraper.py` – Vision-guided planning portal scraper (Playwright + OpenAI)
-- `property_core/planning_councils.json` – Verified council database (98 councils, 6 system types)
-- `property_core/ppd_client.py` – vendored PPD helper from `pp_data`
-- `app/tasks/`, `app/clients/`, `app/utils/` – API wrapper helpers (`app/utils/polite.py` for in-memory politeness)
-- `example_ref/` – reference-only example code copied from other projects
+  - `models/` – domain Pydantic models (PPDTransaction, EPCData, PropertyReport, etc.)
+  - `ppd_client.py` – transport: Land Registry SPARQL + Linked Data API
+  - `epc_client.py` – transport: EPC registry (async)
+  - `rightmove_scraper.py` – transport: listings scraper (sync)
+  - `rightmove_location.py` – transport: search URL builder
+  - `ppd_service.py` – domain service: SPARQL parsing → typed PPD models (sync)
+  - `planning_service.py` – domain service: council matching + URL building (sync)
+  - `report_service.py` – product pipeline: multi-source aggregation → PropertyReport (async)
+  - `enrichment.py` – EPC enrichment pipeline for PPD comps
+  - `planning_scraper.py` – vision-guided planning portal scraper (Playwright + OpenAI)
+  - `planning_councils.json` – verified council database (98 councils, 6 system types)
+- `app/` – FastAPI service wrapping property_core
+  - `api/v1/` – versioned routers (thin HTTP wrappers)
+  - `schemas/` – API envelope models (import domain models from core)
+  - `services/` – API-specific adapters (async threading, rate limiting)
+  - `core/config.py` – settings via pydantic-settings
+- `property_cli/` – Typer CLI with dual mode (core direct vs API)
+- `example_ref/` – reference-only example code
 - `USER_GUIDE.md` – quickstart and endpoint/CLI usage
 
 ## Local setup

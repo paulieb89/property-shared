@@ -104,7 +104,7 @@ def ppd_comps(
         _echo_json(data)
     else:
         # Use service layer for full functionality including subject_property
-        from app.services.ppd_service import PPDService
+        from property_core.ppd_service import PPDService
         service = PPDService()
         result = service.comps(
             postcode=postcode_value,
@@ -119,7 +119,7 @@ def ppd_comps(
             from property_core.enrichment import enrich_comps_with_epc
             comp_dicts = [t.model_dump() for t in result.transactions]
             enriched = asyncio.run(enrich_comps_with_epc(comp_dicts))
-            from app.schemas.ppd import PPDTransaction
+            from property_core.models.ppd import PPDTransaction
             result.transactions = [PPDTransaction(**d) for d in enriched]
         _echo_json(result.model_dump())
 
@@ -636,7 +636,7 @@ def planning_search(
     if http:
         data = http.get("/v1/planning/search", params={"postcode": postcode_value})
     else:
-        from app.services.planning_service import PlanningService
+        from property_core.planning_service import PlanningService
         service = PlanningService()
         data = service.search(postcode_value)
 
@@ -686,7 +686,7 @@ def planning_applications(
         property-cli planning applications "SW1A 1AA" --max 10 -o results.json
     """
     from pathlib import Path
-    from app.services.planning_service import PlanningService
+    from property_core.planning_service import PlanningService
     from property_core.planning_scraper import search_planning_by_postcode
 
     postcode_value = _join_tokens(postcode)
@@ -775,7 +775,7 @@ def planning_council_for_postcode(
     if http:
         data = http.get("/v1/planning/council-for-postcode", params={"postcode": postcode_value})
     else:
-        from app.services.planning_service import PlanningService
+        from property_core.planning_service import PlanningService
         service = PlanningService()
         data = service.council_for_postcode(postcode_value)
 
@@ -839,7 +839,7 @@ def report_generate(
     rprint("[dim]Fetching data from multiple sources...[/dim]\n")
 
     if http:
-        from app.schemas.report import PropertyReport
+        from property_core.models.report import PropertyReport
 
         try:
             data = http.post("/v1/property/report", json={
@@ -854,7 +854,7 @@ def report_generate(
             raise typer.Exit(code=1)
         report_data = PropertyReport(**data)
     else:
-        from app.services.report_service import PropertyReportService
+        from property_core.report_service import PropertyReportService
 
         service = PropertyReportService()
         try:

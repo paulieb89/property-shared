@@ -1,28 +1,25 @@
-"""Service wrapper for Land Registry PPD helpers.
+"""PPD domain service: parsing + orchestration over the transport client.
 
-This layer keeps API concerns (limits/validation) separate from the core client.
+This is the domain layer that converts raw SPARQL/Linked Data dicts from
+PricePaidDataClient into typed Pydantic models. Sync throughout.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional
 
+from property_core.models.ppd import (
+    PPDCompsQuery,
+    PPDCompsResponse,
+    PPDTransaction,
+    PPDTransactionRecord,
+    SubjectProperty,
+)
 from property_core.ppd_client import (
     ESTATE_TYPE_URIS,
     PROPERTY_TYPE_URIS,
     TRANSACTION_CATEGORY_URIS,
     PricePaidDataClient,
-)
-
-from app.schemas.ppd import (
-    PPDCompsQuery,
-    PPDCompsResponse,
-    PPDDownloadURLResponse,
-    PPDSearchResponse,
-    PPDTransaction,
-    PPDTransactionRecord,
-    PPDTransactionRecordResponse,
-    SubjectProperty,
 )
 
 DEFAULT_LIMIT = 50
@@ -165,7 +162,11 @@ def _normalize_transaction_record(raw: Dict[str, Any]) -> PPDTransactionRecord:
 
 
 class PPDService:
-    """High-level PPD operations used by the API layer."""
+    """Domain service for PPD operations.
+
+    Converts raw dicts from PricePaidDataClient into typed models.
+    All methods are synchronous.
+    """
     def __init__(self, client: Optional[PricePaidDataClient] = None):
         self.client = client or PricePaidDataClient()
 
@@ -176,40 +177,42 @@ class PPDService:
         year: Optional[int],
         part: Optional[int],
         fmt: str,
-    ) -> PPDDownloadURLResponse:
-        """Resolve download URLs for bulk PPD datasets."""
+    ) -> str:
+        """Resolve download URL for bulk PPD datasets. Returns the URL string."""
         if kind == "complete":
-            url = self.client.complete_url(fmt=fmt)
+            return self.client.complete_url(fmt=fmt)
         elif kind == "monthly":
-            url = self.client.monthly_change_url(fmt=fmt)
+            return self.client.monthly_change_url(fmt=fmt)
         elif kind == "year":
             if year is None:
                 raise ValueError("year is required when kind=year")
-            url = self.client.year_url(year, part=part, fmt=fmt)
+            return self.client.year_url(year, part=part, fmt=fmt)
         else:
             raise ValueError("kind must be one of: complete, monthly, year")
-        return PPDDownloadURLResponse(url=url)
 
     def search_transactions(
         self,
         *,
         postcode: Optional[str],
         postcode_prefix: Optional[str],
-        from_date: Optional[str],
-        to_date: Optional[str],
-        min_price: Optional[int],
-        max_price: Optional[int],
-        property_type: Optional[str],
-        estate_type: Optional[str],
-        transaction_category: Optional[str],
-        record_status: Optional[str],
-        new_build: Optional[bool],
-        limit: int,
-        offset: int,
-        order_desc: bool,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        min_price: Optional[int] = None,
+        max_price: Optional[int] = None,
+        property_type: Optional[str] = None,
+        estate_type: Optional[str] = None,
+        transaction_category: Optional[str] = None,
+        record_status: Optional[str] = None,
+        new_build: Optional[bool] = None,
+        limit: int = DEFAULT_LIMIT,
+        offset: int = 0,
+        order_desc: bool = True,
         include_raw: bool = False,
-    ) -> PPDSearchResponse:
-        """Search PPD via SPARQL with guardrails on limit/offset."""
+    ) -> Dict[str, Any]:
+        """Search PPD via SPARQL with guardrails on limit/offset.
+
+        Returns a dict with keys: count, limit, offset, results, warnings, raw.
+        """
         warnings: List[str] = []
 
         if limit <= 0:
@@ -238,29 +241,32 @@ class PPDService:
         bindings = raw.get("results", {}).get("bindings", [])
         results = _parse_sparql_bindings(bindings)
 
-        return PPDSearchResponse(
-            count=len(results),
-            limit=limit,
-            offset=offset,
-            results=results,
-            warnings=warnings,
-            raw=bindings if include_raw else None,
-        )
+        return {
+            "count": len(results),
+            "limit": limit,
+            "offset": offset,
+            "results": results,
+            "warnings": warnings,
+            "raw": bindings if include_raw else None,
+        }
 
     def address_search(
         self,
         *,
-        paon: Optional[str],
-        saon: Optional[str],
-        street: Optional[str],
-        town: Optional[str],
-        county: Optional[str],
-        postcode: Optional[str],
-        postcode_prefix: Optional[str],
-        limit: int,
+        paon: Optional[str] = None,
+        saon: Optional[str] = None,
+        street: Optional[str] = None,
+        town: Optional[str] = None,
+        county: Optional[str] = None,
+        postcode: Optional[str] = None,
+        postcode_prefix: Optional[str] = None,
+        limit: int = 25,
         include_raw: bool = False,
-    ) -> PPDSearchResponse:
-        """Address-form search with strict limits."""
+    ) -> Dict[str, Any]:
+        """Address-form search with strict limits.
+
+        Returns a dict with keys: count, limit, offset, results, warnings, raw.
+        """
         warnings: List[str] = []
         if limit <= 0:
             limit = 25
@@ -281,28 +287,28 @@ class PPDService:
 
         bindings = raw.get("results", {}).get("bindings", [])
         results = _parse_sparql_bindings(bindings)
-        return PPDSearchResponse(
-            count=len(results),
-            limit=limit,
-            offset=0,
-            results=results,
-            warnings=warnings,
-            raw=bindings if include_raw else None,
-        )
+        return {
+            "count": len(results),
+            "limit": limit,
+            "offset": 0,
+            "results": results,
+            "warnings": warnings,
+            "raw": bindings if include_raw else None,
+        }
 
     def comps(
         self,
         *,
         postcode: str,
-        property_type: Optional[str],
-        months: int,
-        limit: int,
-        search_level: str,
+        property_type: Optional[str] = None,
+        months: int = 24,
+        limit: int = DEFAULT_LIMIT,
+        search_level: str = "sector",
         address: Optional[str] = None,
     ) -> PPDCompsResponse:
         """Return comparable sales and summary stats for a postcode.
 
-        If address is provided, also returns subject_property with transaction history.
+        If address is provided, also returns subject_property with its transaction history.
         """
         if limit <= 0:
             limit = DEFAULT_LIMIT
@@ -351,8 +357,6 @@ class PPDService:
         self, postcode: str, address: str
     ) -> Optional[SubjectProperty]:
         """Search for a specific property by postcode and address."""
-        # Parse address to extract building number/name
-        # Common formats: "10 Downing Street", "Rose Cottage", "Flat 2, 10 High Street"
         address_clean = address.strip()
 
         # Try to extract PAON (building number/name) from start of address
@@ -429,8 +433,11 @@ class PPDService:
         transaction_id: str,
         view: str = "all",
         include_raw: bool = False,
-    ) -> PPDTransactionRecordResponse:
-        """Fetch a single transaction record and normalize the result."""
+    ) -> Dict[str, Any]:
+        """Fetch a single transaction record and normalize the result.
+
+        Returns dict with keys: record (PPDTransactionRecord), raw (optional).
+        """
         raw = self.client.get_transaction_record(transaction_id, view=view)
         record = _normalize_transaction_record(raw)
-        return PPDTransactionRecordResponse(record=record, raw=raw if include_raw else None)
+        return {"record": record, "raw": raw if include_raw else None}

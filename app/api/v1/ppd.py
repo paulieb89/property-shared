@@ -1,4 +1,4 @@
-"""PPD API endpoints (Phase 1): search, comps, and transaction record lookup."""
+"""PPD API endpoints: search, comps, and transaction record lookup."""
 
 from __future__ import annotations
 
@@ -10,10 +10,11 @@ from app.schemas.ppd import (
     PPDCompsResponse,
     PPDDownloadURLResponse,
     PPDSearchResponse,
+    PPDTransaction,
     PPDTransactionRecordResponse,
 )
-from app.services.ppd_service import PPDService
 from property_core.enrichment import enrich_comps_with_epc
+from property_core.ppd_service import PPDService
 
 router = APIRouter(prefix="/ppd", tags=["ppd"])
 service = PPDService()
@@ -28,7 +29,8 @@ def download_url(
 ) -> PPDDownloadURLResponse:
     """Return a direct Land Registry download URL for bulk datasets."""
     try:
-        return service.download_url(kind=kind, year=year, part=part, fmt=fmt)
+        url = service.download_url(kind=kind, year=year, part=part, fmt=fmt)
+        return PPDDownloadURLResponse(url=url)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -59,7 +61,7 @@ def transactions(
         )
 
     try:
-        return service.search_transactions(
+        result = service.search_transactions(
             postcode=postcode,
             postcode_prefix=postcode_prefix,
             from_date=from_date,
@@ -76,7 +78,8 @@ def transactions(
             order_desc=order_desc,
             include_raw=include_raw,
         )
-    except Exception as exc:  # noqa: BLE001 - surface as 502 for upstream failures
+        return PPDSearchResponse(**result)
+    except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"PPD search failed: {exc}") from exc
 
 
@@ -100,7 +103,7 @@ def address_search(
         )
 
     try:
-        return service.address_search(
+        result = service.address_search(
             paon=paon,
             saon=saon,
             street=street,
@@ -111,6 +114,7 @@ def address_search(
             limit=limit,
             include_raw=include_raw,
         )
+        return PPDSearchResponse(**result)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
@@ -147,7 +151,6 @@ async def comps(
     if enrich_epc:
         comp_dicts = [t.model_dump() for t in result.transactions]
         enriched = await enrich_comps_with_epc(comp_dicts)
-        from app.schemas.ppd import PPDTransaction
         result.transactions = [PPDTransaction(**d) for d in enriched]
 
     return result
@@ -161,11 +164,12 @@ def transaction_record(
 ) -> PPDTransactionRecordResponse:
     """Fetch and normalize a single transaction record from the Linked Data API."""
     try:
-        return service.transaction_record(
+        result = service.transaction_record(
             transaction_id=transaction_id,
             view=view,
             include_raw=include_raw,
         )
+        return PPDTransactionRecordResponse(**result)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=502,

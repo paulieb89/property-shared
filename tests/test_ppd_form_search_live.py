@@ -3,7 +3,7 @@ import urllib.error
 
 import pytest
 
-from app.services.ppd_service import PPDService
+from property_core.ppd_service import PPDService
 
 
 @pytest.mark.skipif(os.getenv("RUN_LIVE_TESTS") != "1", reason="Set RUN_LIVE_TESTS=1 to run live tests")
@@ -26,6 +26,6 @@ def test_ppd_form_search_live() -> None:
         # Upstream SPARQL endpoint can return 503 under load; skip instead of failing CI.
         pytest.skip(f"PPD endpoint unavailable: {exc}")
 
-    assert res.count > 0
-    assert res.count <= limit
-    assert all(tx.postcode and tx.postcode.startswith("B1") for tx in res.results if tx.postcode)
+    assert res["count"] > 0
+    assert res["count"] <= limit
+    assert all(tx.postcode and tx.postcode.startswith("B1") for tx in res["results"] if tx.postcode)

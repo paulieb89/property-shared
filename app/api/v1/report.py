@@ -8,8 +8,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from app.schemas.report import PropertyReport
-from app.services.report_service import PropertyReportService
+from property_core.models.report import PropertyReport
+from property_core.report_service import PropertyReportService
 
 router = APIRouter(prefix="/property", tags=["property"])
 

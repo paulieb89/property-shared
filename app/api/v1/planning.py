@@ -7,7 +7,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, HttpUrl
 
-from app.services.planning_service import PlanningService
+from property_core.planning_service import PlanningService
 
 router = APIRouter(prefix="/planning", tags=["planning"])
 service = PlanningService()

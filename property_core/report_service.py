@@ -1,14 +1,20 @@
-"""Property Report Service - aggregates all data sources into a comprehensive report."""
+"""Property Report Service - aggregates multiple data sources into a comprehensive report.
+
+Async service. Wraps sync calls (PPDService, Rightmove) in asyncio.to_thread().
+Uses core clients directly (no FastAPI dependencies).
+"""
 
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.schemas.report import (
+from property_core.epc_client import EPCClient
+from property_core.models.report import (
     CurrentMarket,
     DataSource,
     EnergyPerformance,
@@ -18,9 +24,9 @@ from app.schemas.report import (
     SaleHistory,
     SaleRecord,
 )
-from app.services.epc_service import EPCService
-from app.services.ppd_service import PPDService
-from app.services.rightmove_service import RightmoveService
+from property_core.ppd_service import PPDService
+from property_core.rightmove_location import RightmoveLocationAPI
+from property_core.rightmove_scraper import fetch_listings
 
 
 # UK postcode regex
@@ -53,17 +59,30 @@ def _get_postcode_sector(postcode: str) -> str:
 
 
 class PropertyReportService:
-    """Generates comprehensive property reports by aggregating multiple data sources."""
+    """Generates comprehensive property reports by aggregating multiple data sources.
+
+    Async service. Constructor takes optional config with env-var fallbacks.
+    """
 
     def __init__(
         self,
         ppd_service: Optional[PPDService] = None,
-        epc_service: Optional[EPCService] = None,
-        rightmove_service: Optional[RightmoveService] = None,
+        epc_client: Optional[EPCClient] = None,
+        rightmove_location: Optional[RightmoveLocationAPI] = None,
+        *,
+        epc_email: Optional[str] = None,
+        epc_api_key: Optional[str] = None,
+        rightmove_delay: float = 0.6,
     ):
         self.ppd = ppd_service or PPDService()
-        self.epc = epc_service or EPCService()
-        self.rightmove = rightmove_service or RightmoveService()
+        self.epc = epc_client or EPCClient(
+            email=epc_email or os.environ.get("EPC_API_EMAIL"),
+            api_key=epc_api_key or os.environ.get("EPC_API_KEY"),
+        )
+        self.rightmove = rightmove_location or RightmoveLocationAPI(
+            rate_limit_delay=rightmove_delay,
+        )
+        self._rightmove_delay = rightmove_delay
 
     async def generate_report(
         self,
@@ -99,7 +118,6 @@ class PropertyReportService:
         key_insights: List[str] = []
 
         # Fetch data in parallel where possible
-        # EPC is async, PPD is sync - run PPD in thread
         ppd_task = asyncio.create_task(
             self._fetch_ppd_data(postcode, street_address, ppd_months)
         )
@@ -124,7 +142,7 @@ class PropertyReportService:
             ))
             if sale_history and sale_history.last_sale:
                 key_insights.append(
-                    f"Last sold for £{sale_history.last_sale.price:,} on {sale_history.last_sale.date}"
+                    f"Last sold for \u00a3{sale_history.last_sale.price:,} on {sale_history.last_sale.date}"
                 )
         else:
             sources.append(DataSource(
@@ -212,12 +230,11 @@ class PropertyReportService:
         estimated_value_low = None
         estimated_value_high = None
         if market_analysis and market_analysis.median_price:
-            # Simple estimate: median +/- 15%
             estimated_value_low = int(market_analysis.median_price * 0.85)
             estimated_value_high = int(market_analysis.median_price * 1.15)
             key_insights.append(
-                f"Area median: £{market_analysis.median_price:,} "
-                f"(range £{market_analysis.min_price:,} - £{market_analysis.max_price:,})"
+                f"Area median: \u00a3{market_analysis.median_price:,} "
+                f"(range \u00a3{market_analysis.min_price:,} - \u00a3{market_analysis.max_price:,})"
             )
 
         return PropertyReport(
@@ -324,7 +341,7 @@ class PropertyReportService:
             }
 
         try:
-            result = await self.epc.search(postcode=postcode, address=address)
+            result = await self.epc.search_by_postcode(postcode, address=address)
             if not result:
                 return {
                     "success": False,
@@ -332,35 +349,34 @@ class PropertyReportService:
                     "error": "No EPC found",
                 }
 
-            rec = result.record
+            record_dict, _raw = result
             total_cost = None
-            if rec.heating_cost_current or rec.hot_water_cost_current or rec.lighting_cost_current:
-                total_cost = (
-                    (rec.heating_cost_current or 0)
-                    + (rec.hot_water_cost_current or 0)
-                    + (rec.lighting_cost_current or 0)
-                )
+            heating = record_dict.get("heating_cost_current")
+            hot_water = record_dict.get("hot_water_cost_current")
+            lighting = record_dict.get("lighting_cost_current")
+            if heating or hot_water or lighting:
+                total_cost = (heating or 0) + (hot_water or 0) + (lighting or 0)
 
             potential_savings = None
-            if rec.heating_cost_current and rec.heating_cost_potential:
-                potential_savings = rec.heating_cost_current - rec.heating_cost_potential
+            if heating and record_dict.get("heating_cost_potential"):
+                potential_savings = heating - record_dict["heating_cost_potential"]
 
             energy = EnergyPerformance(
-                rating=rec.rating,
-                score=rec.score,
-                potential_rating=rec.potential_rating,
-                potential_score=rec.potential_score,
-                floor_area_sqm=rec.floor_area,
-                property_type=rec.property_type,
-                construction_age=rec.construction_age,
-                heating_cost=rec.heating_cost_current,
-                hot_water_cost=rec.hot_water_cost_current,
-                lighting_cost=rec.lighting_cost_current,
+                rating=record_dict.get("rating", "?"),
+                score=record_dict.get("score", 0),
+                potential_rating=record_dict.get("potential_rating"),
+                potential_score=record_dict.get("potential_score"),
+                floor_area_sqm=record_dict.get("floor_area"),
+                property_type=record_dict.get("property_type"),
+                construction_age=record_dict.get("construction_age"),
+                heating_cost=heating,
+                hot_water_cost=hot_water,
+                lighting_cost=lighting,
                 total_annual_cost=total_cost,
-                potential_heating_cost=rec.heating_cost_potential,
+                potential_heating_cost=record_dict.get("heating_cost_potential"),
                 potential_savings=potential_savings,
-                inspection_date=rec.inspection_date,
-                certificate_hash=rec.certificate_hash,
+                inspection_date=record_dict.get("inspection_date"),
+                certificate_hash=record_dict.get("certificate_hash"),
             )
 
             return {"success": True, "energy_performance": energy}
@@ -370,14 +386,20 @@ class PropertyReportService:
     async def _fetch_rental_data(
         self, postcode: str, radius: float
     ) -> Dict[str, Any]:
-        """Fetch rental market data from Rightmove."""
+        """Fetch rental market data from Rightmove (sync, wrapped in thread)."""
         try:
-            url = await self.rightmove.build_search_url(
-                postcode=postcode,
+            url = await asyncio.to_thread(
+                self.rightmove.build_search_url,
+                postcode,
                 property_type="rent",
                 radius=radius,
             )
-            listings = await self.rightmove.listings(search_url=url, max_pages=1)
+            listings = await asyncio.to_thread(
+                fetch_listings,
+                url,
+                max_pages=1,
+                rate_limit_seconds=self._rightmove_delay,
+            )
 
             if not listings:
                 return {
@@ -425,14 +447,20 @@ class PropertyReportService:
     async def _fetch_sales_market(
         self, postcode: str, radius: float
     ) -> Dict[str, Any]:
-        """Fetch current sales market from Rightmove."""
+        """Fetch current sales market from Rightmove (sync, wrapped in thread)."""
         try:
-            url = await self.rightmove.build_search_url(
-                postcode=postcode,
+            url = await asyncio.to_thread(
+                self.rightmove.build_search_url,
+                postcode,
                 property_type="sale",
                 radius=radius,
             )
-            listings = await self.rightmove.listings(search_url=url, max_pages=1)
+            listings = await asyncio.to_thread(
+                fetch_listings,
+                url,
+                max_pages=1,
+                rate_limit_seconds=self._rightmove_delay,
+            )
 
             if not listings:
                 return {
@@ -487,7 +515,6 @@ class PropertyReportService:
             gross_yield = (annual_rent / purchase_price) * 100
             rental.gross_yield_pct = round(gross_yield, 2)
 
-            # Assess yield
             if gross_yield >= 6:
                 rental.yield_assessment = "strong"
             elif gross_yield >= 4:

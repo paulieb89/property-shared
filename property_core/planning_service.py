@@ -1,4 +1,7 @@
-"""Service wrapper for planning-related operations."""
+"""Planning domain service: council matching + URL building.
+
+Sync throughout. No FastAPI dependencies.
+"""
 
 from __future__ import annotations
 
@@ -98,9 +101,7 @@ def _build_search_url(council: Dict[str, Any], postcode: str) -> Dict[str, Any]:
 
 def _normalize_name(name: str) -> str:
     """Normalize council name for matching."""
-    # Lowercase, remove common suffixes, normalize whitespace
     name = name.lower().strip()
-    # Remove common suffixes
     suffixes = [
         "city council",
         "borough council",
@@ -114,7 +115,6 @@ def _normalize_name(name: str) -> str:
     ]
     for suffix in suffixes:
         name = name.replace(suffix, "")
-    # Normalize whitespace and punctuation
     name = re.sub(r"[^\w\s]", "", name)
     name = re.sub(r"\s+", " ", name).strip()
     return name
@@ -123,12 +123,14 @@ def _normalize_name(name: str) -> str:
 def _name_to_code(name: str) -> str:
     """Convert council name to likely code format."""
     normalized = _normalize_name(name)
-    # Replace spaces with hyphens
     return normalized.replace(" ", "-")
 
 
 class PlanningService:
-    """High-level planning operations used by the API layer."""
+    """Domain service for planning operations.
+
+    Council matching + URL building. All methods are synchronous.
+    """
 
     def __init__(
         self,
@@ -137,7 +139,7 @@ class PlanningService:
     ):
         self.postcode_client = postcode_client or PostcodeClient()
         self.councils_path = councils_path or (
-            Path(__file__).parent.parent.parent / "property_core" / "planning_councils.json"
+            Path(__file__).parent / "planning_councils.json"
         )
         self._councils_cache: Optional[Dict[str, Any]] = None
 
@@ -160,14 +162,7 @@ class PlanningService:
         return data.get("councils", []) + data.get("untested", [])
 
     def _match_council(self, local_authority_name: str) -> Optional[Dict[str, Any]]:
-        """Try to match a local authority name to our councils database.
-
-        Matching priority:
-        1. Exact match on postcodes_io_name field (most reliable)
-        2. Exact match on council code
-        3. Normalized name match
-        4. Partial name match (fallback)
-        """
+        """Try to match a local authority name to our councils database."""
         if not local_authority_name:
             return None
 
@@ -202,13 +197,7 @@ class PlanningService:
     def council_for_postcode(
         self, postcode: str, *, include_raw: bool = False
     ) -> Dict[str, Any]:
-        """Look up the planning council for a UK postcode.
-
-        Returns:
-            Dict with postcode info and matched council (or None if not in database).
-            When include_raw=True, includes full postcodes.io data under 'postcode_data'.
-        """
-        # Look up postcode
+        """Look up the planning council for a UK postcode."""
         la_info = self.postcode_client.get_local_authority(
             postcode, include_raw=include_raw
         )
@@ -221,8 +210,6 @@ class PlanningService:
             }
 
         local_authority_name = la_info.get("name")
-
-        # Try to match to our councils database
         council = self._match_council(local_authority_name)
 
         result: Dict[str, Any] = {
@@ -261,12 +248,8 @@ class PlanningService:
     def search(self, postcode: str) -> Dict[str, Any]:
         """Search for planning applications by postcode.
 
-        Returns the council info and search URLs. For Idox councils (most common),
-        a direct search URL is provided. For other systems, instructions are given.
-
-        Note: Actual scraping of search results requires residential IP.
+        Returns the council info and search URLs.
         """
-        # First, look up the council for this postcode
         council_result = self.council_for_postcode(postcode)
 
         if not council_result.get("council"):
