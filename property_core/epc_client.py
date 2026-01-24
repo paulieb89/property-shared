@@ -170,6 +170,59 @@ class EPCClient:
             except (httpx.HTTPError, KeyError, ValueError):
                 return None
 
+    async def search_all_by_postcode(
+        self, postcode: str
+    ) -> list[Dict[str, Any]]:
+        """Return all parsed EPC certificates for a postcode.
+
+        Useful for batch-matching multiple addresses against a single postcode's
+        certificates (e.g. enriching PPD comparables with floor area).
+
+        Returns:
+            List of normalized certificate dicts (may be empty).
+        """
+        if not self.is_configured():
+            return []
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            try:
+                resp = await client.get(
+                    f"{self.BASE_URL}/domestic/search",
+                    params={"postcode": postcode.replace(" ", "")},
+                    headers={"Accept": "application/json", **self._auth_header()},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                rows = data.get("rows", [])
+                return [self._parse_certificate(row) for row in rows]
+            except (httpx.HTTPError, KeyError, ValueError):
+                return []
+
+    def match_address(
+        self, certificates: list[Dict[str, Any]], address: str, min_score: int = 30
+    ) -> Optional[Dict[str, Any]]:
+        """Find the best-matching certificate for an address from a pre-fetched list.
+
+        Args:
+            certificates: List of normalized certs (from search_all_by_postcode).
+            address: Address to match against.
+            min_score: Minimum match score (0-100) to accept.
+
+        Returns:
+            Best-matching certificate dict, or None if no match meets threshold.
+        """
+        best_cert = None
+        best_score = -1
+        for cert in certificates:
+            cert_addr = cert.get("address", "")
+            score = _match_score(cert_addr, address)
+            if score > best_score:
+                best_score = score
+                best_cert = cert
+        if best_cert and best_score >= min_score:
+            return best_cert
+        return None
+
     async def search_by_postcode(
         self, postcode: str, address: str | None = None
     ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
