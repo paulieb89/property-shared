@@ -66,9 +66,15 @@ property-cli rightmove search-url "SW1A 1AA" --property-type rent --radius 0.25
 
 # Fetch listings from a search URL
 property-cli rightmove listings "<search_url>" --max-pages 1
+
+# Fetch full details for a single listing (tenure, service charge, ground rent, etc.)
+property-cli rightmove listing 161151632
+property-cli rightmove listing "https://www.rightmove.co.uk/properties/161151632" --include-raw
 ```
 
 **Rental listings** include additional fields: `let_available_date`, `price_frequency` (monthly/weekly), `students`, `transaction_type`.
+
+**Listing detail** (individual property page) includes: `tenure_type`, `years_remaining_on_lease`, `annual_service_charge`, `annual_ground_rent`, `ground_rent_review_period_years`, `council_tax_band`, `latitude`/`longitude`, `floorplans`, `key_features`, `description`.
 
 ### Planning (UK Council Portals)
 
@@ -154,8 +160,10 @@ Results include `locality` and `district` fields from the Land Registry address 
 - `GET /v1/rightmove/search-url?postcode=SW1A%201AA&property_type=sale&radius=0.25` — Sales
 - `GET /v1/rightmove/search-url?postcode=SW1A%201AA&property_type=rent&radius=0.25` — Rentals
 - `GET /v1/rightmove/listings?search_url=<url>&max_pages=1&include_raw=true`
+- `GET /v1/rightmove/listing/{property_id}?include_raw=false` — Full listing detail (tenure, costs, floorplans)
 
-With `include_raw=true`, each listing includes the full `__NEXT_DATA__` property object (latitude/longitude, tenure, floorplan availability, key features, etc.).
+With `include_raw=true` on listings, each result includes the full `__NEXT_DATA__` property object.
+With `include_raw=true` on listing detail, the response includes the full `PAGE_MODEL.propertyData` dict.
 
 ### Planning
 - `GET /v1/planning/search?postcode=S1%202HH` — Search by postcode (returns search URLs)
@@ -193,6 +201,7 @@ pip install -e /path/to/property_shared
 ### Core Imports (no HTTP)
 ```python
 from property_core import PricePaidDataClient, EPCClient, RightmoveLocationAPI, fetch_listings, PostcodeClient
+from property_core.rightmove_scraper import fetch_listing
 
 # PPD
 client = PricePaidDataClient()
@@ -220,6 +229,13 @@ url = api.build_search_url("SW1A 1AA", property_type="rent", radius=0.25)
 rentals = fetch_listings(url, max_pages=1)
 for r in rentals:
     print(f"£{r.price} {r.price_frequency} - {r.address} (available: {r.let_available_date})")
+
+# Rightmove - Individual listing detail (tenure, service charge, ground rent)
+detail = fetch_listing("161151632")  # or full URL
+print(f"Tenure: {detail.tenure_type}, {detail.years_remaining_on_lease} years remaining")
+print(f"Service charge: £{detail.annual_service_charge}/yr")
+print(f"Ground rent: £{detail.annual_ground_rent}/yr")
+print(f"Size: {detail.display_size}, Council tax: {detail.council_tax_band}")
 
 # Postcode lookup (full postcodes.io data)
 from property_core.postcode_client import PostcodeClient

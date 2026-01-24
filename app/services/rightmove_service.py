@@ -13,10 +13,10 @@ from typing import Optional
 import anyio
 
 from app.core.config import get_settings
-from app.schemas.rightmove import RightmoveListing
+from app.schemas.rightmove import RightmoveListing, RightmoveListingDetail
 from app.utils.polite import PoliteLimiter
 from property_core.rightmove_location import RightmoveLocationAPI
-from property_core.rightmove_scraper import fetch_listings
+from property_core.rightmove_scraper import fetch_listing, fetch_listings
 
 
 class RightmoveService:
@@ -78,3 +78,18 @@ class RightmoveService:
             )
             results = await anyio.to_thread.run_sync(fn)
         return [RightmoveListing.model_validate(item.to_dict()) for item in results]
+
+    async def listing_detail(
+        self,
+        *,
+        property_url_or_id: str,
+        include_raw: bool = False,
+    ) -> RightmoveListingDetail:
+        async with self.limiter:
+            fn = partial(
+                fetch_listing,
+                property_url_or_id,
+                include_raw=include_raw,
+            )
+            result = await anyio.to_thread.run_sync(fn)
+        return RightmoveListingDetail.model_validate(result.to_dict())

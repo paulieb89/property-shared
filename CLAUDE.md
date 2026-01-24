@@ -88,6 +88,7 @@ Install in another project: `pip install /path/to/property_shared` or add to dep
 ```python
 # Core clients (no HTTP, no FastAPI)
 from property_core import PricePaidDataClient, EPCClient, RightmoveLocationAPI, fetch_listings, PostcodeClient
+from property_core.rightmove_scraper import fetch_listing  # individual listing detail
 
 # Planning scraper (requires playwright, openai)
 from property_core.planning_scraper import scrape_planning_application, search_planning_by_postcode

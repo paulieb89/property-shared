@@ -6,7 +6,11 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.schemas.rightmove import RightmoveListingsResponse, RightmoveSearchURLResponse
+from app.schemas.rightmove import (
+    RightmoveListingDetailResponse,
+    RightmoveListingsResponse,
+    RightmoveSearchURLResponse,
+)
 from app.services.rightmove_service import RightmoveService
 
 router = APIRouter(prefix="/rightmove", tags=["rightmove"])
@@ -53,4 +57,19 @@ async def listings(
         return RightmoveListingsResponse(count=len(results), results=results)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Rightmove listings failed: {exc}") from exc
+
+
+@router.get("/listing/{property_id}", response_model=RightmoveListingDetailResponse)
+async def listing_detail(
+    property_id: str,
+    include_raw: bool = Query(False, description="Include raw PAGE_MODEL propertyData dict"),
+) -> RightmoveListingDetailResponse:
+    """Fetch full details for an individual Rightmove property listing."""
+    try:
+        result = await service.listing_detail(
+            property_url_or_id=property_id, include_raw=include_raw
+        )
+        return RightmoveListingDetailResponse(result=result)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Rightmove listing detail failed: {exc}") from exc
 

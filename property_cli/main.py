@@ -22,7 +22,7 @@ from rich.table import Table
 from property_core.epc_client import EPCClient
 from property_core.ppd_client import PricePaidDataClient
 from property_core.rightmove_location import RightmoveLocationAPI
-from property_core.rightmove_scraper import fetch_listings
+from property_core.rightmove_scraper import fetch_listing, fetch_listings
 
 try:
     import httpx
@@ -420,6 +420,58 @@ def rightmove_listings(
     rprint(table)
     if len(listings) > 20:
         typer.echo(f"...and {len(listings) - 20} more")
+
+
+@rightmove.command("listing")
+def rightmove_listing(
+    url_or_id: str = typer.Argument(..., help="Rightmove property URL or numeric ID"),
+    include_raw: bool = typer.Option(False, "--include-raw", help="Include raw PAGE_MODEL data"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """Fetch full details for an individual Rightmove listing."""
+    http = _maybe_http_client(api_url)
+    if http:
+        # Extract property ID from URL if needed
+        prop_id = url_or_id.strip().rstrip("/").split("/")[-1] if "/" in url_or_id else url_or_id
+        data = http.get(
+            f"/v1/rightmove/listing/{prop_id}",
+            params={"include_raw": include_raw},
+        )
+        detail = data.get("result", {})
+    else:
+        result = fetch_listing(url_or_id, include_raw=include_raw)
+        detail = result.to_dict()
+
+    # Display structured output
+    table = Table(title=f"Listing: {detail.get('address', url_or_id)}")
+    table.add_column("Field", style="bold")
+    table.add_column("Value")
+
+    table.add_row("Price", f"£{detail.get('price', ''):,}" if detail.get("price") else "—")
+    table.add_row("Bedrooms", str(detail.get("bedrooms") or "—"))
+    table.add_row("Bathrooms", str(detail.get("bathrooms") or "—"))
+    table.add_row("Property Type", detail.get("property_sub_type") or detail.get("property_type") or "—")
+    table.add_row("Display Size", detail.get("display_size") or "—")
+    table.add_row("Tenure", detail.get("tenure_type") or "—")
+    table.add_row("Lease Remaining", f"{detail['years_remaining_on_lease']} years" if detail.get("years_remaining_on_lease") else "—")
+    table.add_row("Service Charge", f"£{detail['annual_service_charge']:,}/yr" if detail.get("annual_service_charge") else "—")
+    table.add_row("Ground Rent", f"£{detail['annual_ground_rent']:,}/yr" if detail.get("annual_ground_rent") else "—")
+    table.add_row("Council Tax Band", detail.get("council_tax_band") or "—")
+    table.add_row("Agent", detail.get("agent_name") or detail.get("agent_branch") or "—")
+    table.add_row("Lat/Lon", f"{detail.get('latitude')}, {detail.get('longitude')}" if detail.get("latitude") else "—")
+    table.add_row("Floorplans", str(len(detail.get("floorplans") or [])))
+    table.add_row("Images", str(len(detail.get("images") or [])))
+
+    rprint(table)
+
+    if detail.get("key_features"):
+        rprint("\n[bold]Key Features:[/bold]")
+        for feat in detail["key_features"]:
+            rprint(f"  • {feat}")
+
+    if include_raw and detail.get("raw"):
+        rprint("\n[bold]Raw data:[/bold]")
+        rprint(json.dumps(detail["raw"], indent=2, default=str)[:5000])
 
 
 planning = typer.Typer(help="Planning portal commands")

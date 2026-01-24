@@ -66,6 +66,7 @@ Generate a typed client from the running service OpenAPI:
 - `GET /v1/epc/search?postcode&address?&include_raw=bool` → `{ record, raw? }` (returns 501-style response if EPC creds not configured)
 - `GET /v1/rightmove/search-url?postcode&property_type=sale|rent&radius?&min/max price/bedrooms?` → `{ url }`
 - `GET /v1/rightmove/listings?search_url&max_pages?&include_raw=bool` → `{ count, results: [ { id, url, price, currency, bedrooms, bathrooms, address, summary, property_type, agent_name, agent_branch, first_visible_date, images, raw? } ] }`
+- `GET /v1/rightmove/listing/{property_id}?include_raw=bool` → `{ result: { id, url, price, bedrooms, bathrooms, address, description, property_type, tenure_type, years_remaining_on_lease, annual_service_charge, annual_ground_rent, ground_rent_review_period_years, council_tax_band, latitude, longitude, floorplans, key_features, display_size, ... } }`
 - `GET /v1/planning/search?postcode` → `{ postcode, local_authority, council_found, council, search_urls }`
 - `GET /v1/planning/councils` → `{ verified_count, untested_count, councils, systems }`
 - `GET /v1/planning/council-for-postcode?postcode&include_raw=bool` → `{ postcode, local_authority, council, council_found, postcode_data? }`
@@ -78,6 +79,7 @@ Generate a typed client from the running service OpenAPI:
 ## Rightmove CLI snippets
 - Build a search URL: `uv run --extra cli property-cli rightmove search-url --postcode SW1A 1AA --property-type sale --radius 0.25`
 - Fetch listings from a search URL: `uv run --extra cli property-cli rightmove listings --search-url "<rightmove_url>" --max-pages 1`
+- Fetch individual listing detail: `uv run --extra cli property-cli rightmove listing 161151632`
 
 ## Other CLI commands (core mode; add `--api-url` to hit the API)
 - Meta integrations: `uv run --extra cli property-cli meta`
