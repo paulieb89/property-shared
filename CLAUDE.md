@@ -72,7 +72,7 @@ property_cli/           # Typer CLI with dual mode (core direct vs API)
 - **Dual-mode CLI**: Commands call `property_core` directly by default (fast, offline-capable). Add `--api-url` to route through the HTTP API instead.
 - **Service layer guardrails**: `app/services/` enforces limits (MAX_LIMIT=200, FORM_MAX_LIMIT=50) and normalizes responses before returning to API.
 - **`include_raw` pattern**: All endpoints normalize data by default. Pass `include_raw=true` to get the original source data alongside normalized fields. EPC, PPD (transactions/address-search), Rightmove (listings), and Planning (council-for-postcode) all support this.
-- **EPC enrichment**: PPD comps can be enriched with EPC floor area via `enrich_epc=true` on the comps endpoint (or `--enrich-epc` in CLI). Groups comps by postcode, fetches all EPC certs per postcode (one API call each), fuzzy-matches addresses, and attaches `epc_floor_area_sqm`, `price_per_sqft`, `epc_rating`, etc.
+- **EPC enrichment**: PPD comps can be enriched with EPC floor area via `enrich_epc=true` on the comps endpoint (or `--enrich-epc` in CLI). Groups comps by postcode, fetches all EPC certs per postcode (one API call each), fuzzy-matches addresses, and attaches derived fields (`epc_floor_area_sqm`, `price_per_sqft`, `epc_rating`, etc.) plus the full matched cert (`epc_match`) and confidence score (`epc_match_score`). The enrichment module manages its own EPCClient internally — callers don't need to instantiate one.
 - **Live test gating**: Tests making real network calls check `RUN_LIVE_TESTS=1` and skip gracefully on 503 or missing credentials.
 
 ## Environment Variables

@@ -116,14 +116,11 @@ def ppd_comps(
         )
         if enrich_epc:
             import asyncio
-            from property_core.epc_client import EPCClient
             from property_core.enrichment import enrich_comps_with_epc
-            epc = EPCClient()
-            if epc.is_configured():
-                comp_dicts = [t.model_dump() for t in result.transactions]
-                enriched = asyncio.run(enrich_comps_with_epc(comp_dicts, epc))
-                from app.schemas.ppd import PPDTransaction
-                result.transactions = [PPDTransaction(**d) for d in enriched]
+            comp_dicts = [t.model_dump() for t in result.transactions]
+            enriched = asyncio.run(enrich_comps_with_epc(comp_dicts))
+            from app.schemas.ppd import PPDTransaction
+            result.transactions = [PPDTransaction(**d) for d in enriched]
         _echo_json(result.model_dump())
 
 

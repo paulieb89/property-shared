@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -13,12 +13,10 @@ from app.schemas.ppd import (
     PPDTransactionRecordResponse,
 )
 from app.services.ppd_service import PPDService
-from property_core.epc_client import EPCClient
 from property_core.enrichment import enrich_comps_with_epc
 
 router = APIRouter(prefix="/ppd", tags=["ppd"])
 service = PPDService()
-_epc_client = EPCClient()
 
 
 @router.get("/download-url", response_model=PPDDownloadURLResponse)
@@ -146,9 +144,9 @@ async def comps(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"PPD comps failed: {exc}") from exc
 
-    if enrich_epc and _epc_client.is_configured():
+    if enrich_epc:
         comp_dicts = [t.model_dump() for t in result.transactions]
-        enriched = await enrich_comps_with_epc(comp_dicts, _epc_client)
+        enriched = await enrich_comps_with_epc(comp_dicts)
         from app.schemas.ppd import PPDTransaction
         result.transactions = [PPDTransaction(**d) for d in enriched]
 

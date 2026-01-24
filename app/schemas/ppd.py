@@ -25,6 +25,8 @@ class PPDTransaction(BaseModel):
     locality: Optional[str] = None
     district: Optional[str] = None
     # EPC enrichment fields (populated when enrich_epc=True on comps endpoint)
+    epc_match: Optional[dict[str, Any]] = None
+    epc_match_score: Optional[int] = None
     epc_floor_area_sqm: Optional[float] = None
     epc_floor_area_sqft: Optional[int] = None
     price_per_sqm: Optional[int] = None

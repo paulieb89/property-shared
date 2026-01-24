@@ -33,7 +33,7 @@ def _build_address(comp: Dict[str, Any]) -> str:
 
 async def enrich_comps_with_epc(
     comps: List[Dict[str, Any]],
-    epc_client: EPCClient,
+    epc_client: Optional[EPCClient] = None,
     *,
     min_score: int = 30,
     max_concurrent: int = 5,
@@ -42,24 +42,23 @@ async def enrich_comps_with_epc(
 
     Groups comps by postcode, fetches all EPC certs per unique postcode
     (one API call each), then fuzzy-matches each comp's address to attach:
-      - epc_floor_area_sqm
-      - epc_floor_area_sqft
-      - price_per_sqm
-      - price_per_sqft
-      - epc_rating
-      - epc_score
-      - epc_construction_age
-      - epc_built_form
+      - epc_floor_area_sqm / epc_floor_area_sqft
+      - price_per_sqm / price_per_sqft
+      - epc_rating / epc_score / epc_construction_age / epc_built_form
+      - epc_match (full normalized cert dict)
+      - epc_match_score (fuzzy confidence 0-100)
 
     Args:
         comps: List of PPD transaction dicts (must have postcode, paon, street, price).
-        epc_client: Configured EPCClient instance.
+        epc_client: Configured EPCClient instance. If None, creates one internally.
         min_score: Minimum fuzzy-match score to accept an EPC match.
         max_concurrent: Max concurrent EPC API calls (rate limiting).
 
     Returns:
         Same list of dicts with EPC fields added (None if no match found).
     """
+    if epc_client is None:
+        epc_client = EPCClient()
     if not epc_client.is_configured():
         return comps
 
@@ -95,11 +94,14 @@ async def enrich_comps_with_epc(
             if not address:
                 continue
 
-            match = epc_client.match_address(certs, address, min_score=min_score)
-            if match:
+            result = epc_client.match_address(certs, address, min_score=min_score)
+            if result:
+                match, match_score = result
                 floor_sqm = match.get("floor_area")
                 price = comp.get("price")
 
+                comp["epc_match"] = match
+                comp["epc_match_score"] = match_score
                 comp["epc_floor_area_sqm"] = floor_sqm
                 comp["epc_floor_area_sqft"] = (
                     round(floor_sqm * _SQM_TO_SQFT) if floor_sqm else None

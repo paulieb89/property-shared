@@ -200,7 +200,7 @@ class EPCClient:
 
     def match_address(
         self, certificates: list[Dict[str, Any]], address: str, min_score: int = 30
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[tuple[Dict[str, Any], int]]:
         """Find the best-matching certificate for an address from a pre-fetched list.
 
         Args:
@@ -209,7 +209,7 @@ class EPCClient:
             min_score: Minimum match score (0-100) to accept.
 
         Returns:
-            Best-matching certificate dict, or None if no match meets threshold.
+            Tuple of (certificate_dict, match_score) or None if no match meets threshold.
         """
         best_cert = None
         best_score = -1
@@ -220,7 +220,7 @@ class EPCClient:
                 best_score = score
                 best_cert = cert
         if best_cert and best_score >= min_score:
-            return best_cert
+            return (best_cert, best_score)
         return None
 
     async def search_by_postcode(
