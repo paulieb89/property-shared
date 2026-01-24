@@ -77,11 +77,13 @@ def ppd_comps(
     limit: int = typer.Option(50, help="Max transactions"),
     search_level: str = typer.Option("sector", help="postcode|sector|district"),
     address: Optional[str] = typer.Option(None, help="Subject property address for context"),
+    enrich_epc: bool = typer.Option(False, "--enrich-epc", help="Attach EPC floor area and price/sqft"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
     """Get comparable sales summary for a postcode.
 
     If --address is provided, also returns subject property transaction history.
+    If --enrich-epc is set, attaches EPC floor area and price-per-sqft to each comp.
     """
     postcode_value = _join_tokens(postcode)
     http = _maybe_http_client(api_url)
@@ -96,6 +98,8 @@ def ppd_comps(
             params["property_type"] = property_type
         if address:
             params["address"] = address
+        if enrich_epc:
+            params["enrich_epc"] = True
         data = http.get("/v1/ppd/comps", params=params)
         _echo_json(data)
     else:
@@ -110,6 +114,16 @@ def ppd_comps(
             search_level=search_level,
             address=address,
         )
+        if enrich_epc:
+            import asyncio
+            from property_core.epc_client import EPCClient
+            from property_core.enrichment import enrich_comps_with_epc
+            epc = EPCClient()
+            if epc.is_configured():
+                comp_dicts = [t.model_dump() for t in result.transactions]
+                enriched = asyncio.run(enrich_comps_with_epc(comp_dicts, epc))
+                from app.schemas.ppd import PPDTransaction
+                result.transactions = [PPDTransaction(**d) for d in enriched]
         _echo_json(result.model_dump())
 
 

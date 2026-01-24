@@ -61,7 +61,7 @@ Generate a typed client from the running service OpenAPI:
 - `GET /v1/ppd/download-url?kind=complete|monthly|year&year?&part?&fmt=csv|txt` → `{ url }`
 - `GET /v1/ppd/transactions?postcode|postcode_prefix&limit&filters...&include_raw=bool` (one of postcode/postcode_prefix) → `{ count, limit, offset, results: [ { transaction_id, price, date, postcode, property_type, estate_type, transaction_category, new_build, paon, saon, street, town, county, locality, district } ], warnings, raw? }`
 - `GET /v1/ppd/address-search?paon?&saon?&street?&town?&county?&postcode?&postcode_prefix?&limit&include_raw=bool` (requires ≥2 fields, limit≤50) → same shape as `/transactions`
-- `GET /v1/ppd/comps?postcode&property_type?&months?&limit?&search_level=postcode|sector|district` → `{ query, count, median, mean, min, max, thin_market, transactions: [PPDTransaction] }`
+- `GET /v1/ppd/comps?postcode&property_type?&months?&limit?&search_level=postcode|sector|district&enrich_epc=bool` → `{ query, count, median, mean, min, max, thin_market, transactions: [PPDTransaction] }` (when `enrich_epc=true`, each transaction gains `epc_floor_area_sqm`, `epc_floor_area_sqft`, `price_per_sqm`, `price_per_sqft`, `epc_rating`, `epc_score`, `epc_construction_age`, `epc_built_form`)
 - `GET /v1/ppd/transaction/{id}?view=all|basic&include_raw=bool` → `{ record: { transaction_id, price_paid, transaction_date, property/transaction metadata... }, raw? }`
 - `GET /v1/epc/search?postcode&address?&include_raw=bool` → `{ record, raw? }` (returns 501-style response if EPC creds not configured)
 - `GET /v1/rightmove/search-url?postcode&property_type=sale|rent&radius?&min/max price/bedrooms?` → `{ url }`
@@ -84,6 +84,7 @@ Generate a typed client from the running service OpenAPI:
 ## Other CLI commands (core mode; add `--api-url` to hit the API)
 - Meta integrations: `uv run --extra cli property-cli meta`
 - PPD comps (postcode is positional): `uv run --extra cli property-cli ppd comps "SW1A 1AA" --months 24 --limit 20 --search-level sector`
+- PPD comps with EPC enrichment: `uv run --extra cli property-cli ppd comps "B1 1BB" --search-level sector --enrich-epc`
 - PPD transactions (postcode/prefix): `uv run --extra cli property-cli ppd search --postcode-prefix SW1A --limit 10`
 - PPD transaction record: `uv run --extra cli property-cli ppd transaction 31C68072-E0B5-FEE3-E063-4804A8C04F37 --include-raw` (replace with a real transaction id)
 - EPC search (requires EPC_API_EMAIL/EPC_API_KEY set): `uv run --extra cli property-cli epc search "SW1A 1AA" --address "10 Downing Street" --include-raw`

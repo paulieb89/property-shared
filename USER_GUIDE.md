@@ -21,6 +21,7 @@ property-cli meta
 # Comparable sales summary (with optional subject property context)
 property-cli ppd comps "SW1A 1AA" --months 24 --limit 20 --search-level sector
 property-cli ppd comps "SW1A 1PH" --address "73 St James Street" --months 24  # includes subject property history
+property-cli ppd comps "B1 1BB" --search-level sector --enrich-epc  # adds floor area + price/sqft from EPC
 
 # Search transactions by postcode
 property-cli ppd search --postcode "SW1A 1AA" --limit 10
@@ -145,7 +146,7 @@ property-cli report generate "SW1A 2AA" --api-url http://localhost:8000
 ### PPD
 - `GET /v1/ppd/transactions?postcode=SW1A%201AA&limit=20&include_raw=true`
 - `GET /v1/ppd/address-search?postcode=SW1A&street=Downing&limit=5&include_raw=true` (requires ≥2 fields)
-- `GET /v1/ppd/comps?postcode=SW1A%201AA&months=24&address=10%20Downing%20Street` (address optional)
+- `GET /v1/ppd/comps?postcode=SW1A%201AA&months=24&address=10%20Downing%20Street` (address optional, add `&enrich_epc=true` for floor area/price-per-sqft)
 - `GET /v1/ppd/transaction/{id}?include_raw=true`
 - `GET /v1/ppd/download-url?kind=monthly`
 

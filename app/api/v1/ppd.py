@@ -13,9 +13,12 @@ from app.schemas.ppd import (
     PPDTransactionRecordResponse,
 )
 from app.services.ppd_service import PPDService
+from property_core.epc_client import EPCClient
+from property_core.enrichment import enrich_comps_with_epc
 
 router = APIRouter(prefix="/ppd", tags=["ppd"])
 service = PPDService()
+_epc_client = EPCClient()
 
 
 @router.get("/download-url", response_model=PPDDownloadURLResponse)
@@ -117,20 +120,22 @@ def address_search(
 
 
 @router.get("/comps", response_model=PPDCompsResponse)
-def comps(
+async def comps(
     postcode: str = Query(..., min_length=2),
     property_type: Optional[str] = Query(None, description="D/S/T/F/O"),
     months: int = Query(24, ge=1, le=120),
     limit: int = Query(50, ge=1, le=200),
     search_level: Literal["postcode", "sector", "district"] = "sector",
     address: Optional[str] = Query(None, description="Subject property address for context"),
+    enrich_epc: bool = Query(False, description="Enrich comps with EPC floor area and price/sqft"),
 ) -> PPDCompsResponse:
     """Get comparable sales summary for a postcode (sector/district supported).
 
     If address is provided, returns subject_property with its transaction history.
+    If enrich_epc is True, attaches EPC floor area and price-per-sqft to each comp.
     """
     try:
-        return service.comps(
+        result = service.comps(
             postcode=postcode,
             property_type=property_type,
             months=months,
@@ -140,6 +145,14 @@ def comps(
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"PPD comps failed: {exc}") from exc
+
+    if enrich_epc and _epc_client.is_configured():
+        comp_dicts = [t.model_dump() for t in result.transactions]
+        enriched = await enrich_comps_with_epc(comp_dicts, _epc_client)
+        from app.schemas.ppd import PPDTransaction
+        result.transactions = [PPDTransaction(**d) for d in enriched]
+
+    return result
 
 
 @router.get("/transaction/{transaction_id}", response_model=PPDTransactionRecordResponse)

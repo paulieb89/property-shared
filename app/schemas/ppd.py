@@ -24,6 +24,15 @@ class PPDTransaction(BaseModel):
     county: Optional[str] = None
     locality: Optional[str] = None
     district: Optional[str] = None
+    # EPC enrichment fields (populated when enrich_epc=True on comps endpoint)
+    epc_floor_area_sqm: Optional[float] = None
+    epc_floor_area_sqft: Optional[int] = None
+    price_per_sqm: Optional[int] = None
+    price_per_sqft: Optional[int] = None
+    epc_rating: Optional[str] = None
+    epc_score: Optional[int] = None
+    epc_construction_age: Optional[str] = None
+    epc_built_form: Optional[str] = None
 
 
 class PPDSearchResponse(BaseModel):
