@@ -261,27 +261,37 @@ results = search_planning_by_postcode(
 )
 ```
 
-### Service Layer (with guardrails)
+### Domain Services (typed models, guardrails)
 ```python
-from app.services.ppd_service import PPDService
-from app.services.epc_service import EPCService
-from app.services.rightmove_service import RightmoveService
+from property_core import PPDService, PlanningService, PropertyReportService
 
 # PPD with subject property context
 service = PPDService()
 result = service.comps(postcode="SW1A 1AA", address="10 Downing Street", months=24, limit=50, search_level="sector")
 print(result.subject_property)  # Transaction history for the specific address
 
-# PPD with raw SPARQL bindings
+# PPD transactions (returns dict with typed transaction list)
 result = service.search_transactions(postcode="SW1A 1AA", limit=5, include_raw=True)
-print(result.results[0].locality)   # "LONDON"
-print(result.results[0].district)   # "CITY OF WESTMINSTER"
-print(result.raw)                   # Full SPARQL bindings list
+print(result["results"][0]["locality"])   # "LONDON"
+print(result["results"][0]["district"])   # "CITY OF WESTMINSTER"
+print(result["raw"])                      # Full SPARQL bindings list
 
-# Rightmove with raw data
-rm_service = RightmoveService()
-listings = await rm_service.listings(search_url="...", max_pages=1, include_raw=True)
-print(listings[0].raw["tenure"])    # "FREEHOLD" / "LEASEHOLD"
+# PPD comps with EPC enrichment (floor area, price/sqft)
+from property_core import enrich_comps_with_epc
+result = service.comps(postcode="B1 1BB", months=24, search_level="sector")
+enriched = enrich_comps_with_epc(result)  # adds epc_floor_area_sqm, price_per_sqft, etc.
+
+# Planning - find council for postcode
+planning = PlanningService()
+info = planning.council_for_postcode("SW1A 2AA")
+print(info["council"]["name"], info["council"]["system"])
+
+# Property report (async)
+import asyncio
+from property_core import PropertyReportService
+report_service = PropertyReportService()
+report = asyncio.run(report_service.generate("10 Downing Street, SW1A 2AA"))
+print(report.estimated_value_low, report.estimated_value_high)
 ```
 
 ## Notes
