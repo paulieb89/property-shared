@@ -59,7 +59,8 @@ property_core/              # Pure Python library (no FastAPI, no DB assumptions
 ├── ppd_service.py          # Domain service: SPARQL parsing → typed PPD models (sync)
 ├── planning_service.py     # Domain service: council matching + URL building (sync)
 ├── report_service.py       # Product pipeline: multi-source aggregation (async)
-├── enrichment.py           # EPC enrichment pipeline
+├── rental_service.py       # Standalone rental analysis with yield calculation (async)
+├── enrichment.py           # EPC enrichment pipeline + compute_enriched_stats()
 ├── planning_scraper.py     # Vision-guided planning portal scraper (Playwright + OpenAI)
 └── planning_councils.json  # Verified council database (98 councils, 6 system types)
 
@@ -88,7 +89,9 @@ property_cli/               # Typer CLI (imports only from property_core)
 - **Dual-mode CLI**: Commands call `property_core` directly by default (fast, offline-capable). Add `--api-url` to route through the HTTP API instead.
 - **Domain service guardrails**: `property_core/ppd_service.py` enforces limits (MAX_LIMIT=200, FORM_MAX_LIMIT=50) and normalizes responses. API routers are thin wrappers.
 - **`include_raw` pattern**: All endpoints normalize data by default. Pass `include_raw=true` to get the original source data alongside normalized fields. EPC, PPD (transactions/address-search), Rightmove (listings), and Planning (council-for-postcode) all support this.
-- **EPC enrichment**: PPD comps can be enriched with EPC floor area via `enrich_epc=true` on the comps endpoint (or `--enrich-epc` in CLI). Groups comps by postcode, fetches all EPC certs per postcode (one API call each), fuzzy-matches addresses, and attaches derived fields (`epc_floor_area_sqm`, `price_per_sqft`, `epc_rating`, etc.) plus the full matched cert (`epc_match`) and confidence score (`epc_match_score`). The enrichment module manages its own EPCClient internally — callers don't need to instantiate one.
+- **Area stats**: `PPDCompsResponse` includes `percentile_25`, `percentile_75` for price quartiles. When an address is provided and found, also includes `subject_price_percentile` (0-100) and `subject_vs_median_pct` (e.g., +10.8 means 10.8% above median).
+- **EPC enrichment**: PPD comps can be enriched with EPC floor area via `enrich_epc=true` on the comps endpoint (or `--enrich-epc` in CLI). Groups comps by postcode, fetches all EPC certs per postcode (one API call each), fuzzy-matches addresses, and attaches derived fields (`epc_floor_area_sqm`, `price_per_sqft`, `epc_rating`, etc.) plus the full matched cert (`epc_match`) and confidence score (`epc_match_score`). After enrichment, call `compute_enriched_stats()` to populate `median_price_per_sqft` and `epc_match_rate`.
+- **Standalone rental analysis**: `analyze_rentals(postcode, purchase_price=N)` returns rental market stats (median/average rent, listing count) with optional gross yield calculation. No full report needed.
 - **Live test gating**: Tests making real network calls check `RUN_LIVE_TESTS=1` and skip gracefully on 503 or missing credentials.
 
 ## Environment Variables
@@ -109,7 +112,7 @@ from property_core import PPDService, PlanningService, PropertyReportService
 
 # Transport clients (raw dicts)
 from property_core import PricePaidDataClient, EPCClient, RightmoveLocationAPI, fetch_listings, PostcodeClient
-from property_core import enrich_comps_with_epc, fetch_listing
+from property_core import enrich_comps_with_epc, compute_enriched_stats, fetch_listing, analyze_rentals
 
 # Domain models
 from property_core.models.ppd import PPDTransaction, PPDCompsResponse
