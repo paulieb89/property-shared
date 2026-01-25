@@ -13,7 +13,7 @@ from app.schemas.ppd import (
     PPDTransaction,
     PPDTransactionRecordResponse,
 )
-from property_core.enrichment import enrich_comps_with_epc
+from property_core.enrichment import compute_enriched_stats, enrich_comps_with_epc
 from property_core.ppd_service import PPDService
 
 router = APIRouter(prefix="/ppd", tags=["ppd"])
@@ -152,6 +152,7 @@ async def comps(
         comp_dicts = [t.model_dump() for t in result.transactions]
         enriched = await enrich_comps_with_epc(comp_dicts)
         result.transactions = [PPDTransaction(**d) for d in enriched]
+        compute_enriched_stats(result)
 
     return result
 

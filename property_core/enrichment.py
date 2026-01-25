@@ -8,9 +8,11 @@ derived price-per-sqft metrics.
 from __future__ import annotations
 
 import asyncio
+from statistics import median
 from typing import Any, Dict, List, Optional
 
 from property_core.epc_client import EPCClient
+from property_core.models.ppd import PPDCompsResponse
 
 # Conversion factor
 _SQM_TO_SQFT = 10.7639
@@ -120,4 +122,22 @@ async def enrich_comps_with_epc(
                     comp["price_per_sqm"] = None
                     comp["price_per_sqft"] = None
 
+    return comps
+
+
+def compute_enriched_stats(comps: PPDCompsResponse) -> PPDCompsResponse:
+    """Compute aggregate stats after EPC enrichment.
+
+    Intended to be called after callers have applied enrichment to
+    ``comps.transactions`` (price_per_sqft, epc_match, etc.).
+    """
+    prices_per_sqft = [
+        t.price_per_sqft for t in comps.transactions if t.price_per_sqft is not None
+    ]
+    matched = sum(1 for t in comps.transactions if t.epc_match is not None)
+
+    comps.median_price_per_sqft = int(median(prices_per_sqft)) if prices_per_sqft else None
+    comps.epc_match_rate = (
+        matched / len(comps.transactions) if comps.transactions else None
+    )
     return comps

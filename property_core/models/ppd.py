@@ -61,9 +61,17 @@ class PPDCompsResponse(BaseModel):
     count: int
     median: Optional[int] = None
     mean: Optional[int] = None
+    percentile_25: Optional[int] = None
+    percentile_75: Optional[int] = None
     min: Optional[int] = None
     max: Optional[int] = None
     thin_market: bool
+    # EPC-enriched stats (populated when enrich_epc=True on callers)
+    median_price_per_sqft: Optional[int] = None
+    epc_match_rate: Optional[float] = None
+    # Subject comparison (populated when address provided and subject found)
+    subject_price_percentile: Optional[int] = None
+    subject_vs_median_pct: Optional[float] = None
     transactions: List[PPDTransaction] = Field(default_factory=list)
     subject_property: Optional[SubjectProperty] = None
 
