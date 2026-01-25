@@ -116,11 +116,12 @@ def ppd_comps(
         )
         if enrich_epc:
             import asyncio
-            from property_core.enrichment import enrich_comps_with_epc
+            from property_core.enrichment import compute_enriched_stats, enrich_comps_with_epc
             comp_dicts = [t.model_dump() for t in result.transactions]
             enriched = asyncio.run(enrich_comps_with_epc(comp_dicts))
             from property_core.models.ppd import PPDTransaction
             result.transactions = [PPDTransaction(**d) for d in enriched]
+            compute_enriched_stats(result)
         _echo_json(result.model_dump())
 
 

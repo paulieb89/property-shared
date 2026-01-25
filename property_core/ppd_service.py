@@ -6,6 +6,7 @@ PricePaidDataClient into typed Pydantic models. Sync throughout.
 
 from __future__ import annotations
 
+from statistics import quantiles
 from typing import Any, Dict, Iterable, List, Optional
 
 from property_core.models.ppd import (
@@ -341,16 +342,43 @@ class PPDService:
                 subject_ids = {t.transaction_id for t in subject_property.transaction_history}
                 transactions = [t for t in transactions if t.transaction_id not in subject_ids]
 
+        prices = [t.price for t in transactions if t.price is not None]
+
+        percentile_25 = raw.get("percentile_25")
+        percentile_75 = raw.get("percentile_75")
+        if subject_property and len(prices) >= 4:
+            q = quantiles(prices, n=4)
+            percentile_25 = int(round(q[0]))
+            percentile_75 = int(round(q[2]))
+
+        subject_price_percentile = None
+        subject_vs_median_pct = None
+        last_sale_price = (
+            subject_property.last_sale.price
+            if subject_property and subject_property.last_sale
+            else None
+        )
+        if last_sale_price is not None and prices:
+            below = sum(1 for p in prices if p < last_sale_price)
+            subject_price_percentile = int((below / len(prices)) * 100)
+            median_price = raw.get("median")
+            if isinstance(median_price, int) and median_price > 0:
+                subject_vs_median_pct = round(((last_sale_price - median_price) / median_price) * 100, 1)
+
         return PPDCompsResponse(
             query=query,
             count=raw["count"],
             median=raw["median"],
             mean=raw["mean"],
+            percentile_25=percentile_25,
+            percentile_75=percentile_75,
             min=raw["min"],
             max=raw["max"],
             thin_market=raw["thin_market"],
             transactions=transactions,
             subject_property=subject_property,
+            subject_price_percentile=subject_price_percentile,
+            subject_vs_median_pct=subject_vs_median_pct,
         )
 
     def _find_subject_property(

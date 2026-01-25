@@ -20,8 +20,11 @@ property-cli meta
 ```bash
 # Comparable sales summary (with optional subject property context)
 property-cli ppd comps "SW1A 1AA" --months 24 --limit 20 --search-level sector
-property-cli ppd comps "SW1A 1PH" --address "73 St James Street" --months 24  # includes subject property history
+property-cli ppd comps "SW1A 1PH" --address "73 St James Street" --months 24  # includes subject property + comparison stats
 property-cli ppd comps "B1 1BB" --search-level sector --enrich-epc  # adds floor area + price/sqft from EPC
+
+# Response includes area stats: percentile_25, percentile_75, and when address provided:
+# subject_price_percentile (0-100), subject_vs_median_pct (e.g., +10.8 or -5.2)
 
 # Search transactions by postcode
 property-cli ppd search --postcode "SW1A 1AA" --limit 10
@@ -118,6 +121,18 @@ curl -X POST http://localhost:8000/v1/planning/search-results \
   -d '{"postcode": "M1 1AA", "portal_url": "https://pa.manchester.gov.uk/online-applications/search.do?action=simple", "system": "idox", "max_results": 5}'
 ```
 
+### Rental Analysis
+
+```bash
+# Standalone rental market analysis (no full report needed)
+uv run python -c "
+import asyncio
+from property_core import analyze_rentals
+r = asyncio.run(analyze_rentals('SW1A 1AA', radius=0.5, purchase_price=500000))
+print(f'Median rent: £{r.median_rent_monthly}/mo, Yield: {r.gross_yield_pct}%')
+"
+```
+
 ### Property Report
 
 ```bash
@@ -201,7 +216,10 @@ pip install -e /path/to/property_shared
 
 ### Core Imports (no HTTP)
 ```python
-from property_core import PricePaidDataClient, EPCClient, RightmoveLocationAPI, fetch_listings, PostcodeClient
+from property_core import (
+    PricePaidDataClient, EPCClient, RightmoveLocationAPI, fetch_listings, PostcodeClient,
+    analyze_rentals, compute_enriched_stats, enrich_comps_with_epc
+)
 from property_core.rightmove_scraper import fetch_listing
 
 # PPD
@@ -246,6 +264,11 @@ print(la["name"])           # "Westminster"
 print(la["raw"]["lsoa"])    # "Westminster 018C"
 print(la["raw"]["parliamentary_constituency"])  # "Cities of London and Westminster"
 
+# Rental analysis (standalone, no full report needed)
+import asyncio
+rental = asyncio.run(analyze_rentals("SW1A 1AA", purchase_price=500000))
+print(f"Median: £{rental.median_rent_monthly}/mo, Yield: {rental.gross_yield_pct}%")
+
 # Planning (residential IP only, requires playwright + openai)
 from property_core.planning_scraper import scrape_planning_application, search_planning_by_postcode
 
@@ -264,11 +287,15 @@ results = search_planning_by_postcode(
 ### Domain Services (typed models, guardrails)
 ```python
 from property_core import PPDService, PlanningService, PropertyReportService
+from app.services.epc_service import EPCService
+from app.services.rightmove_service import RightmoveService
 
-# PPD with subject property context
+# PPD with subject property context and area stats
 service = PPDService()
 result = service.comps(postcode="SW1A 1AA", address="10 Downing Street", months=24, limit=50, search_level="sector")
-print(result.subject_property)  # Transaction history for the specific address
+print(result.subject_property)           # Transaction history for the specific address
+print(result.percentile_25, result.percentile_75)  # Area price quartiles
+print(result.subject_vs_median_pct)      # e.g., +10.8 means 10.8% above median
 
 # PPD transactions (returns dict with typed transaction list)
 result = service.search_transactions(postcode="SW1A 1AA", limit=5, include_raw=True)

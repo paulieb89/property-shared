@@ -33,7 +33,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import date, timedelta
-from statistics import median, mean
+from statistics import mean, median, quantiles
 from typing import Any, Dict, List, Optional
 
 S3_BASE = "http://prod2.publicdata.landregistry.gov.uk.s3-website-eu-west-1.amazonaws.com"
@@ -394,6 +394,8 @@ class PricePaidDataClient:
                 - count: number of transactions found
                 - median: median price (None if no results)
                 - mean: mean price (None if no results)
+                - percentile_25: 25th percentile price (None if insufficient results)
+                - percentile_75: 75th percentile price (None if insufficient results)
                 - min: minimum price
                 - max: maximum price
                 - transactions: list of transaction dicts
@@ -489,6 +491,12 @@ class PricePaidDataClient:
 
         # Calculate stats
         count = len(prices)
+        percentile_25 = None
+        percentile_75 = None
+        if len(prices) >= 4:
+            q = quantiles(prices, n=4)
+            percentile_25 = int(round(q[0]))
+            percentile_75 = int(round(q[2]))
         result: Dict[str, Any] = {
             "query": {
                 "postcode": postcode,
@@ -500,6 +508,8 @@ class PricePaidDataClient:
             "count": count,
             "median": median(prices) if prices else None,
             "mean": round(mean(prices)) if prices else None,
+            "percentile_25": percentile_25,
+            "percentile_75": percentile_75,
             "min": min(prices) if prices else None,
             "max": max(prices) if prices else None,
             "transactions": transactions,
