@@ -103,8 +103,13 @@ class ListingDetail:
     council_tax_band: Optional[str] = None
     # Size
     display_size: Optional[str] = None
+    price_per_sqft: Optional[str] = None
     # Key features
     key_features: List[str] = field(default_factory=list)
+    # Listing history
+    listing_update_reason: Optional[str] = None
+    # Transport
+    nearest_stations: List[Dict[str, Any]] = field(default_factory=list)
     # Rental-specific
     let_available_date: Optional[str] = None
     price_frequency: Optional[str] = None
@@ -375,15 +380,28 @@ def _extract_display_size(data: Dict[str, Any]) -> Optional[str]:
     ds = data.get("displaySize")
     if isinstance(ds, str) and ds:
         return ds
-    # Sizings list: [{"unit": "sqm", "displaySize": 125.5, ...}]
+    # Try infoReelItems first (nicely formatted): [{"type": "SIZE", "primaryText": "1,195 sq ft"}]
+    info_reel = data.get("infoReelItems")
+    if isinstance(info_reel, list):
+        for item in info_reel:
+            if isinstance(item, dict) and item.get("type") == "SIZE":
+                primary = item.get("primaryText")
+                if primary:
+                    return primary
+    # Sizings list: [{"unit": "sqft", "minimumSize": 1195, "maximumSize": 1195, "displayUnit": "sq. ft."}]
     sizings = data.get("sizings")
     if isinstance(sizings, list) and sizings:
-        for s in sizings:
-            if isinstance(s, dict):
-                val = s.get("displaySize")
-                unit = s.get("unit", "")
-                if val:
-                    return f"{val} {unit}".strip()
+        # Prefer sqft, fallback to first available
+        for preferred_unit in ["sqft", "sqm"]:
+            for s in sizings:
+                if isinstance(s, dict) and s.get("unit") == preferred_unit:
+                    size_val = s.get("minimumSize") or s.get("maximumSize") or s.get("displaySize")
+                    display_unit = s.get("displayUnit", preferred_unit)
+                    if size_val:
+                        # Format with commas for readability
+                        if isinstance(size_val, (int, float)) and size_val >= 1000:
+                            return f"{size_val:,.0f} {display_unit}".strip()
+                        return f"{size_val} {display_unit}".strip()
     return None
 
 
@@ -441,6 +459,17 @@ def _to_listing_detail(
     channel = (data.get("channel") or "").lower()  # "BUY" or "RENT"
     transaction_type = "rent" if channel == "rent" else "buy" if channel == "buy" else None
 
+    # Listing history
+    listing_history = data.get("listingHistory") or {}
+
+    # Nearest stations
+    stations_raw = data.get("nearestStations") or []
+    nearest_stations = [
+        {"name": s.get("name"), "types": s.get("types", []),
+         "distance": s.get("distance"), "unit": s.get("unit")}
+        for s in stations_raw if isinstance(s, dict)
+    ]
+
     return ListingDetail(
         id=data.get("id"),
         url=url,
@@ -450,7 +479,7 @@ def _to_listing_detail(
         bathrooms=_safe_int(data.get("bathrooms")),
         address=display_address,
         description=description,
-        property_type=data.get("propertyType"),
+        property_type=data.get("propertyType") or data.get("propertySubType"),
         property_sub_type=data.get("propertySubType"),
         agent_name=customer.get("branchName") or customer.get("companyName"),
         agent_branch=customer.get("branchDisplayName"),
@@ -471,7 +500,10 @@ def _to_listing_detail(
         ),
         council_tax_band=living_costs.get("councilTaxBand"),
         display_size=_extract_display_size(data),
+        price_per_sqft=price_info.get("pricePerSqFt"),
         key_features=_extract_key_features(data),
+        listing_update_reason=listing_history.get("listingUpdateReason"),
+        nearest_stations=nearest_stations,
         let_available_date=data.get("letAvailableDate"),
         price_frequency=frequency,
         transaction_type=transaction_type,

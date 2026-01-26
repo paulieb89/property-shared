@@ -64,8 +64,13 @@ class RightmoveListingDetail(BaseModel):
     council_tax_band: Optional[str] = None
     # Size
     display_size: Optional[str] = None
+    price_per_sqft: Optional[str] = None
     # Key features
     key_features: List[str] = Field(default_factory=list)
+    # Listing history
+    listing_update_reason: Optional[str] = None
+    # Transport
+    nearest_stations: List[dict[str, Any]] = Field(default_factory=list)
     # Rental-specific
     let_available_date: Optional[str] = None
     price_frequency: Optional[str] = None
