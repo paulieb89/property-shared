@@ -473,6 +473,8 @@ class PricePaidDataClient:
             street = b.get("street", {}).get("value")
             town = b.get("town", {}).get("value")
             county = b.get("county", {}).get("value")
+            locality = b.get("locality", {}).get("value")
+            district = b.get("district", {}).get("value")
 
             transactions.append({
                 "transaction_id": b["transactionId"]["value"],
@@ -487,6 +489,8 @@ class PricePaidDataClient:
                 "street": street,
                 "town": town,
                 "county": county,
+                "locality": locality,
+                "district": district,
             })
 
         # Calculate stats

@@ -62,6 +62,7 @@ class PostcodeClient:
             "postcode": result.get("postcode"),
             "latitude": result.get("latitude"),
             "longitude": result.get("longitude"),
+            "rural_urban": result.get("ruc21"),  # Rural Urban Classification 2021
         }
         if include_raw:
             data["raw"] = result

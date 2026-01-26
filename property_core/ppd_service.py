@@ -90,6 +90,8 @@ def _parse_comps_transactions(rows: Iterable[Dict[str, Any]]) -> List[PPDTransac
                 street=row.get("street"),
                 town=row.get("town"),
                 county=row.get("county"),
+                locality=row.get("locality"),
+                district=row.get("district"),
             )
         )
     return results
