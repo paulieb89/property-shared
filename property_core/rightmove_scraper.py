@@ -58,6 +58,9 @@ class Listing:
     agent_branch: Optional[str]
     first_visible_date: Optional[str]
     images: List[str]
+    # Location
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     # Rental-specific fields (None for sales)
     let_available_date: Optional[str] = None
     price_frequency: Optional[str] = None  # "monthly", "weekly"
@@ -90,6 +93,7 @@ class ListingDetail:
     images: List[str]
     floorplans: List[str]
     # Location
+    postcode: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     # Tenure
@@ -233,6 +237,7 @@ def _to_listing(data: Dict[str, Any], *, include_raw: bool = False) -> Listing:
     price_info = data.get("price") or {}
     property_url = data.get("propertyUrl") or ""
     customer = data.get("customer") or {}
+    location = data.get("location") or {}
     return Listing(
         id=data.get("id"),
         url=f"https://www.rightmove.co.uk{property_url}",
@@ -247,6 +252,8 @@ def _to_listing(data: Dict[str, Any], *, include_raw: bool = False) -> Listing:
         agent_branch=customer.get("branchLandingPageUrl"),
         first_visible_date=data.get("firstVisibleDate"),
         images=_extract_images(data),
+        latitude=_safe_float(location.get("latitude")),
+        longitude=_safe_float(location.get("longitude")),
         # Rental-specific fields
         let_available_date=data.get("letAvailableDate"),
         price_frequency=price_info.get("frequency"),
@@ -450,6 +457,9 @@ def _to_listing_detail(
     # Address
     address_info = data.get("address") or {}
     display_address = address_info.get("displayAddress") or data.get("displayAddress")
+    outcode = address_info.get("outcode")
+    incode = address_info.get("incode")
+    postcode = f"{outcode} {incode}" if outcode and incode else None
 
     # Text/description
     text = data.get("text") or {}
@@ -478,6 +488,7 @@ def _to_listing_detail(
         bedrooms=_safe_int(data.get("bedrooms")),
         bathrooms=_safe_int(data.get("bathrooms")),
         address=display_address,
+        postcode=postcode,
         description=description,
         property_type=data.get("propertyType") or data.get("propertySubType"),
         property_sub_type=data.get("propertySubType"),

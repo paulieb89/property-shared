@@ -23,6 +23,9 @@ class RightmoveListing(BaseModel):
     agent_branch: Optional[str] = None
     first_visible_date: Optional[str] = None
     images: List[str] = Field(default_factory=list)
+    # Location
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     # Rental-specific fields (None for sales)
     let_available_date: Optional[str] = None
     price_frequency: Optional[str] = None  # "monthly", "weekly" for rentals
@@ -51,6 +54,7 @@ class RightmoveListingDetail(BaseModel):
     images: List[str] = Field(default_factory=list)
     floorplans: List[str] = Field(default_factory=list)
     # Location
+    postcode: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     # Tenure
