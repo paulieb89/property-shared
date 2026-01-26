@@ -26,6 +26,9 @@ class RightmoveListing(BaseModel):
     # Location
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    # Status tags (SOLD_STC, UNDER_OFFER, LET_AGREED, etc.)
+    listing_status: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
     # Rental-specific fields (None for sales)
     let_available_date: Optional[str] = None
     price_frequency: Optional[str] = None  # "monthly", "weekly" for rentals
@@ -73,6 +76,9 @@ class RightmoveListingDetail(BaseModel):
     key_features: List[str] = Field(default_factory=list)
     # Listing history
     listing_update_reason: Optional[str] = None
+    # Status tags (SOLD_STC, UNDER_OFFER, LET_AGREED, etc.)
+    listing_status: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
     # Transport
     nearest_stations: List[dict[str, Any]] = Field(default_factory=list)
     # Rental-specific

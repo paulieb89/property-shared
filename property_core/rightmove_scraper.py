@@ -61,6 +61,9 @@ class Listing:
     # Location
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    # Status tags (SOLD_STC, UNDER_OFFER, LET_AGREED, etc.)
+    listing_status: Optional[str] = None
+    tags: List[str] = field(default_factory=list)
     # Rental-specific fields (None for sales)
     let_available_date: Optional[str] = None
     price_frequency: Optional[str] = None  # "monthly", "weekly"
@@ -112,6 +115,9 @@ class ListingDetail:
     key_features: List[str] = field(default_factory=list)
     # Listing history
     listing_update_reason: Optional[str] = None
+    # Status tags (SOLD_STC, UNDER_OFFER, LET_AGREED, etc.)
+    listing_status: Optional[str] = None
+    tags: List[str] = field(default_factory=list)
     # Transport
     nearest_stations: List[Dict[str, Any]] = field(default_factory=list)
     # Rental-specific
@@ -238,6 +244,7 @@ def _to_listing(data: Dict[str, Any], *, include_raw: bool = False) -> Listing:
     property_url = data.get("propertyUrl") or ""
     customer = data.get("customer") or {}
     location = data.get("location") or {}
+    tags = data.get("tags") or []
     return Listing(
         id=data.get("id"),
         url=f"https://www.rightmove.co.uk{property_url}",
@@ -254,6 +261,8 @@ def _to_listing(data: Dict[str, Any], *, include_raw: bool = False) -> Listing:
         images=_extract_images(data),
         latitude=_safe_float(location.get("latitude")),
         longitude=_safe_float(location.get("longitude")),
+        listing_status=tags[0] if tags else None,
+        tags=tags,
         # Rental-specific fields
         let_available_date=data.get("letAvailableDate"),
         price_frequency=price_info.get("frequency"),
@@ -472,6 +481,9 @@ def _to_listing_detail(
     # Listing history
     listing_history = data.get("listingHistory") or {}
 
+    # Status tags (SOLD_STC, UNDER_OFFER, LET_AGREED, etc.)
+    tags = data.get("tags") or []
+
     # Nearest stations
     stations_raw = data.get("nearestStations") or []
     nearest_stations = [
@@ -514,6 +526,8 @@ def _to_listing_detail(
         price_per_sqft=price_info.get("pricePerSqFt"),
         key_features=_extract_key_features(data),
         listing_update_reason=listing_history.get("listingUpdateReason"),
+        listing_status=tags[0] if tags else None,
+        tags=tags,
         nearest_stations=nearest_stations,
         let_available_date=data.get("letAvailableDate"),
         price_frequency=frequency,
