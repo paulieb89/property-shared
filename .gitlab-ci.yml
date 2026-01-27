@@ -1,0 +1,42 @@
+stages:
+  - test
+  - publish
+
+variables:
+  UV_CACHE_DIR: .uv-cache
+
+.uv-setup: &uv-setup
+  before_script:
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - source $HOME/.local/bin/env
+    - uv sync --extra dev
+
+cache:
+  paths:
+    - .uv-cache/
+
+test:
+  stage: test
+  image: python:3.12
+  <<: *uv-setup
+  script:
+    - uv run pytest -v
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+publish:
+  stage: publish
+  image: python:3.12
+  environment: pypi
+  id_tokens:
+    PYPI_ID_TOKEN:
+      aud: pypi
+  before_script:
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - source $HOME/.local/bin/env
+  script:
+    - uv build
+    - uv publish --trusted-publishing always
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
