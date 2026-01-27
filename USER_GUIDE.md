@@ -76,9 +76,11 @@ property-cli rightmove listing 161151632
 property-cli rightmove listing "https://www.rightmove.co.uk/properties/161151632" --include-raw
 ```
 
+**All listings** include: `listing_status` (e.g., "SOLD_STC", "UNDER_OFFER"), `tags` (all status tags as list), `latitude`/`longitude` (direct access).
+
 **Rental listings** include additional fields: `let_available_date`, `price_frequency` (monthly/weekly), `students`, `transaction_type`.
 
-**Listing detail** (individual property page) includes: `tenure_type`, `years_remaining_on_lease`, `annual_service_charge`, `annual_ground_rent`, `ground_rent_review_period_years`, `council_tax_band`, `latitude`/`longitude`, `floorplans`, `key_features`, `description`.
+**Listing detail** (individual property page) includes: `tenure_type`, `years_remaining_on_lease`, `annual_service_charge`, `annual_ground_rent`, `ground_rent_review_period_years`, `council_tax_band`, `postcode`, `latitude`/`longitude`, `floorplans`, `key_features`, `description`, `price_per_sqft`, `nearest_stations`.
 
 ### Planning (UK Council Portals)
 
@@ -207,7 +209,10 @@ The suite skips if credentials are missing or upstream services return 503.
 
 ### Install
 ```bash
-# From repo root
+# From PyPI
+pip install property-shared
+
+# From repo root (development)
 uv sync --extra cli
 
 # Or install editable in another project
@@ -243,6 +248,11 @@ listings = fetch_listings(url, max_pages=1, include_raw=True)
 for listing in listings:
     print(listing.raw["location"])  # {"latitude": ..., "longitude": ...}
 
+# Rightmove - Filter out SOLD_STC/UNDER_OFFER (critical for active listings)
+listings = fetch_listings(url, max_pages=1)
+available = [l for l in listings if l.listing_status not in ("SOLD_STC", "UNDER_OFFER")]
+print(f"{len(available)} available out of {len(listings)} total")
+
 # Rightmove - Rentals
 url = api.build_search_url("SW1A 1AA", property_type="rent", radius=0.25)
 rentals = fetch_listings(url, max_pages=1)
@@ -261,6 +271,7 @@ from property_core.postcode_client import PostcodeClient
 pc = PostcodeClient()
 la = pc.get_local_authority("SW1A 1AA", include_raw=True)
 print(la["name"])           # "Westminster"
+print(la["rural_urban"])    # Rural Urban Classification 2021 (ruc21)
 print(la["raw"]["lsoa"])    # "Westminster 018C"
 print(la["raw"]["parliamentary_constituency"])  # "Cities of London and Westminster"
 
