@@ -49,5 +49,8 @@ build-backend = "hatchling.build"
 packages = ["property_core", "app", "property_cli"]
 include = ["app/web/templates/**", "app/templates/**"]
 
+[tool.hatch.build.targets.sdist]
+exclude = [".uv-cache", ".venv", "*.pyc", "__pycache__", ".pytest_cache", ".git"]
+
 [tool.pytest.ini_options]
 addopts = "-ra"
