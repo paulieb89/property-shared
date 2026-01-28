@@ -58,6 +58,14 @@ _postcode = PostcodeClient()
 WIDGET_URI = "ui://property/comps-dashboard"
 WIDGET_MIME = "text/html;profile=mcp-app"
 
+# MCP Apps tool metadata — include both nested and flat key for host compat.
+# Hosts may look up _meta["ui/resourceUri"] (flat) or _meta.ui.resourceUri
+# (nested).  The ext-apps SDK registerAppTool() sets both; we mirror that.
+TOOL_UI_META = {
+    "ui": {"resourceUri": WIDGET_URI},
+    "ui/resourceUri": WIDGET_URI,
+}
+
 
 @lru_cache(maxsize=None)
 def _load_widget_html() -> str:
@@ -84,7 +92,7 @@ def comps_dashboard_resource() -> str:
         "openWorldHint": False,
         "destructiveHint": False,
     },
-    meta={"ui": {"resourceUri": WIDGET_URI}},
+    meta=TOOL_UI_META,
 )
 def property_comps(
     postcode: str,
@@ -123,7 +131,7 @@ def property_comps(
             )
         ],
         structuredContent=data,
-        _meta={"ui": {"resourceUri": WIDGET_URI}},
+        _meta=TOOL_UI_META,
     )
 
 
