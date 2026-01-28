@@ -169,15 +169,12 @@
 </div>
 
 <script type="module">
-// --- Data injection: supports multiple host environments ---
+// --- Data injection ---
 //
 // 1. window.__COMPS_DATA__      — FastAPI / CLI pre-embedded
-// 2. window.openai.toolOutput   — LEGACY(openai-apps-sdk): ChatGPT injects
-//                                  structuredContent here.  Remove once ChatGPT
-//                                  migrates to MCP Apps.
-// 3. MCP Apps (ontoolresult)    — Future standard (Claude, VS Code, ChatGPT)
-// 4. postMessage fallback       — Generic iframe host
-// 5. window.renderCompsData()   — Manual / programmatic
+// 2. MCP Apps (ontoolresult)    — Standard path (Claude.ai, VS Code, ChatGPT, Goose)
+// 3. postMessage fallback       — Generic iframe host
+// 4. window.renderCompsData()   — Manual / programmatic
 
 window.renderCompsData = function(data) { render(data); };
 
@@ -185,25 +182,7 @@ window.renderCompsData = function(data) { render(data); };
 if (window.__COMPS_DATA__) {
   render(window.__COMPS_DATA__);
 } else {
-  // (2) LEGACY(openai-apps-sdk): poll window.openai.toolOutput
-  //     ChatGPT sets window.openai globals and fires "openai:set_globals".
-  const SET_GLOBALS = "openai:set_globals";
-
-  function tryOpenAiGlobal() {
-    const output = window.openai?.toolOutput;
-    if (output && typeof output === "object" && output.count !== undefined) {
-      render(output);
-      return true;
-    }
-    return false;
-  }
-
-  if (!tryOpenAiGlobal()) {
-    window.addEventListener(SET_GLOBALS, () => tryOpenAiGlobal(), { once: false });
-  }
-
-  // (3) MCP Apps — @modelcontextprotocol/ext-apps
-  //     Standard path for Claude.ai, VS Code, Goose, and future ChatGPT.
+  // (2) MCP Apps — @modelcontextprotocol/ext-apps
   (async () => {
     try {
       const { App, applyDocumentTheme, applyHostStyleVariables, applyHostFonts } =
@@ -219,7 +198,6 @@ if (window.__COMPS_DATA__) {
       };
 
       app.ontoolinput = (params) => {
-        // Show loading state with postcode hint while tool executes
         const pc = params.arguments?.postcode;
         if (pc) {
           document.querySelector("#loading div:last-child").textContent =
@@ -238,10 +216,10 @@ if (window.__COMPS_DATA__) {
       };
 
       await app.connect();
-    } catch { /* ext-apps not available — other injection paths will handle it */ }
+    } catch { /* ext-apps not available — postMessage fallback below */ }
   })();
 
-  // (4) postMessage fallback (generic iframe hosts)
+  // (3) postMessage fallback (generic iframe hosts)
   window.addEventListener("message", (event) => {
     try {
       const msg = typeof event.data === "string" ? JSON.parse(event.data) : event.data;

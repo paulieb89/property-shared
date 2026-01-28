@@ -7,15 +7,26 @@ Or:   uv run python -m mcp_server.server
 from __future__ import annotations
 
 import json
+import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+import mcp.types as types
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from property_core import PPDService, PlanningService
 from property_core.postcode_client import PostcodeClient
 
 UI_DIR = Path(__file__).parent / "ui"
+
+# Build allowed hosts for DNS rebinding protection.
+# Always allow localhost; add the public hostname when deployed.
+_allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+_public_host = os.environ.get("MCP_PUBLIC_HOST", "property-shared.fly.dev")
+if _public_host:
+    _allowed_hosts.append(_public_host)
 
 mcp = FastMCP(
     "property-server",
@@ -23,6 +34,13 @@ mcp = FastMCP(
         "UK property data tools. Use property_comps to get comparable sales "
         "with price statistics for any UK postcode. Use property_postcode_info "
         "to look up local authority and area details."
+    ),
+    host="0.0.0.0",
+    port=8080,
+    stateless_http=True,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_allowed_hosts,
     ),
 )
 
@@ -34,27 +52,47 @@ _planning = PlanningService()
 _postcode = PostcodeClient()
 
 # ---------------------------------------------------------------------------
-# UI Resources
+# UI resource — MCP Apps standard
 # ---------------------------------------------------------------------------
 
-@mcp.resource("ui://property/comps-dashboard", mime_type="text/html")
-def comps_dashboard_ui() -> str:
-    """Interactive comparable sales dashboard."""
+WIDGET_URI = "ui://property/comps-dashboard"
+WIDGET_MIME = "text/html;profile=mcp-app"
+
+
+@lru_cache(maxsize=None)
+def _load_widget_html() -> str:
     return (UI_DIR / "comps_dashboard.html").read_text()
+
+
+@mcp.resource(
+    WIDGET_URI,
+    name="Comps dashboard",
+    description="Comparable sales dashboard with price statistics",
+    mime_type=WIDGET_MIME,
+)
+def comps_dashboard_resource() -> str:
+    return _load_widget_html()
 
 
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(
+    annotations={
+        "readOnlyHint": True,
+        "openWorldHint": False,
+        "destructiveHint": False,
+    },
+    meta={"ui": {"resourceUri": WIDGET_URI}},
+)
 def property_comps(
     postcode: str,
     months: int = 24,
     limit: int = 30,
     search_level: str = "sector",
     address: Optional[str] = None,
-) -> str:
+) -> types.CallToolResult:
     """Get comparable property sales for a UK postcode.
 
     Returns price statistics (median, mean, percentiles) and individual
@@ -74,7 +112,19 @@ def property_comps(
         search_level=search_level,
         address=address,
     )
-    return result.model_dump_json()
+    data = result.model_dump(mode="json")
+    count = len(data.get("transactions", []))
+
+    return types.CallToolResult(
+        content=[
+            types.TextContent(
+                type="text",
+                text=f"Found {count} comparable sales for {postcode}",
+            )
+        ],
+        structuredContent=data,
+        _meta={"ui": {"resourceUri": WIDGET_URI}},
+    )
 
 
 @mcp.tool()
