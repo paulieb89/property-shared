@@ -3,7 +3,7 @@
 .gitignore
 
 # Python
-__pycache__
+**/__pycache__
 *.py[cod]
 *$py.class
 *.so
@@ -17,12 +17,12 @@ env
 *.egg
 
 # Testing/Dev
-.pytest_cache
+**/.pytest_cache
 .coverage
 htmlcov
 .tox
-.mypy_cache
-.ruff_cache
+**/.mypy_cache
+**/.ruff_cache
 
 # IDE
 .vscode
@@ -37,11 +37,16 @@ output/
 # Apify (not needed for Fly deployment)
 apify_actors/
 
-# Docs/Tests (not needed at runtime)
+# Docs/Tests/Dev (not needed at runtime)
 tests/
 docs/
 *.md
 !README.md
+example_ref/
+scripts/
+dist/
+skills/
+feedback*.md
 
 # Environment
 .env

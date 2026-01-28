@@ -35,19 +35,23 @@ cli = [
 demo = [
   "python-multipart>=0.0.9",
 ]
+mcp = [
+  "mcp[cli]>=1.9.0",
+]
 
 [project.scripts]
 property-api = "app.main:run"
 property-cli = "property_cli.main:app"
 property-demo = "app.main:run"
+property-mcp = "mcp_server.server:main"
 
 [build-system]
 requires = ["hatchling>=1.26.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["property_core", "app", "property_cli"]
-include = ["app/web/templates/**", "app/templates/**"]
+packages = ["property_core", "app", "property_cli", "mcp_server"]
+include = ["app/web/templates/**", "app/templates/**", "mcp_server/ui/**"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [".uv-cache", ".venv", "*.pyc", "__pycache__", ".pytest_cache", ".git"]

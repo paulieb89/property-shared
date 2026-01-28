@@ -18,14 +18,15 @@ RUN pip install --no-cache-dir uv
 
 # Copy dependency manifests first for better layer caching
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --extra api
+RUN uv sync --frozen --no-dev --extra api --extra mcp
 
-# Install Playwright browsers (Chromium only to save space)
-RUN playwright install chromium
+# Install Playwright browsers if planning extra is available
+RUN playwright install chromium 2>/dev/null || true
 
 # Copy application code
 COPY app ./app
 COPY property_core ./property_core
+COPY mcp_server ./mcp_server
 
 EXPOSE 8080
 

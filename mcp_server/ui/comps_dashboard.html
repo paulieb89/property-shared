@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Comparable Sales Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f8fafc; color: #1e293b; padding: 20px; line-height: 1.5;
+  }
+  .loading { text-align: center; padding: 60px 20px; color: #64748b; }
+  .loading .spinner {
+    width: 32px; height: 32px; border: 3px solid #e2e8f0;
+    border-top-color: #2563eb; border-radius: 50%;
+    animation: spin 0.8s linear infinite; margin: 0 auto 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .dashboard { display: none; }
+  .dashboard.visible { display: block; }
+
+  .header {
+    background: linear-gradient(135deg, #1e40af, #3b82f6);
+    color: white; padding: 24px; border-radius: 12px; margin-bottom: 20px;
+  }
+  .header h1 { font-size: 20px; font-weight: 600; }
+  .header .subtitle { opacity: 0.85; font-size: 14px; margin-top: 4px; }
+
+  .stats-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px; margin-bottom: 20px;
+  }
+  .stat-card {
+    background: white; border-radius: 10px; padding: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
+  .stat-value { font-size: 22px; font-weight: 700; color: #1e293b; margin-top: 4px; }
+  .stat-value.highlight { color: #2563eb; }
+  .stat-value.green { color: #16a34a; }
+  .stat-value.amber { color: #d97706; }
+  .stat-value.red { color: #dc2626; }
+
+  .subject-banner {
+    background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px;
+    padding: 16px; margin-bottom: 20px; display: none;
+  }
+  .subject-banner.visible { display: block; }
+  .subject-banner h3 { font-size: 14px; color: #1e40af; margin-bottom: 8px; }
+  .subject-detail { font-size: 13px; color: #334155; }
+  .subject-detail span { font-weight: 600; }
+  .percentile-bar {
+    height: 8px; background: #e2e8f0; border-radius: 4px; margin-top: 10px; position: relative;
+  }
+  .percentile-marker {
+    position: absolute; top: -4px; width: 16px; height: 16px;
+    background: #2563eb; border-radius: 50%; border: 2px solid white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3); transform: translateX(-50%);
+  }
+
+  .chart-container {
+    background: white; border-radius: 10px; padding: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 20px;
+  }
+  .chart-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+  .bar-chart { display: flex; align-items: flex-end; gap: 2px; height: 120px; }
+  .bar {
+    flex: 1; background: #3b82f6; border-radius: 3px 3px 0 0;
+    min-width: 8px; position: relative; transition: background 0.2s;
+    cursor: default;
+  }
+  .bar:hover { background: #1d4ed8; }
+  .bar.subject { background: #f59e0b; }
+  .bar.subject:hover { background: #d97706; }
+  .chart-labels {
+    display: flex; justify-content: space-between;
+    font-size: 11px; color: #94a3b8; margin-top: 6px;
+  }
+
+  .thin-market-warning {
+    background: #fef3c7; border: 1px solid #fcd34d; border-radius: 8px;
+    padding: 10px 14px; font-size: 13px; color: #92400e; margin-bottom: 20px;
+    display: none;
+  }
+  .thin-market-warning.visible { display: block; }
+
+  .table-container {
+    background: white; border-radius: 10px; overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .table-header {
+    padding: 14px 16px; font-size: 14px; font-weight: 600;
+    border-bottom: 1px solid #e2e8f0; display: flex;
+    justify-content: space-between; align-items: center;
+  }
+  .table-count { font-size: 12px; color: #64748b; font-weight: 400; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; padding: 10px 12px; font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.05em; color: #64748b;
+    border-bottom: 1px solid #e2e8f0; cursor: pointer; user-select: none;
+    white-space: nowrap;
+  }
+  th:hover { color: #1e293b; }
+  th .sort-arrow { margin-left: 4px; font-size: 10px; }
+  td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover { background: #f8fafc; }
+  .price-cell { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .type-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 500; background: #f1f5f9; color: #475569;
+  }
+</style>
+</head>
+<body>
+
+<div id="loading" class="loading">
+  <div class="spinner"></div>
+  <div>Loading comparable sales data...</div>
+</div>
+
+<div id="dashboard" class="dashboard">
+  <div class="header">
+    <h1 id="title">Comparable Sales</h1>
+    <div class="subtitle" id="subtitle"></div>
+  </div>
+
+  <div id="thin-warning" class="thin-market-warning">
+    Thin market warning: limited transactions found. Statistics may be less reliable.
+  </div>
+
+  <div id="subject-banner" class="subject-banner">
+    <h3>Subject Property</h3>
+    <div class="subject-detail" id="subject-detail"></div>
+    <div class="percentile-bar" id="percentile-bar" style="display:none">
+      <div class="percentile-marker" id="percentile-marker"></div>
+    </div>
+  </div>
+
+  <div class="stats-grid" id="stats-grid"></div>
+
+  <div class="chart-container">
+    <div class="chart-title">Price Distribution</div>
+    <div class="bar-chart" id="bar-chart"></div>
+    <div class="chart-labels" id="chart-labels"></div>
+  </div>
+
+  <div class="table-container">
+    <div class="table-header">
+      <span>Transactions</span>
+      <span class="table-count" id="table-count"></span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th data-sort="date">Date <span class="sort-arrow"></span></th>
+          <th data-sort="price">Price <span class="sort-arrow"></span></th>
+          <th data-sort="address">Address <span class="sort-arrow"></span></th>
+          <th data-sort="type">Type <span class="sort-arrow"></span></th>
+          <th data-sort="postcode">Postcode <span class="sort-arrow"></span></th>
+        </tr>
+      </thead>
+      <tbody id="table-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<script type="module">
+// --- MCP App connection ---
+// Try to load ext-apps SDK; fall back to listening for postMessage directly
+let appConnected = false;
+
+async function initApp() {
+  try {
+    const { App } = await import("https://esm.sh/@anthropic-ai/claude-code-mcp-apps@0.1.0");
+    const app = new App({ name: "Comps Dashboard", version: "1.0.0" });
+    await app.connect();
+    app.ontoolresult = (result) => {
+      const text = result.content?.find(c => c.type === "text")?.text;
+      if (text) render(JSON.parse(text));
+    };
+    appConnected = true;
+  } catch {
+    // Fallback: listen for postMessage (works in most MCP hosts)
+    window.addEventListener("message", (event) => {
+      try {
+        const msg = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        // Handle various message shapes from different hosts
+        const text = msg?.result?.content?.[0]?.text
+          || msg?.content?.[0]?.text
+          || msg?.text
+          || (typeof msg === "object" && msg.count !== undefined ? JSON.stringify(msg) : null);
+        if (text) render(typeof text === "string" ? JSON.parse(text) : text);
+      } catch { /* ignore non-JSON messages */ }
+    });
+  }
+}
+
+// Also support direct data injection (for FastAPI / CLI reuse)
+window.renderCompsData = function(data) { render(data); };
+
+// --- Check for embedded data (FastAPI/CLI mode) ---
+if (window.__COMPS_DATA__) {
+  render(window.__COMPS_DATA__);
+} else {
+  initApp();
+}
+
+// --- Rendering ---
+let currentData = null;
+let sortCol = "date";
+let sortAsc = false;
+
+function fmt(n) {
+  if (n == null) return "—";
+  return "\u00A3" + n.toLocaleString("en-GB");
+}
+
+function fmtDate(d) {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function render(data) {
+  currentData = data;
+  document.getElementById("loading").style.display = "none";
+  document.getElementById("dashboard").classList.add("visible");
+
+  // Header
+  const q = data.query || {};
+  document.getElementById("title").textContent =
+    `Comparable Sales \u2014 ${q.postcode || ""}`;
+  document.getElementById("subtitle").textContent =
+    `${data.count} transactions \u00B7 ${q.months || 24} months \u00B7 ${q.search_level || "sector"} level`;
+
+  // Thin market warning
+  if (data.thin_market) {
+    document.getElementById("thin-warning").classList.add("visible");
+  }
+
+  // Subject property
+  if (data.subject_property) {
+    const sp = data.subject_property;
+    const banner = document.getElementById("subject-banner");
+    banner.classList.add("visible");
+    let html = `<span>${sp.address}, ${sp.postcode}</span>`;
+    if (sp.last_sale) {
+      html += ` \u00B7 Last sale: ${fmt(sp.last_sale.price)} (${fmtDate(sp.last_sale.date)})`;
+    }
+    html += ` \u00B7 ${sp.transaction_count} recorded transaction${sp.transaction_count !== 1 ? "s" : ""}`;
+    document.getElementById("subject-detail").innerHTML = html;
+
+    if (data.subject_price_percentile != null) {
+      const bar = document.getElementById("percentile-bar");
+      bar.style.display = "block";
+      document.getElementById("percentile-marker").style.left =
+        `${data.subject_price_percentile}%`;
+    }
+  }
+
+  // Stats grid
+  const stats = [
+    { label: "Median", value: fmt(data.median), cls: "highlight" },
+    { label: "Mean", value: fmt(data.mean) },
+    { label: "25th Percentile", value: fmt(data.percentile_25) },
+    { label: "75th Percentile", value: fmt(data.percentile_75) },
+    { label: "Min", value: fmt(data.min) },
+    { label: "Max", value: fmt(data.max) },
+  ];
+  if (data.subject_vs_median_pct != null) {
+    const pct = data.subject_vs_median_pct;
+    const sign = pct >= 0 ? "+" : "";
+    const cls = pct > 5 ? "red" : pct < -5 ? "green" : "amber";
+    stats.push({ label: "vs Median", value: `${sign}${pct.toFixed(1)}%`, cls });
+  }
+  if (data.median_price_per_sqft != null) {
+    stats.push({ label: "Median \u00A3/sqft", value: fmt(data.median_price_per_sqft) });
+  }
+  if (data.epc_match_rate != null) {
+    stats.push({ label: "EPC Match Rate", value: `${(data.epc_match_rate * 100).toFixed(0)}%` });
+  }
+
+  document.getElementById("stats-grid").innerHTML = stats.map(s =>
+    `<div class="stat-card">
+      <div class="stat-label">${s.label}</div>
+      <div class="stat-value ${s.cls || ""}">${s.value}</div>
+    </div>`
+  ).join("");
+
+  // Price distribution chart (histogram)
+  renderChart(data.transactions || []);
+
+  // Transaction table
+  renderTable(data.transactions || []);
+}
+
+function renderChart(transactions) {
+  if (!transactions.length) return;
+
+  const prices = transactions.map(t => t.price).filter(p => p != null).sort((a, b) => a - b);
+  if (!prices.length) return;
+
+  const bucketCount = Math.min(20, Math.max(5, Math.ceil(prices.length / 3)));
+  const min = prices[0];
+  const max = prices[prices.length - 1];
+  const range = max - min || 1;
+  const bucketSize = range / bucketCount;
+
+  const buckets = new Array(bucketCount).fill(0);
+  for (const p of prices) {
+    const idx = Math.min(Math.floor((p - min) / bucketSize), bucketCount - 1);
+    buckets[idx]++;
+  }
+
+  const maxCount = Math.max(...buckets);
+  const chart = document.getElementById("bar-chart");
+
+  // Check if subject property price falls in any bucket
+  const subjectPrice = currentData?.subject_property?.last_sale?.price;
+
+  chart.innerHTML = buckets.map((count, i) => {
+    const height = maxCount > 0 ? (count / maxCount) * 100 : 0;
+    const bucketMin = min + i * bucketSize;
+    const bucketMax = bucketMin + bucketSize;
+    const isSubject = subjectPrice != null && subjectPrice >= bucketMin && subjectPrice < bucketMax + (i === bucketCount - 1 ? 1 : 0);
+    return `<div class="bar ${isSubject ? "subject" : ""}"
+      style="height:${Math.max(height, 2)}%"
+      title="${fmt(Math.round(bucketMin))} \u2013 ${fmt(Math.round(bucketMax))}: ${count} sale${count !== 1 ? "s" : ""}">
+    </div>`;
+  }).join("");
+
+  document.getElementById("chart-labels").innerHTML =
+    `<span>${fmt(min)}</span><span>${fmt(max)}</span>`;
+}
+
+function renderTable(transactions) {
+  document.getElementById("table-count").textContent = `${transactions.length} shown`;
+
+  const sorted = [...transactions].sort((a, b) => {
+    let va = a[sortCol], vb = b[sortCol];
+    if (sortCol === "address") {
+      va = buildAddress(a); vb = buildAddress(b);
+    } else if (sortCol === "type") {
+      va = a.property_type || ""; vb = b.property_type || "";
+    }
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    if (va < vb) return sortAsc ? -1 : 1;
+    if (va > vb) return sortAsc ? 1 : -1;
+    return 0;
+  });
+
+  const tbody = document.getElementById("table-body");
+  tbody.innerHTML = sorted.map(t => {
+    const typeLabel = {
+      D: "Detached", S: "Semi", T: "Terraced", F: "Flat", O: "Other"
+    }[t.property_type] || t.property_type || "—";
+    return `<tr>
+      <td>${fmtDate(t.date)}</td>
+      <td class="price-cell">${fmt(t.price)}</td>
+      <td>${buildAddress(t)}</td>
+      <td><span class="type-badge">${typeLabel}</span></td>
+      <td>${t.postcode || "—"}</td>
+    </tr>`;
+  }).join("");
+
+  // Update sort arrows
+  document.querySelectorAll("th[data-sort]").forEach(th => {
+    const arrow = th.querySelector(".sort-arrow");
+    if (th.dataset.sort === sortCol) {
+      arrow.textContent = sortAsc ? "\u25B2" : "\u25BC";
+    } else {
+      arrow.textContent = "";
+    }
+  });
+}
+
+function buildAddress(t) {
+  return [t.saon, t.paon, t.street, t.locality].filter(Boolean).join(", ") || "—";
+}
+
+// Sort on header click
+document.querySelectorAll("th[data-sort]").forEach(th => {
+  th.addEventListener("click", () => {
+    const col = th.dataset.sort;
+    if (sortCol === col) { sortAsc = !sortAsc; }
+    else { sortCol = col; sortAsc = col === "date" ? false : true; }
+    if (currentData) renderTable(currentData.transactions || []);
+  });
+});
+</script>
+</body>
+</html>
