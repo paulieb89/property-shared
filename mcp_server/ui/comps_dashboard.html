@@ -169,44 +169,91 @@
 </div>
 
 <script type="module">
-// --- MCP App connection ---
-// Try to load ext-apps SDK; fall back to listening for postMessage directly
-let appConnected = false;
+// --- Data injection: supports multiple host environments ---
+//
+// 1. window.__COMPS_DATA__      — FastAPI / CLI pre-embedded
+// 2. window.openai.toolOutput   — LEGACY(openai-apps-sdk): ChatGPT injects
+//                                  structuredContent here.  Remove once ChatGPT
+//                                  migrates to MCP Apps.
+// 3. MCP Apps (ontoolresult)    — Future standard (Claude, VS Code, ChatGPT)
+// 4. postMessage fallback       — Generic iframe host
+// 5. window.renderCompsData()   — Manual / programmatic
 
-async function initApp() {
-  try {
-    const { App } = await import("https://esm.sh/@anthropic-ai/claude-code-mcp-apps@0.1.0");
-    const app = new App({ name: "Comps Dashboard", version: "1.0.0" });
-    await app.connect();
-    app.ontoolresult = (result) => {
-      const text = result.content?.find(c => c.type === "text")?.text;
-      if (text) render(JSON.parse(text));
-    };
-    appConnected = true;
-  } catch {
-    // Fallback: listen for postMessage (works in most MCP hosts)
-    window.addEventListener("message", (event) => {
-      try {
-        const msg = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-        // Handle various message shapes from different hosts
-        const text = msg?.result?.content?.[0]?.text
-          || msg?.content?.[0]?.text
-          || msg?.text
-          || (typeof msg === "object" && msg.count !== undefined ? JSON.stringify(msg) : null);
-        if (text) render(typeof text === "string" ? JSON.parse(text) : text);
-      } catch { /* ignore non-JSON messages */ }
-    });
-  }
-}
-
-// Also support direct data injection (for FastAPI / CLI reuse)
 window.renderCompsData = function(data) { render(data); };
 
-// --- Check for embedded data (FastAPI/CLI mode) ---
+// (1) Pre-embedded data
 if (window.__COMPS_DATA__) {
   render(window.__COMPS_DATA__);
 } else {
-  initApp();
+  // (2) LEGACY(openai-apps-sdk): poll window.openai.toolOutput
+  //     ChatGPT sets window.openai globals and fires "openai:set_globals".
+  const SET_GLOBALS = "openai:set_globals";
+
+  function tryOpenAiGlobal() {
+    const output = window.openai?.toolOutput;
+    if (output && typeof output === "object" && output.count !== undefined) {
+      render(output);
+      return true;
+    }
+    return false;
+  }
+
+  if (!tryOpenAiGlobal()) {
+    window.addEventListener(SET_GLOBALS, () => tryOpenAiGlobal(), { once: false });
+  }
+
+  // (3) MCP Apps — @modelcontextprotocol/ext-apps
+  //     Standard path for Claude.ai, VS Code, Goose, and future ChatGPT.
+  (async () => {
+    try {
+      const { App, applyDocumentTheme, applyHostStyleVariables, applyHostFonts } =
+        await import("https://esm.sh/@modelcontextprotocol/ext-apps@0.1.4");
+
+      const app = new App({ name: "Property Comps Dashboard", version: "1.0.0" });
+
+      // Register ALL handlers BEFORE connect() per MCP Apps spec.
+      app.ontoolresult = (result) => {
+        if (result.structuredContent) { render(result.structuredContent); return; }
+        const text = result.content?.find(c => c.type === "text")?.text;
+        if (text) try { render(JSON.parse(text)); } catch {}
+      };
+
+      app.ontoolinput = (params) => {
+        // Show loading state with postcode hint while tool executes
+        const pc = params.arguments?.postcode;
+        if (pc) {
+          document.querySelector("#loading div:last-child").textContent =
+            `Searching comparable sales for ${pc}…`;
+        }
+      };
+
+      app.onhostcontextchanged = (ctx) => {
+        if (ctx.theme) applyDocumentTheme(ctx.theme);
+        if (ctx.styles?.variables) applyHostStyleVariables(ctx.styles.variables);
+        if (ctx.styles?.css?.fonts) applyHostFonts(ctx.styles.css.fonts);
+        if (ctx.safeAreaInsets) {
+          const { top, right, bottom, left } = ctx.safeAreaInsets;
+          document.body.style.padding = `${top}px ${right}px ${bottom}px ${left}px`;
+        }
+      };
+
+      await app.connect();
+    } catch { /* ext-apps not available — other injection paths will handle it */ }
+  })();
+
+  // (4) postMessage fallback (generic iframe hosts)
+  window.addEventListener("message", (event) => {
+    try {
+      const msg = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+      const payload = msg?.structuredContent
+        || msg?.result?.structuredContent
+        || msg?.result?.content?.[0]?.text
+        || msg?.content?.[0]?.text
+        || msg?.text
+        || (typeof msg === "object" && msg.count !== undefined ? msg : null);
+      if (payload) render(typeof payload === "string" ? JSON.parse(payload) : payload);
+    } catch { /* ignore non-JSON messages */ }
+  });
 }
 
 // --- Rendering ---
