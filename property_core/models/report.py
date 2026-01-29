@@ -75,6 +75,19 @@ class RentalAnalysis(BaseModel):
     yield_assessment: Optional[str] = None  # "strong", "average", "weak"
 
 
+class YieldAnalysis(BaseModel):
+    """Combined sale + rental yield analysis for a postcode."""
+    postcode: str
+    median_sale_price: Optional[int] = None
+    sale_count: int = 0
+    median_monthly_rent: Optional[int] = None
+    rental_count: int = 0
+    gross_yield_pct: Optional[float] = None
+    yield_assessment: Optional[str] = None  # "strong", "average", "weak"
+    data_quality: str = "insufficient"  # "good", "low", "insufficient"
+    thin_market: bool = True
+
+
 class CurrentMarket(BaseModel):
     """Current sales market snapshot."""
     search_radius_miles: float

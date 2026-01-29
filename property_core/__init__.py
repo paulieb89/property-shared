@@ -12,6 +12,7 @@ from property_core.ppd_client import PricePaidDataClient
 from property_core.ppd_service import PPDService
 from property_core.rental_service import analyze_rentals
 from property_core.report_service import PropertyReportService
+from property_core.yield_service import calculate_yield
 from property_core.rightmove_location import RightmoveLocationAPI
 from property_core.rightmove_scraper import fetch_listing, fetch_listings
 
@@ -24,6 +25,7 @@ __all__ = [
     "PropertyReportService",
     "RightmoveLocationAPI",
     "analyze_rentals",
+    "calculate_yield",
     "compute_enriched_stats",
     "enrich_comps_with_epc",
     "fetch_listing",

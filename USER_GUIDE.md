@@ -280,6 +280,13 @@ import asyncio
 rental = asyncio.run(analyze_rentals("SW1A 1AA", purchase_price=500000))
 print(f"Median: £{rental.median_rent_monthly}/mo, Yield: {rental.gross_yield_pct}%")
 
+# Yield analysis (combines PPD sales + Rightmove rentals)
+from property_core import calculate_yield
+result = asyncio.run(calculate_yield("SW1A 1AA"))
+print(f"Sale: £{result.median_sale_price}, Rent: £{result.median_monthly_rent}/mo")
+print(f"Gross yield: {result.gross_yield_pct}% ({result.yield_assessment})")
+print(f"Data quality: {result.data_quality}")
+
 # Planning (residential IP only, requires playwright + openai)
 from property_core.planning_scraper import scrape_planning_application, search_planning_by_postcode
 

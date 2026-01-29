@@ -24,15 +24,14 @@ def _setup_mcp() -> None:
     try:
         from mcp_server.server import mcp as mcp_server
 
-        starlette_app = mcp_server.streamable_http_app()
+        _mcp_asgi_handler = mcp_server.streamable_http_app()
         _mcp_session_manager = mcp_server._session_manager
-        _mcp_asgi_handler = getattr(starlette_app.routes[0], "endpoint", None)
-    except (ImportError, IndexError):
+    except ImportError:
         pass
 
 
 class MCPMiddleware:
-    """ASGI middleware that routes /mcp to the MCP handler."""
+    """ASGI middleware that routes /mcp to the MCP Starlette app."""
 
     def __init__(self, app: ASGIApp, mcp_handler: Any) -> None:
         self.app = app
@@ -40,6 +39,8 @@ class MCPMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http" and scope.get("path") == "/mcp":
+            # Rewrite path so the MCP Starlette app sees "/" on its root route
+            scope = dict(scope, path="/mcp", root_path="")
             await self.mcp_handler(scope, receive, send)
         else:
             await self.app(scope, receive, send)
