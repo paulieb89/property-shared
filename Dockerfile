@@ -20,8 +20,8 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --extra api --extra mcp
 
-# Install Playwright browsers if planning extra is available
-RUN playwright install chromium 2>/dev/null || true
+# Planning disabled: scraping requires UK residential IP
+# RUN uv sync ... --extra planning && playwright install chromium
 
 # Copy application code
 COPY app ./app

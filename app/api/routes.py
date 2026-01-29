@@ -1,12 +1,13 @@
 from fastapi import APIRouter
 
-from .v1 import epc, health, meta, planning, ppd, report, rightmove
+from .v1 import epc, health, meta, ppd, report, rightmove
+# from .v1 import planning  # Disabled: scraping requires UK residential IP
 
 api_router = APIRouter(prefix="/v1")
 api_router.include_router(health.router)
 api_router.include_router(ppd.router)
 api_router.include_router(epc.router)
 api_router.include_router(rightmove.router)
-api_router.include_router(planning.router)
+# api_router.include_router(planning.router)  # Disabled: scraping requires UK residential IP
 api_router.include_router(report.router)
 api_router.include_router(meta.router)

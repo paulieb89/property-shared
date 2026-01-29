@@ -1,6 +1,12 @@
 """Domain models for property_core."""
 
 from property_core.models.epc import EPCData
+from property_core.models.planning import (
+    Council,
+    CouncilSummary,
+    LocalAuthority,
+    SearchUrls,
+)
 from property_core.models.ppd import (
     PPDCompsQuery,
     PPDCompsResponse,
@@ -21,10 +27,13 @@ from property_core.models.report import (
 from property_core.models.rightmove import RightmoveListingDetail, RightmoveListing
 
 __all__ = [
+    "Council",
+    "CouncilSummary",
     "CurrentMarket",
     "DataSource",
     "EPCData",
     "EnergyPerformance",
+    "LocalAuthority",
     "MarketAnalysis",
     "PPDCompsQuery",
     "PPDCompsResponse",
@@ -36,5 +45,6 @@ __all__ = [
     "RightmoveListingDetail",
     "SaleHistory",
     "SaleRecord",
+    "SearchUrls",
     "SubjectProperty",
 ]

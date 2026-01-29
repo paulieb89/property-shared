@@ -224,7 +224,7 @@ class PlanningService:
             "council_found": council is not None,
         }
         if include_raw:
-            result["postcode_data"] = la_info.get("raw")
+            result["raw"] = la_info.get("raw")
         return result
 
     def get_council(self, code: str) -> Optional[Dict[str, Any]]:

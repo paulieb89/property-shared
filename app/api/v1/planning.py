@@ -2,35 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
-
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, HttpUrl
 
+from app.schemas.planning import (
+    Council,
+    CouncilForPostcodeResponse,
+    CouncilsListResponse,
+    PlanningApplication,
+    PlanningScraperRequest,
+    PlanningScraperResponse,
+    PlanningSearchResponse,
+    ProbeRequest,
+    ProbeResponse,
+    SearchResultsRequest,
+    SearchResultsResponse,
+)
 from property_core.planning_service import PlanningService
 
 router = APIRouter(prefix="/planning", tags=["planning"])
 service = PlanningService()
-
-
-class PlanningScraperRequest(BaseModel):
-    """Request to scrape a planning application."""
-    url: str
-    save_screenshots: bool = False
-
-
-class PlanningScraperResponse(BaseModel):
-    """Response from planning scraper."""
-    url: str
-    council_system: str
-    screenshots_captured: int
-    data: dict[str, Any]
-
-
-class PlanningScrapeError(BaseModel):
-    """Error response."""
-    url: str
-    error: str
 
 
 @router.post("/scrape", response_model=PlanningScraperResponse)
@@ -63,26 +53,6 @@ def scrape_application(
         raise HTTPException(status_code=502, detail=f"Scrape failed: {e}") from e
 
 
-class ProbeRequest(BaseModel):
-    """Request for connectivity probe."""
-    url: str
-    timeout_ms: int = 30000
-
-
-class ProbeResponse(BaseModel):
-    """Diagnostic probe response."""
-    url: str
-    success: bool
-    page_title: Optional[str]
-    status_code: Optional[int]
-    load_time_ms: Optional[int]
-    screenshot_base64: Optional[str]
-    html_snippet: Optional[str]
-    blocking_indicators: list[str]
-    error: Optional[str]
-    proxy_used: Optional[str] = None
-
-
 @router.post("/probe", response_model=ProbeResponse)
 def probe_url(request: ProbeRequest) -> ProbeResponse:
     """
@@ -106,10 +76,10 @@ def probe_url(request: ProbeRequest) -> ProbeResponse:
         raise HTTPException(status_code=502, detail=f"Probe failed: {e}") from e
 
 
-@router.get("/search")
+@router.get("/search", response_model=PlanningSearchResponse)
 def search_by_postcode(
     postcode: str = Query(..., min_length=2, description="UK postcode"),
-) -> dict[str, Any]:
+) -> PlanningSearchResponse:
     """Search for planning applications by postcode.
 
     Looks up the council for this postcode and returns search URLs.
@@ -119,68 +89,47 @@ def search_by_postcode(
     Note: Actual scraping of search results requires UK residential IP.
     """
     try:
-        return service.search(postcode)
+        result = service.search(postcode)
+        return PlanningSearchResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Planning search failed: {e}") from e
 
 
-@router.get("/council-for-postcode")
+@router.get("/council-for-postcode", response_model=CouncilForPostcodeResponse)
 def council_for_postcode(
     postcode: str = Query(..., min_length=2, description="UK postcode"),
     include_raw: bool = Query(False, description="Include full postcodes.io response"),
-) -> dict[str, Any]:
+) -> CouncilForPostcodeResponse:
     """Look up the planning council for a UK postcode.
 
     Uses postcodes.io to identify the local authority, then matches to our
     councils database. Returns council info if found, otherwise returns
     local authority info for reference.
+
+    When include_raw=true, includes full postcodes.io data (NHS region,
+    constituency, LSOA, police force, etc.) in the 'raw' field.
     """
     try:
-        return service.council_for_postcode(postcode, include_raw=include_raw)
+        result = service.council_for_postcode(postcode, include_raw=include_raw)
+        return CouncilForPostcodeResponse(**result)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Postcode lookup failed: {e}") from e
 
 
-@router.get("/councils")
-def list_councils() -> dict[str, Any]:
+@router.get("/councils", response_model=CouncilsListResponse)
+def list_councils() -> CouncilsListResponse:
     """List verified UK council planning portals."""
-    return service.list_councils()
+    result = service.list_councils()
+    return CouncilsListResponse(**result)
 
 
-@router.get("/council/{code}")
-def get_council(code: str) -> dict[str, Any]:
+@router.get("/council/{code}", response_model=Council)
+def get_council(code: str) -> Council:
     """Get details for a specific council by code."""
     council = service.get_council(code)
     if not council:
         raise HTTPException(status_code=404, detail=f"Council '{code}' not found")
-    return council
-
-
-class SearchResultsRequest(BaseModel):
-    """Request to search for planning applications."""
-    postcode: str
-    portal_url: Optional[str] = None
-    system: Optional[str] = None
-    max_results: int = 10
-
-
-class PlanningApplication(BaseModel):
-    """Single planning application result."""
-    reference: Optional[str] = None
-    address: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[str] = None
-    link: Optional[str] = None
-
-
-class SearchResultsResponse(BaseModel):
-    """Response with planning search results."""
-    postcode: str
-    council_name: Optional[str] = None
-    system: Optional[str] = None
-    portal_url: str
-    results: list[PlanningApplication]
-    count: int
+    return Council(**council)
 
 
 @router.post("/search-results", response_model=SearchResultsResponse)
