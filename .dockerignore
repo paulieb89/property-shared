@@ -52,6 +52,15 @@ feedback*.md
 .env
 .env.*
 
+# Node.js (MCP App build tools - only need built HTML)
+**/node_modules
+mcp_server/mcp-app/dist
+mcp_server/mcp-app/src
+mcp_server/mcp-app/*.json
+mcp_server/mcp-app/*.ts
+mcp_server/mcp-app/*.js
+mcp_server/mcp-app/*.html
+
 # Misc
 .DS_Store
 Thumbs.db
