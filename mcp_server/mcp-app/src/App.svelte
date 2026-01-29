@@ -1,4 +1,8 @@
 <script lang="ts">
+/**
+ * Main MCP App entry point.
+ * Handles MCP lifecycle and routes to appropriate view based on data type.
+ */
 import { onMount } from "svelte";
 import {
   App,
@@ -8,36 +12,28 @@ import {
   type McpUiHostContext,
 } from "@modelcontextprotocol/ext-apps";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import StatsPanel from "./StatsPanel.svelte";
-import CompsTable from "./CompsTable.svelte";
 
-interface Transaction {
-  date: string;
-  paon?: string;
-  street?: string;
-  postcode?: string;
-  price: number;
-  property_type?: string;
-}
+import type { ToolData, DataType, CompsData, YieldData } from "./lib/types";
+import { isYieldData, isCompsData } from "./lib/types";
+import CompsView from "./views/CompsView.svelte";
+import YieldView from "./views/YieldView.svelte";
 
-interface CompsData {
-  median?: number;
-  mean?: number;
-  count?: number;
-  percentile_25?: number;
-  percentile_75?: number;
-  transactions?: Transaction[];
-}
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
 
-// State using Svelte 5 runes
 let app = $state<App | null>(null);
 let hostContext = $state<McpUiHostContext | undefined>();
 let loading = $state(true);
-let loadingMessage = $state("Loading comparable sales...");
+let loadingMessage = $state("Loading...");
 let error = $state<string | null>(null);
-let data = $state<CompsData | null>(null);
+let data = $state<ToolData | null>(null);
+let dataType = $state<DataType | null>(null);
 
-// Apply host styles reactively when hostContext changes
+// ---------------------------------------------------------------------------
+// Host styling
+// ---------------------------------------------------------------------------
+
 $effect(() => {
   if (hostContext?.theme) {
     applyDocumentTheme(hostContext.theme);
@@ -50,23 +46,49 @@ $effect(() => {
   }
 });
 
-function extractCompsData(result: CallToolResult): CompsData | null {
+// ---------------------------------------------------------------------------
+// Data extraction
+// ---------------------------------------------------------------------------
+
+function extractToolData(result: CallToolResult): { data: ToolData | null; type: DataType | null } {
+  let parsed: unknown = null;
+
   if (result.structuredContent) {
-    return result.structuredContent as CompsData;
-  }
-  const textContent = result.content?.find((c) => c.type === "text");
-  if (textContent && "text" in textContent) {
-    try {
-      return JSON.parse(textContent.text) as CompsData;
-    } catch {
-      return null;
+    parsed = result.structuredContent;
+  } else {
+    const textContent = result.content?.find((c) => c.type === "text");
+    if (textContent && "text" in textContent) {
+      try {
+        parsed = JSON.parse(textContent.text);
+      } catch {
+        return { data: null, type: null };
+      }
     }
   }
-  return null;
+
+  if (!parsed) return { data: null, type: null };
+
+  if (isYieldData(parsed)) {
+    return { data: parsed, type: "yield" };
+  }
+  if (isCompsData(parsed)) {
+    return { data: parsed, type: "comps" };
+  }
+
+  // Fallback: assume comps if has median/mean
+  if (typeof parsed === "object" && parsed !== null && ("median" in parsed || "mean" in parsed)) {
+    return { data: parsed as CompsData, type: "comps" };
+  }
+
+  return { data: null, type: null };
 }
 
+// ---------------------------------------------------------------------------
+// MCP Lifecycle
+// ---------------------------------------------------------------------------
+
 onMount(async () => {
-  const instance = new App({ name: "Property Comps Dashboard", version: "1.0.0" });
+  const instance = new App({ name: "Property Dashboard", version: "1.0.0" });
 
   instance.onteardown = async () => {
     console.info("[MCP App] Teardown");
@@ -77,18 +99,25 @@ onMount(async () => {
     console.info("[MCP App] Tool input:", params);
     loading = true;
     error = null;
+
     const postcode = params.arguments?.postcode;
-    if (postcode) {
-      loadingMessage = `Searching comparable sales for ${postcode}...`;
+    const toolName = params.name || "";
+
+    // Detect tool type from name for loading message
+    if (toolName.includes("yield")) {
+      loadingMessage = postcode ? `Calculating yield for ${postcode}...` : "Calculating rental yield...";
+    } else {
+      loadingMessage = postcode ? `Searching comparable sales for ${postcode}...` : "Loading comparable sales...";
     }
   };
 
   instance.ontoolresult = (result) => {
     console.info("[MCP App] Tool result:", result);
     loading = false;
-    const compsData = extractCompsData(result);
-    if (compsData) {
-      data = compsData;
+    const extracted = extractToolData(result);
+    if (extracted.data) {
+      data = extracted.data;
+      dataType = extracted.type;
     }
   };
 
@@ -122,9 +151,10 @@ onMount(async () => {
     <div class="loading">{loadingMessage}</div>
   {:else if error}
     <div class="error">{error}</div>
-  {:else if data}
-    <StatsPanel {data} />
-    <CompsTable transactions={data.transactions ?? []} />
+  {:else if data && dataType === "yield"}
+    <YieldView data={data as YieldData} />
+  {:else if data && dataType === "comps"}
+    <CompsView data={data as CompsData} />
   {:else}
     <div class="loading">No data available</div>
   {/if}

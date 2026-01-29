@@ -14,13 +14,13 @@ import anyio
 import mcp.types as types
 from mcp.server.fastmcp import FastMCP
 
-from property_core import PPDService
+from property_core import PPDService, calculate_yield
 
 UI_DIR = Path(__file__).parent / "ui"
 
 mcp = FastMCP(
     "property-server",
-    instructions="UK property comparables tool. Use property_comps to get comparable sales for any UK postcode.",
+    instructions="UK property data tools. Use property_comps for comparable sales, property_yield for rental yield analysis.",
     host="0.0.0.0",
     port=8080,
     stateless_http=True,
@@ -43,18 +43,18 @@ TOOL_UI_META = {
 
 
 @lru_cache(maxsize=None)
-def _load_widget_html() -> str:
-    return (UI_DIR / "comps_dashboard.html").read_text()
+def _load_dashboard_html() -> str:
+    return (UI_DIR / "property_dashboard.html").read_text()
 
 
 @mcp.resource(
     WIDGET_URI,
-    name="Comps dashboard",
-    description="Comparable sales dashboard with price statistics",
+    name="Property dashboard",
+    description="Property data dashboard - comps and yield analysis",
     mime_type=WIDGET_MIME,
 )
 def comps_dashboard_resource() -> str:
-    return _load_widget_html()
+    return _load_dashboard_html()
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +104,70 @@ async def property_comps(
         ],
         structuredContent=data,
         _meta=TOOL_UI_META,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Yield Tool + UI
+# ---------------------------------------------------------------------------
+
+YIELD_URI = "ui://property/yield-dashboard"
+
+YIELD_UI_META = {
+    "ui": {"resourceUri": YIELD_URI},
+    "ui/resourceUri": YIELD_URI,
+}
+
+
+@mcp.resource(
+    YIELD_URI,
+    name="Property dashboard",
+    description="Property data dashboard - comps and yield analysis",
+    mime_type=WIDGET_MIME,
+)
+def yield_dashboard_resource() -> str:
+    return _load_dashboard_html()
+
+
+@mcp.tool(meta=YIELD_UI_META)
+async def property_yield(
+    postcode: str,
+    months: int = 24,
+    search_level: str = "sector",
+    radius: float = 0.5,
+) -> types.CallToolResult:
+    """Calculate rental yield for a UK postcode.
+
+    Combines Land Registry sales data with Rightmove rental listings.
+
+    Args:
+        postcode: UK postcode (e.g. "NG11", "SW1A 1AA")
+        months: Sales lookback period in months (default 24)
+        search_level: "sector" (recommended), "district", or "postcode"
+        radius: Rental search radius in miles (default 0.5)
+    """
+    result = await calculate_yield(
+        postcode=postcode,
+        months=months,
+        search_level=search_level,
+        radius=radius,
+    )
+    data = result.model_dump(mode="json")
+
+    return types.CallToolResult(
+        content=[
+            types.TextContent(
+                type="text",
+                text=json.dumps({
+                    "summary": f"Yield analysis for {postcode}",
+                    "gross_yield_pct": data.get("gross_yield_pct"),
+                    "yield_assessment": data.get("yield_assessment"),
+                    "data_quality": data.get("data_quality"),
+                }),
+            )
+        ],
+        structuredContent=data,
+        _meta=YIELD_UI_META,
     )
 
 
