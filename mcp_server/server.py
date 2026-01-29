@@ -44,8 +44,7 @@ TOOL_UI_META = {
 
 @lru_cache(maxsize=None)
 def _load_widget_html() -> str:
-    # Use Vite-bundled version (follows official MCP Apps pattern exactly)
-    return (UI_DIR / "comps_dashboard_vite.html").read_text()
+    return (UI_DIR / "comps_dashboard.html").read_text()
 
 
 @mcp.resource(
