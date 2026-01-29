@@ -1,0 +1,51 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+  background: var(--color-background-primary, #fff);
+  color: var(--color-text-primary, #1a1a1a);
+  padding: 16px;
+  line-height: 1.5;
+}
+
+#loading {
+  text-align: center;
+  padding: 40px;
+  color: var(--color-text-secondary, #666);
+}
+
+#stats {
+  margin-bottom: 20px;
+  padding: 16px;
+  background: var(--color-background-secondary, #f5f5f5);
+  border-radius: var(--border-radius-md, 8px);
+}
+
+#stats p {
+  margin: 4px 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-text-sm-size, 14px);
+}
+
+th, td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border-primary, #e0e0e0);
+}
+
+th {
+  background: var(--color-background-secondary, #f5f5f5);
+  font-weight: var(--font-weight-semibold, 600);
+}
+
+tr:hover {
+  background: var(--color-background-ghost, rgba(0,0,0,0.02));
+}

@@ -1,9 +1,9 @@
 {
-  "servers": {
+  "mcpServers": {
     "property": {
       "command": "uv",
       "args": ["run", "--extra", "mcp", "property-mcp"],
-      "cwd": "/home/bch/company/dev/property/property_shared"
+      "env": {}
     }
   }
 }

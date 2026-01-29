@@ -178,26 +178,23 @@
 
 window.renderCompsData = function(data) { render(data); };
 
-// (1) Pre-embedded data
-if (window.__COMPS_DATA__) {
-  render(window.__COMPS_DATA__);
-} else {
-  // (2) MCP Apps — @modelcontextprotocol/ext-apps
+// (1) Pre-embedded data — check moved to end of script after render() is defined
+// (2) MCP Apps — @modelcontextprotocol/ext-apps
+if (!window.__COMPS_DATA__) {
   (async () => {
     try {
       const { App, applyDocumentTheme, applyHostStyleVariables, applyHostFonts } =
-        await import("https://esm.sh/@modelcontextprotocol/ext-apps@0.1.4");
+        await import("https://esm.sh/@modelcontextprotocol/ext-apps@1.0.1");
 
-      const app = new App({ name: "Property Comps Dashboard", version: "1.0.0" });
+      const app = new App(
+        { name: "Property Comps Dashboard", version: "1.0.0" },
+        { tools: { listChanged: true } }, // capabilities
+        { autoResize: true }
+      );
 
       // Register ALL handlers BEFORE connect() per MCP Apps spec.
-      app.ontoolresult = (result) => {
-        if (result.structuredContent) { render(result.structuredContent); return; }
-        const text = result.content?.find(c => c.type === "text")?.text;
-        if (text) try { render(JSON.parse(text)); } catch {}
-      };
-
       app.ontoolinput = (params) => {
+        console.log("[MCP App] ontoolinput:", params);
         const pc = params.arguments?.postcode;
         if (pc) {
           document.querySelector("#loading div:last-child").textContent =
@@ -205,7 +202,19 @@ if (window.__COMPS_DATA__) {
         }
       };
 
+      app.ontoolresult = (result) => {
+        console.log("[MCP App] ontoolresult:", result);
+        if (result.structuredContent) { render(result.structuredContent); return; }
+        const text = result.content?.find(c => c.type === "text")?.text;
+        if (text) try { render(JSON.parse(text)); } catch {}
+      };
+
+      app.ontoolcancelled = (params) => {
+        console.log("[MCP App] ontoolcancelled:", params);
+      };
+
       app.onhostcontextchanged = (ctx) => {
+        console.log("[MCP App] onhostcontextchanged:", ctx);
         if (ctx.theme) applyDocumentTheme(ctx.theme);
         if (ctx.styles?.variables) applyHostStyleVariables(ctx.styles.variables);
         if (ctx.styles?.css?.fonts) applyHostFonts(ctx.styles.css.fonts);
@@ -215,8 +224,31 @@ if (window.__COMPS_DATA__) {
         }
       };
 
+      app.onteardown = async () => {
+        console.log("[MCP App] onteardown");
+        return {};
+      };
+
+      app.onerror = (err) => {
+        console.error("[MCP App] Error:", err);
+      };
+
+      console.log("[MCP App] Connecting...");
       await app.connect();
-    } catch { /* ext-apps not available — postMessage fallback below */ }
+      console.log("[MCP App] Connected successfully");
+
+      // Apply initial host context after connect
+      const ctx = app.getHostContext();
+      if (ctx) {
+        console.log("[MCP App] Initial host context:", ctx);
+        if (ctx.theme) applyDocumentTheme(ctx.theme);
+        if (ctx.styles?.variables) applyHostStyleVariables(ctx.styles.variables);
+        if (ctx.styles?.css?.fonts) applyHostFonts(ctx.styles.css.fonts);
+      }
+    } catch (err) {
+      console.warn("[MCP App] Failed to initialize:", err.message || err);
+      // Fall through to postMessage fallback
+    }
   })();
 
   // (3) postMessage fallback (generic iframe hosts)
@@ -416,6 +448,11 @@ document.querySelectorAll("th[data-sort]").forEach(th => {
     if (currentData) renderTable(currentData.transactions || []);
   });
 });
+
+// (1) Pre-embedded data — check at end after render() is defined
+if (window.__COMPS_DATA__) {
+  render(window.__COMPS_DATA__);
+}
 </script>
 </body>
 </html>

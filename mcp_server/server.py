@@ -1,66 +1,41 @@
-"""Property MCP server — thin wrapper over property_core.
+"""Property MCP server — minimal version with one tool + UI.
 
 Run:  uv run property-mcp
-Or:   uv run python -m mcp_server.server
 """
 
 from __future__ import annotations
 
 import json
-import os
-from functools import lru_cache
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Optional
 
+import anyio
 import mcp.types as types
 from mcp.server.fastmcp import FastMCP
-from mcp.server.transport_security import TransportSecuritySettings
 
-from property_core import PPDService, PlanningService
-from property_core.postcode_client import PostcodeClient
+from property_core import PPDService
 
 UI_DIR = Path(__file__).parent / "ui"
 
-# Build allowed hosts for DNS rebinding protection.
-# Always allow localhost; add the public hostname when deployed.
-_allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
-_public_host = os.environ.get("MCP_PUBLIC_HOST", "property-shared.fly.dev")
-if _public_host:
-    _allowed_hosts.append(_public_host)
-
 mcp = FastMCP(
     "property-server",
-    instructions=(
-        "UK property data tools. Use property_comps to get comparable sales "
-        "with price statistics for any UK postcode. Use property_postcode_info "
-        "to look up local authority and area details."
-    ),
+    instructions="UK property comparables tool. Use property_comps to get comparable sales for any UK postcode.",
     host="0.0.0.0",
     port=8080,
     stateless_http=True,
-    transport_security=TransportSecuritySettings(
-        enable_dns_rebinding_protection=True,
-        allowed_hosts=_allowed_hosts,
-    ),
 )
 
-# ---------------------------------------------------------------------------
-# Services (instantiated once)
-# ---------------------------------------------------------------------------
+# Service
 _ppd = PPDService()
-_planning = PlanningService()
-_postcode = PostcodeClient()
 
 # ---------------------------------------------------------------------------
-# UI resource — MCP Apps standard
+# UI Resource
 # ---------------------------------------------------------------------------
 
 WIDGET_URI = "ui://property/comps-dashboard"
 WIDGET_MIME = "text/html;profile=mcp-app"
 
-# MCP Apps tool metadata — include both nested and flat key for host compat.
-# Hosts may look up _meta["ui/resourceUri"] (flat) or _meta.ui.resourceUri
-# (nested).  The ext-apps SDK registerAppTool() sets both; we mirror that.
 TOOL_UI_META = {
     "ui": {"resourceUri": WIDGET_URI},
     "ui/resourceUri": WIDGET_URI,
@@ -69,7 +44,8 @@ TOOL_UI_META = {
 
 @lru_cache(maxsize=None)
 def _load_widget_html() -> str:
-    return (UI_DIR / "comps_dashboard.html").read_text()
+    # Use Vite-bundled version (follows official MCP Apps pattern exactly)
+    return (UI_DIR / "comps_dashboard_vite.html").read_text()
 
 
 @mcp.resource(
@@ -83,18 +59,11 @@ def comps_dashboard_resource() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Tools
+# Tool
 # ---------------------------------------------------------------------------
 
-@mcp.tool(
-    annotations={
-        "readOnlyHint": True,
-        "openWorldHint": False,
-        "destructiveHint": False,
-    },
-    meta=TOOL_UI_META,
-)
-def property_comps(
+@mcp.tool(meta=TOOL_UI_META)
+async def property_comps(
     postcode: str,
     months: int = 24,
     limit: int = 30,
@@ -103,22 +72,22 @@ def property_comps(
 ) -> types.CallToolResult:
     """Get comparable property sales for a UK postcode.
 
-    Returns price statistics (median, mean, percentiles) and individual
-    transactions from the Land Registry Price Paid Data.
-
     Args:
-        postcode: UK postcode (e.g. "SW1A 1AA", "B1 1BB")
+        postcode: UK postcode (e.g. "SW1A 1AA", "NG11 9HD")
         months: Lookback period in months (default 24)
-        limit: Max transactions to return (default 30, max 200)
-        search_level: "sector" (e.g. SW1A 1), "district" (SW1A), or "postcode" (exact)
-        address: Optional address to identify a subject property for comparison
+        limit: Max transactions to return (default 30)
+        search_level: "sector" (recommended), "district", or "postcode"
+        address: Optional street address to identify subject property
     """
-    result = _ppd.comps(
-        postcode=postcode,
-        months=months,
-        limit=limit,
-        search_level=search_level,
-        address=address,
+    result = await anyio.to_thread.run_sync(
+        partial(
+            _ppd.comps,
+            postcode=postcode,
+            months=months,
+            limit=limit,
+            search_level=search_level,
+            address=address,
+        )
     )
     data = result.model_dump(mode="json")
     count = len(data.get("transactions", []))
@@ -127,54 +96,16 @@ def property_comps(
         content=[
             types.TextContent(
                 type="text",
-                text=f"Found {count} comparable sales for {postcode}",
+                text=json.dumps({
+                    "summary": f"Found {count} comparable sales for {postcode}",
+                    "median": data.get("median"),
+                    "count": count,
+                }),
             )
         ],
         structuredContent=data,
         _meta=TOOL_UI_META,
     )
-
-
-@mcp.tool()
-def property_transactions(
-    postcode: str,
-    limit: int = 20,
-) -> str:
-    """Search Land Registry transactions by postcode.
-
-    Args:
-        postcode: UK postcode or prefix (e.g. "SW1A 1AA" or "SW1A")
-        limit: Max results (default 20, max 200)
-    """
-    result = _ppd.search_transactions(postcode=postcode, limit=limit)
-    # Convert PPDTransaction objects to dicts for JSON serialization
-    result["results"] = [
-        t.model_dump() if hasattr(t, "model_dump") else t
-        for t in result.get("results", [])
-    ]
-    return json.dumps(result, default=str)
-
-
-@mcp.tool()
-def property_postcode_info(postcode: str) -> str:
-    """Look up local authority, region, and area details for a UK postcode.
-
-    Args:
-        postcode: UK postcode (e.g. "SW1A 2AA")
-    """
-    result = _postcode.get_local_authority(postcode, include_raw=True)
-    return json.dumps(result, default=str)
-
-
-@mcp.tool()
-def property_planning_search(postcode: str) -> str:
-    """Find planning portal and search URLs for a UK postcode.
-
-    Args:
-        postcode: UK postcode (e.g. "S1 2HH", "SW1A 2AA")
-    """
-    result = _planning.search(postcode)
-    return json.dumps(result, default=str)
 
 
 # ---------------------------------------------------------------------------
