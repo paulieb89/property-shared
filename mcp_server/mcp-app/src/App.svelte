@@ -18,6 +18,8 @@ import { isYieldData, isCompsData } from "./lib/types";
 import CompsView from "./views/CompsView.svelte";
 import YieldView from "./views/YieldView.svelte";
 
+import type { SearchParams } from "./components/SearchControls.svelte";
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -29,6 +31,10 @@ let loadingMessage = $state("Loading...");
 let error = $state<string | null>(null);
 let data = $state<ToolData | null>(null);
 let dataType = $state<DataType | null>(null);
+
+// Current tool and params for re-querying
+let currentToolName = $state<string | null>(null);
+let currentParams = $state<SearchParams | null>(null);
 
 // ---------------------------------------------------------------------------
 // Host styling
@@ -100,8 +106,20 @@ onMount(async () => {
     loading = true;
     error = null;
 
-    const postcode = params.arguments?.postcode;
+    const args = params.arguments || {};
     const toolName = params.name || "";
+
+    // Store tool name and params for re-querying
+    currentToolName = toolName;
+    currentParams = {
+      postcode: args.postcode,
+      months: args.months ?? 24,
+      radius: args.radius ?? 0.5,
+      search_level: args.search_level ?? "sector",
+      address: args.address,
+    };
+
+    const postcode = args.postcode;
 
     // Detect tool type from name for loading message
     if (toolName.includes("yield")) {
@@ -141,6 +159,47 @@ onMount(async () => {
   app = instance;
   hostContext = instance.getHostContext();
 });
+
+// ---------------------------------------------------------------------------
+// Re-query handler for SearchControls
+// ---------------------------------------------------------------------------
+
+async function handleApply(params: SearchParams) {
+  if (!app || !currentToolName) return;
+
+  console.info("[MCP App] Re-querying with params:", params);
+  loading = true;
+  error = null;
+
+  const postcode = params.postcode;
+  if (currentToolName.includes("yield")) {
+    loadingMessage = postcode ? `Calculating yield for ${postcode}...` : "Calculating rental yield...";
+  } else {
+    loadingMessage = postcode ? `Searching comparable sales for ${postcode}...` : "Loading comparable sales...";
+  }
+
+  try {
+    const result = await app.callServerTool({
+      name: currentToolName,
+      arguments: params,
+    });
+
+    console.info("[MCP App] Re-query result:", result);
+    loading = false;
+
+    const extracted = extractToolData(result);
+    if (extracted.data) {
+      data = extracted.data;
+      dataType = extracted.type;
+      // Update stored params
+      currentParams = params;
+    }
+  } catch (err) {
+    console.error("[MCP App] Re-query error:", err);
+    loading = false;
+    error = String(err);
+  }
+}
 </script>
 
 <main
@@ -152,9 +211,21 @@ onMount(async () => {
   {:else if error}
     <div class="error">{error}</div>
   {:else if data && dataType === "yield"}
-    <YieldView data={data as YieldData} />
+    <YieldView
+      data={data as YieldData}
+      params={currentParams}
+      toolName={currentToolName ?? "property_yield"}
+      {loading}
+      onApply={handleApply}
+    />
   {:else if data && dataType === "comps"}
-    <CompsView data={data as CompsData} />
+    <CompsView
+      data={data as CompsData}
+      params={currentParams}
+      toolName={currentToolName ?? "property_comps"}
+      {loading}
+      onApply={handleApply}
+    />
   {:else}
     <div class="loading">No data available</div>
   {/if}

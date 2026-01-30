@@ -5,10 +5,31 @@
 export interface Transaction {
   date: string;
   paon?: string;
+  saon?: string;
   street?: string;
   postcode?: string;
   price: number;
   property_type?: string;
+  estate_type?: string;
+  town?: string;
+  locality?: string;
+  district?: string;
+  // EPC enrichment fields
+  epc_floor_area_sqm?: number;
+  epc_floor_area_sqft?: number;
+  price_per_sqm?: number;
+  price_per_sqft?: number;
+  epc_rating?: string;
+  epc_score?: number;
+  epc_match_score?: number;
+}
+
+export interface SubjectProperty {
+  address: string;
+  postcode: string;
+  last_sale?: Transaction;
+  transaction_count: number;
+  transaction_history: Transaction[];
 }
 
 export interface CompsData {
@@ -17,7 +38,17 @@ export interface CompsData {
   count?: number;
   percentile_25?: number;
   percentile_75?: number;
+  min?: number;
+  max?: number;
+  thin_market?: boolean;
   transactions?: Transaction[];
+  // Subject property context (when address provided)
+  subject_property?: SubjectProperty;
+  subject_price_percentile?: number; // 0-100
+  subject_vs_median_pct?: number; // e.g., +10.8 or -5.2
+  // EPC enrichment stats
+  median_price_per_sqft?: number;
+  epc_match_rate?: number; // 0-1
 }
 
 export interface YieldData {

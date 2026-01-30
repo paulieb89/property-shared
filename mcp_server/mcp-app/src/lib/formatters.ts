@@ -90,3 +90,21 @@ export function getAssessmentLabel(assessment: string | undefined): string {
   if (assessment === "weak") return "Weak";
   return "N/A";
 }
+
+/**
+ * Format a price in short form (e.g., "£250k", "£1.2m").
+ */
+export function formatPriceShort(price: number | undefined | null): string {
+  if (price === undefined || price === null) return "N/A";
+  if (price >= 1_000_000) return `£${(price / 1_000_000).toFixed(1)}m`;
+  return `£${Math.round(price / 1000)}k`;
+}
+
+/**
+ * Get yield assessment from percentage.
+ */
+export function getYieldAssessment(yieldPct: number): "strong" | "average" | "weak" {
+  if (yieldPct >= 6) return "strong";
+  if (yieldPct >= 4) return "average";
+  return "weak";
+}
