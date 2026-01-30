@@ -4,14 +4,22 @@
 
 A tool reaches **gold** when it meets all criteria:
 
+### UI/UX
 - [ ] BOUCH design system applied
 - [ ] Interactive UI with reactive feedback
-- [ ] `app.callServerTool()` re-query working
-- [ ] Tested in ChatGPT host (interactions verified)
-- [ ] Tested in Claude host (if available)
-- [ ] Error states polished
+- [ ] Tested in MCP host (ChatGPT/Claude)
 - [ ] Mobile responsive
-- [ ] Ready for production use
+
+### Data & Logic
+- [ ] Business logic verified correct
+- [ ] Data handling edge cases covered
+- [ ] Error responses meaningful
+- [ ] API responses validated
+
+### Production
+- [ ] Performance acceptable
+- [ ] Rate limits / quotas handled
+- [ ] Ready for real users
 
 ## Gold Tools
 
@@ -23,34 +31,44 @@ A tool reaches **gold** when it meets all criteria:
 
 ### `property_comps`
 
-**Status:** Beta - BOUCH styled, needs interaction testing
+**Status:** Beta - UI complete, data logic needs review
 
+UI:
 - [x] BOUCH design system
 - [x] Sortable transaction table
 - [x] Search controls (months, area)
 - [x] Subject property card
-- [ ] Verify sorting works in ChatGPT
-- [ ] Verify Apply button re-queries
-- [ ] Test error states
-- [ ] Mobile testing
+- [x] Works in ChatGPT host
+
+Data/Logic:
+- [ ] Verify SPARQL query returns correct data
+- [ ] Check percentile calculations
+- [ ] Validate subject property matching
+- [ ] Edge case: no results
+- [ ] Edge case: invalid postcode
 
 ### `property_yield`
 
-**Status:** Beta - BOUCH styled, needs interaction testing
+**Status:** Beta - UI complete, data logic needs review
 
+UI:
 - [x] BOUCH design system
 - [x] Yield gauge with animation
 - [x] Price slider for what-if
 - [x] Search controls (months, radius, area)
-- [ ] Verify slider updates gauge in ChatGPT
-- [ ] Verify Apply button re-queries
-- [ ] Test thin market warning
-- [ ] Mobile testing
+- [x] Works in ChatGPT host
+
+Data/Logic:
+- [ ] Verify yield calculation formula
+- [ ] Check rental data source accuracy
+- [ ] Validate thin_market threshold
+- [ ] Edge case: no sales data
+- [ ] Edge case: no rental data
 
 ---
 
 ## Notes
 
-- Gold certification requires manual verification in actual MCP hosts
-- Screenshots of working interactions should be added to docs when gold
+- Gold = verified correct, not just working
+- Screenshots of verified results should be added
 - Version tagged in git when tool reaches gold
