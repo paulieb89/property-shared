@@ -14,6 +14,19 @@ MCP Apps = Tool + Resource linked via `_meta.ui.resourceUri`
 Host calls tool → Server returns result → Host renders resource UI → UI receives result
 ```
 
+### Bidirectional Communication
+
+```
+Model → Tool → UI     (tool results flow to UI)
+UI → Model            (updateModelContext syncs state back)
+UI → Chat             (sendMessage triggers model response)
+```
+
+**The Rule**: Use `updateModelContext` when the model's next action depends on UI state the model didn't produce itself.
+
+- User can change things locally (sliders, selection, navigation) → model needs to know
+- Model can infer from tool results alone → skip it
+
 ---
 
 ## Server-Side Registration
@@ -197,6 +210,118 @@ await app.sendLog({ level: "info", data: "Debug message" });
 const ctx = app.getHostContext();
 ```
 
+---
+
+## Model Context Sync
+
+Keep the model informed of UI state changes it didn't produce.
+
+### When to Use
+
+**DO update model context when:**
+- User commits slider/control (mouseup, Apply button)
+- Selection changes (scenario, property, tab)
+- Assumption/constraint toggles
+- Navigation (page, region, zoom)
+- New data chunk arrives (transcript, stream)
+
+**DON'T update when:**
+- Every keystroke
+- Every render cycle
+- Timer-based polling
+- Mouse movement
+
+### Capability Guard
+
+Always check before calling:
+
+```typescript
+const caps = app.getHostCapabilities();
+if (!caps?.updateModelContext) return;
+```
+
+### Payload Shape (YAML Frontmatter)
+
+Use structured markdown with YAML frontmatter for machine + human readability:
+
+```typescript
+const markdown = `---
+tool: property_yield
+scenario: what-if
+postcode: NG1 1AA
+---
+
+## Changes
+- purchase_price: £320,000 → £400,000
+- gross_yield: 5.2% → 4.1%
+
+## Current View
+- median_rent: £1,200/mo
+- data_quality: good
+- assessment: below_average
+`;
+
+await app.updateModelContext({
+  content: [{ type: "text", text: markdown }],
+});
+```
+
+### Delta Tracking Pattern
+
+Send what changed, not full state:
+
+```typescript
+interface ParamDelta {
+  field: string;
+  from: any;
+  to: any;
+}
+
+function computeDeltas(prev: Record<string, any>, next: Record<string, any>): ParamDelta[] {
+  return Object.keys(next)
+    .filter(k => prev[k] !== next[k])
+    .map(k => ({ field: k, from: prev[k], to: next[k] }));
+}
+
+function formatDeltas(deltas: ParamDelta[]): string {
+  return deltas.map(d => `- ${d.field}: ${d.from} → ${d.to}`).join('\n');
+}
+```
+
+### Real Example: transcript-server
+
+```typescript
+function updateModelContext() {
+  const caps = app.getHostCapabilities();
+  if (!caps?.updateModelContext) return;
+
+  const text = getUnsentText();
+  const frontmatter = [
+    "---",
+    "tool: transcribe",
+    `status: ${isListening ? "listening" : "paused"}`,
+    `unsent-entries: ${unsentCount}`,
+    "---",
+  ].join("\n");
+
+  const markdown = text ? `${frontmatter}\n\n${text}` : frontmatter;
+
+  app.updateModelContext({
+    content: [{ type: "text", text: markdown }],
+  }).catch(console.warn);
+}
+```
+
+### Performance Budget
+
+| Metric | Target |
+|--------|--------|
+| Perceived latency | < 150ms |
+| Update frequency | On commit, not continuous |
+| Payload size | Deltas preferred over dumps |
+
+---
+
 ### React Hook
 
 ```typescript
@@ -333,6 +458,41 @@ app.ontoolinput = (params) => {
 };
 ```
 
+### Debounced Apply Pattern
+
+For sliders and frequent inputs, update UI immediately but debounce server calls:
+
+```typescript
+let applyTimeout: number | null = null;
+let previousParams: SearchParams | null = null;
+
+function handleSliderChange(value: number) {
+  // Optimistic UI update immediately
+  updateDisplay(value);
+
+  // Debounce server call + model context update
+  if (applyTimeout) clearTimeout(applyTimeout);
+  applyTimeout = window.setTimeout(() => {
+    const newParams = buildParams(value);
+    commitChange(newParams);
+    syncModelContext(previousParams, newParams);
+    previousParams = newParams;
+  }, 150);
+}
+
+async function syncModelContext(prev: SearchParams | null, next: SearchParams) {
+  const caps = app.getHostCapabilities();
+  if (!caps?.updateModelContext) return;
+
+  const deltas = prev ? computeDeltas(prev, next) : [];
+  const markdown = formatContextPayload(next, deltas);
+
+  await app.updateModelContext({
+    content: [{ type: "text", text: markdown }],
+  });
+}
+```
+
 ---
 
 ## Build Configuration
@@ -365,6 +525,10 @@ export default defineConfig({
 5. **Ignoring safe area insets** - Always handle `ctx.safeAreaInsets`
 6. **No text fallback** - Always provide `content` array for non-UI hosts
 7. **Hardcoded styles** - Use host CSS variables for theme integration
+8. **Missing model context sync** - User changes state but model doesn't know
+9. **Dumping full state** - Send deltas, not entire app state on every update
+10. **Updating too frequently** - Debounce, update on commit not every keystroke
+11. **No capability guard** - Always check `getHostCapabilities()?.updateModelContext`
 
 ---
 

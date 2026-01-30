@@ -39,6 +39,205 @@ let currentToolName = $state<string | null>(null);
 let currentParams = $state<SearchParams | null>(null);
 
 // ---------------------------------------------------------------------------
+// Model Context Sync
+// ---------------------------------------------------------------------------
+
+type ScenarioMode = "baseline" | "what-if";
+
+interface CommittedSnapshot {
+  tool: string;
+  mode: ScenarioMode;
+  view: DataType;
+  postcode: string;
+  params: SearchParams;
+  // Key outputs for delta tracking
+  outputs: {
+    median?: number;
+    gross_yield_pct?: number;
+    assessment?: string;
+    data_quality?: string;
+    count?: number;
+  };
+}
+
+let lastCommitted = $state<CommittedSnapshot | null>(null);
+let lastContextSignature = $state<string>("");
+
+// Visibility tracking for resource management
+let isVisible = $state(true);
+let mainElement = $state<HTMLElement | null>(null);
+
+/**
+ * Check if host supports updateModelContext
+ */
+function canUpdateModelContext(appInstance: App | null): boolean {
+  if (!appInstance) return false;
+  const caps = appInstance.getHostCapabilities?.() as { updateModelContext?: unknown } | null;
+  return Boolean(caps?.updateModelContext);
+}
+
+/**
+ * Format currency for display
+ */
+function fmtGBP(n: number | undefined): string {
+  if (n === undefined) return "—";
+  return `£${Math.round(n).toLocaleString("en-GB")}`;
+}
+
+/**
+ * Format percentage for display
+ */
+function fmtPct(x: number | undefined): string {
+  if (x === undefined) return "—";
+  return `${x.toFixed(1)}%`;
+}
+
+/**
+ * Compute deltas between two snapshots
+ */
+function computeDeltas(prev: CommittedSnapshot | null, next: CommittedSnapshot): string[] {
+  if (!prev) return [];
+
+  const changes: string[] = [];
+
+  // Params changes
+  if (prev.params.months !== next.params.months) {
+    changes.push(`- months: ${prev.params.months} → ${next.params.months}`);
+  }
+  if (prev.params.search_level !== next.params.search_level) {
+    changes.push(`- search_level: ${prev.params.search_level} → ${next.params.search_level}`);
+  }
+  if (prev.params.radius !== next.params.radius) {
+    changes.push(`- radius: ${prev.params.radius}mi → ${next.params.radius}mi`);
+  }
+
+  // Output changes
+  if (prev.outputs.median !== next.outputs.median) {
+    changes.push(`- median: ${fmtGBP(prev.outputs.median)} → ${fmtGBP(next.outputs.median)}`);
+  }
+  if (prev.outputs.gross_yield_pct !== next.outputs.gross_yield_pct) {
+    changes.push(`- gross_yield: ${fmtPct(prev.outputs.gross_yield_pct)} → ${fmtPct(next.outputs.gross_yield_pct)}`);
+  }
+  if (prev.outputs.assessment !== next.outputs.assessment) {
+    changes.push(`- assessment: ${prev.outputs.assessment} → ${next.outputs.assessment}`);
+  }
+
+  return changes;
+}
+
+/**
+ * Build YAML frontmatter + markdown payload for model context
+ */
+function buildModelContextMarkdown(
+  next: CommittedSnapshot,
+  changes: string[]
+): string {
+  const frontmatter = [
+    "---",
+    `tool: ${next.tool}`,
+    `scenario: ${next.mode}`,
+    `postcode: ${next.postcode}`,
+    `view: ${next.view}`,
+    "---",
+  ].join("\n");
+
+  const changesBlock = changes.length > 0
+    ? changes.join("\n")
+    : "- (initial load)";
+
+  const viewLines: string[] = [];
+
+  if (next.view === "comps") {
+    viewLines.push(`- median: ${fmtGBP(next.outputs.median)}`);
+    viewLines.push(`- count: ${next.outputs.count ?? 0} transactions`);
+    viewLines.push(`- search_level: ${next.params.search_level}`);
+    viewLines.push(`- months: ${next.params.months}`);
+  } else if (next.view === "yield") {
+    viewLines.push(`- gross_yield: ${fmtPct(next.outputs.gross_yield_pct)}`);
+    viewLines.push(`- assessment: ${next.outputs.assessment ?? "—"}`);
+    viewLines.push(`- data_quality: ${next.outputs.data_quality ?? "—"}`);
+    viewLines.push(`- median: ${fmtGBP(next.outputs.median)}`);
+  }
+
+  return [
+    frontmatter,
+    "",
+    "## Changes",
+    changesBlock,
+    "",
+    "## Current View",
+    viewLines.join("\n"),
+    "",
+  ].join("\n");
+}
+
+/**
+ * Push model context update (guarded + deduped)
+ */
+async function pushModelContext(
+  appInstance: App | null,
+  snapshot: CommittedSnapshot
+): Promise<void> {
+  if (!canUpdateModelContext(appInstance)) {
+    console.info("[MCP App] Host does not support updateModelContext");
+    return;
+  }
+
+  const changes = computeDeltas(lastCommitted, snapshot);
+  const markdown = buildModelContextMarkdown(snapshot, changes);
+
+  // Dedupe identical updates
+  if (markdown === lastContextSignature) {
+    console.info("[MCP App] Skipping duplicate context update");
+    return;
+  }
+
+  console.info("[MCP App] Pushing model context:", markdown);
+
+  try {
+    await appInstance!.updateModelContext({
+      content: [{ type: "text", text: markdown }],
+    });
+    lastContextSignature = markdown;
+    lastCommitted = snapshot;
+  } catch (err) {
+    console.warn("[MCP App] Failed to update model context:", err);
+  }
+}
+
+/**
+ * Build snapshot from current state + data
+ */
+function buildSnapshot(
+  toolName: string,
+  params: SearchParams,
+  toolData: ToolData,
+  type: DataType,
+  mode: ScenarioMode = "baseline"
+): CommittedSnapshot {
+  const outputs: CommittedSnapshot["outputs"] = {};
+
+  if (type === "comps" && isCompsData(toolData)) {
+    outputs.median = toolData.median;
+    outputs.count = toolData.count;
+  } else if (type === "yield" && isYieldData(toolData)) {
+    outputs.gross_yield_pct = toolData.gross_yield_pct;
+    outputs.assessment = toolData.yield_assessment;
+    outputs.data_quality = toolData.data_quality;
+    outputs.median = toolData.median_sale_price;
+  }
+
+  return {
+    tool: toolName,
+    mode,
+    view: type,
+    postcode: params.postcode ?? "",
+    params,
+    outputs,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Host styling
 // ---------------------------------------------------------------------------
 
@@ -52,6 +251,28 @@ $effect(() => {
   if (hostContext?.styles?.css?.fonts) {
     applyHostFonts(hostContext.styles.css.fonts);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Visibility-aware resource management
+// ---------------------------------------------------------------------------
+
+$effect(() => {
+  if (!mainElement) return;
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        isVisible = entry.isIntersecting;
+        console.info("[MCP App] Visibility changed:", isVisible ? "visible" : "hidden");
+      }
+    },
+    { threshold: 0.1 }
+  );
+
+  observer.observe(mainElement);
+
+  return () => observer.disconnect();
 });
 
 // ---------------------------------------------------------------------------
@@ -135,9 +356,19 @@ onMount(async () => {
     console.info("[MCP App] Tool result:", result);
     loading = false;
     const extracted = extractToolData(result);
-    if (extracted.data) {
+    if (extracted.data && extracted.type && currentParams && currentToolName) {
       data = extracted.data;
       dataType = extracted.type;
+
+      // Push initial baseline to model context
+      const snapshot = buildSnapshot(
+        currentToolName,
+        currentParams,
+        extracted.data,
+        extracted.type,
+        "baseline"
+      );
+      pushModelContext(instance, snapshot);
     }
   };
 
@@ -190,9 +421,27 @@ async function handleApply(params: SearchParams) {
     loading = false;
 
     const extracted = extractToolData(result);
-    if (extracted.data) {
+    if (extracted.data && extracted.type) {
       data = extracted.data;
       dataType = extracted.type;
+
+      // Determine scenario mode: "what-if" if user changed params from initial
+      const isWhatIf = lastCommitted !== null && (
+        params.months !== lastCommitted.params.months ||
+        params.search_level !== lastCommitted.params.search_level ||
+        params.radius !== lastCommitted.params.radius
+      );
+
+      // Push updated context to model
+      const snapshot = buildSnapshot(
+        currentToolName,
+        params,
+        extracted.data,
+        extracted.type,
+        isWhatIf ? "what-if" : "baseline"
+      );
+      pushModelContext(app, snapshot);
+
       // Update stored params
       currentParams = params;
     }
@@ -205,7 +454,9 @@ async function handleApply(params: SearchParams) {
 </script>
 
 <main
+  bind:this={mainElement}
   class="main"
+  class:hidden={!isVisible}
   style:padding={hostContext?.safeAreaInsets && `${hostContext.safeAreaInsets.top}px ${hostContext.safeAreaInsets.right}px ${hostContext.safeAreaInsets.bottom}px ${hostContext.safeAreaInsets.left}px`}
 >
   {#if loading}
@@ -261,6 +512,8 @@ async function handleApply(params: SearchParams) {
   width: 100%;
   max-width: 800px;
   margin: 0 auto;
+  padding: 16px;
+  box-sizing: border-box;
   font-family: 'Space Mono', ui-monospace, monospace;
 }
 
@@ -436,5 +689,11 @@ async function handleApply(params: SearchParams) {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* Visibility-aware: pause animations when offscreen */
+.main.hidden .loading-spinner,
+.main.hidden .loading-dots span {
+  animation-play-state: paused;
 }
 </style>
