@@ -42,7 +42,7 @@ A tool reaches **gold** when it meets all criteria:
 
 ### `property_comps`
 
-**Status:** Ready for Gold - pending production testing + model context sync
+**Status:** Ready for Gold - pending production testing
 
 UI:
 - [x] BOUCH design system
@@ -62,15 +62,15 @@ Data/Logic:
 - [ ] Live test: invalid postcode handling
 
 Model Context Sync:
-- [ ] `updateModelContext` called on Apply
-- [ ] Capability guard (`getHostCapabilities()?.updateModelContext`)
-- [ ] Delta tracking (previous → current params)
-- [ ] YAML frontmatter payload format
-- [ ] Debounced (fires on commit, not every slider move)
+- [x] `updateModelContext` called on Apply
+- [x] Capability guard (`getHostCapabilities()?.updateModelContext`)
+- [x] Delta tracking (previous → current params)
+- [x] YAML frontmatter payload format
+- [x] Debounced (fires on commit, not every slider move)
 
 ### `property_yield`
 
-**Status:** Ready for Gold - pending production testing + model context sync
+**Status:** Ready for Gold - pending production testing
 
 UI:
 - [x] BOUCH design system
@@ -90,12 +90,12 @@ Data/Logic:
 - [ ] Live test: thin market area
 
 Model Context Sync:
-- [ ] `updateModelContext` called on Apply
-- [ ] Capability guard (`getHostCapabilities()?.updateModelContext`)
-- [ ] Delta tracking (previous → current params)
-- [ ] Scenario mode in payload (baseline vs what-if price)
-- [ ] YAML frontmatter payload format
-- [ ] Debounced (fires on commit, not every slider move)
+- [x] `updateModelContext` called on Apply
+- [x] Capability guard (`getHostCapabilities()?.updateModelContext`)
+- [x] Delta tracking (previous → current params)
+- [x] Scenario mode in payload (baseline vs what-if price)
+- [x] YAML frontmatter payload format
+- [x] Debounced (fires on commit, not every slider move)
 
 **Note:** Median calculation uses floor-based approach (line 103) rather than `statistics.median()`.
 Acceptable for typical sample sizes but could be improved for consistency.
