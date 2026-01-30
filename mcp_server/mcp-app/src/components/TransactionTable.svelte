@@ -1,7 +1,7 @@
 <script lang="ts">
 /**
  * Transaction table component for displaying property sales.
- * Supports interactive column sorting.
+ * BOUCH Design System - Interactive sortable table with reactive feedback
  */
 import type { Transaction } from "../lib/types";
 import { formatPrice, formatDate } from "../lib/formatters";
@@ -67,12 +67,12 @@ function formatAddress(tx: Transaction): string {
 function formatPropertyType(type: string | undefined): string {
   const types: Record<string, string> = {
     D: "Detached",
-    S: "Semi-detached",
-    T: "Terraced",
+    S: "Semi",
+    T: "Terrace",
     F: "Flat",
     O: "Other",
   };
-  return types[type || ""] || type || "Unknown";
+  return types[type || ""] || type || "—";
 }
 
 // Sort indicator
@@ -117,11 +117,11 @@ function getSortIndicator(column: SortColumn): string {
       </tr>
     </thead>
     <tbody>
-      {#each sortedTransactions() as tx}
-        <tr>
+      {#each sortedTransactions() as tx, i}
+        <tr style="animation-delay: {i * 0.02}s">
           <td class="date-col">{formatDate(tx.date)}</td>
-          <td class="address-col">{formatAddress(tx)}</td>
-          <td>{formatPropertyType(tx.property_type)}</td>
+          <td class="address-col" title={formatAddress(tx)}>{formatAddress(tx)}</td>
+          <td class="type-col">{formatPropertyType(tx.property_type)}</td>
           <td class="price-col">{formatPrice(tx.price)}</td>
         </tr>
       {/each}
@@ -133,50 +133,80 @@ function getSortIndicator(column: SortColumn): string {
 .table-container {
   overflow-x: auto;
   margin-top: 16px;
+  border: 1px solid var(--bouch-gray, rgba(28, 25, 23, 0.12));
 }
 
 .comps-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--font-text-sm-size, 14px);
+  font-family: 'Space Mono', monospace;
+  font-size: 13px;
 }
 
 .comps-table th,
 .comps-table td {
-  padding: 12px 8px;
+  padding: 12px 10px;
   text-align: left;
-  border-bottom: 1px solid var(--color-border-primary, #e0e0e0);
+  border-bottom: 1px solid var(--bouch-gray, rgba(28, 25, 23, 0.12));
 }
 
 .comps-table th {
-  font-weight: var(--font-weight-semibold, 600);
-  color: var(--color-text-secondary, #666);
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  font-size: var(--font-text-xs-size, 11px);
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
+  color: var(--bouch-mid-gray, #b0aea5);
+  background: var(--bouch-charcoal, #1C1917);
+  border-bottom: 2px solid var(--bouch-orange, #D97757);
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 .comps-table th.sortable {
   cursor: pointer;
   user-select: none;
-  transition: background-color 0.15s ease;
+  transition: all 0.15s ease;
 }
 
 .comps-table th.sortable:hover {
-  background: var(--color-background-secondary, #f5f5f5);
+  color: var(--bouch-cream, #FAF9F5);
+  background: #2d2926;
 }
 
 .comps-table th.sorted {
-  color: var(--color-text-primary, #333);
-  background: var(--color-background-secondary, #f5f5f5);
+  color: var(--bouch-orange, #D97757);
+}
+
+.comps-table tbody tr {
+  transition: all 0.15s ease;
+  animation: fadeInRow 0.3s ease-out forwards;
+  opacity: 0;
+}
+
+@keyframes fadeInRow {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .comps-table tbody tr:hover {
-  background: var(--color-background-secondary, #f5f5f5);
+  background: var(--bouch-gray, #e8e6dc);
+}
+
+.comps-table tbody tr:active {
+  background: var(--bouch-mid-gray, #b0aea5);
 }
 
 .date-col {
   white-space: nowrap;
+  color: var(--bouch-mid-gray, #b0aea5);
+  font-size: 12px;
 }
 
 .address-col {
@@ -184,11 +214,31 @@ function getSortIndicator(column: SortColumn): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--bouch-charcoal, #1C1917);
+}
+
+.type-col {
+  color: var(--bouch-mid-gray, #b0aea5);
+  font-size: 12px;
 }
 
 .price-col {
   text-align: right;
-  font-weight: var(--font-weight-semibold, 600);
+  font-weight: 700;
   white-space: nowrap;
+  color: var(--bouch-charcoal, #1C1917);
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .comps-table th,
+  .comps-table td {
+    padding: 10px 6px;
+    font-size: 11px;
+  }
+
+  .address-col {
+    max-width: 120px;
+  }
 }
 </style>

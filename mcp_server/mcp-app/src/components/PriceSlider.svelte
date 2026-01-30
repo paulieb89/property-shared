@@ -1,7 +1,7 @@
 <script lang="ts">
 /**
  * Price slider component for interactive value adjustment.
- * Used for "what-if" yield calculations.
+ * BOUCH Design System - Brutalist slider with reactive feedback
  */
 
 interface Props {
@@ -24,6 +24,8 @@ function defaultFormat(v: number): string {
 
 let format = formatFn ?? defaultFormat;
 
+let isDragging = $state(false);
+
 function handleInput(e: Event) {
   const target = e.target as HTMLInputElement;
   const newValue = parseFloat(target.value);
@@ -35,22 +37,29 @@ function handleInput(e: Event) {
 let fillPct = $derived(() => ((value - min) / (max - min)) * 100);
 </script>
 
-<div class="price-slider">
+<div class="price-slider" class:dragging={isDragging}>
   {#if label}
     <label class="label">{label}</label>
   {/if}
   <div class="slider-row">
     <span class="value-display">{format(value)}</span>
-    <input
-      type="range"
-      {min}
-      {max}
-      {step}
-      {value}
-      class="slider"
-      style:--fill-pct="{fillPct()}%"
-      oninput={handleInput}
-    />
+    <div class="slider-track">
+      <input
+        type="range"
+        {min}
+        {max}
+        {step}
+        {value}
+        class="slider"
+        style:--fill-pct="{fillPct()}%"
+        oninput={handleInput}
+        onmousedown={() => isDragging = true}
+        onmouseup={() => isDragging = false}
+        ontouchstart={() => isDragging = true}
+        ontouchend={() => isDragging = false}
+      />
+      <div class="slider-fill" style:width="{fillPct()}%"></div>
+    </div>
   </div>
   <div class="range-labels">
     <span>{format(min)}</span>
@@ -61,76 +70,109 @@ let fillPct = $derived(() => ((value - min) / (max - min)) * 100);
 <style>
 .price-slider {
   width: 100%;
+  padding: 16px;
+  background: var(--bouch-charcoal, #1C1917);
+  transition: all 0.2s ease;
+}
+
+.price-slider.dragging {
+  background: #2d2926;
 }
 
 .label {
   display: block;
-  font-size: var(--font-text-xs-size, 11px);
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-text-secondary, #64748b);
-  margin-bottom: 8px;
+  letter-spacing: 2px;
+  color: var(--bouch-mid-gray, #b0aea5);
+  margin-bottom: 12px;
 }
 
 .slider-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
 }
 
 .value-display {
   min-width: 70px;
-  font-size: var(--font-text-md-size, 16px);
-  font-weight: var(--font-weight-bold, 700);
-  color: var(--color-text-primary, #1e293b);
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 24px;
+  letter-spacing: 1px;
+  color: var(--bouch-cream, #FAF9F5);
+}
+
+.slider-track {
+  flex: 1;
+  position: relative;
+  height: 6px;
+  background: rgba(250, 249, 245, 0.2);
+}
+
+.slider-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--bouch-orange, #D97757);
+  pointer-events: none;
+  transition: width 0.1s ease;
 }
 
 .slider {
-  flex: 1;
-  height: 8px;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 100%;
+  height: 24px;
   appearance: none;
-  background: linear-gradient(
-    to right,
-    var(--color-ring-primary, #3b82f6) 0%,
-    var(--color-ring-primary, #3b82f6) var(--fill-pct),
-    var(--color-background-tertiary, #e2e8f0) var(--fill-pct),
-    var(--color-background-tertiary, #e2e8f0) 100%
-  );
-  border-radius: 4px;
+  background: transparent;
   cursor: pointer;
+  margin: 0;
 }
 
 .slider::-webkit-slider-thumb {
   appearance: none;
   width: 20px;
   height: 20px;
-  background: var(--color-ring-primary, #3b82f6);
-  border: 3px solid white;
-  border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-  cursor: pointer;
-  transition: transform 0.1s ease;
+  background: var(--bouch-cream, #FAF9F5);
+  border: 3px solid var(--bouch-orange, #D97757);
+  cursor: grab;
+  transition: all 0.15s ease;
 }
 
 .slider::-webkit-slider-thumb:hover {
-  transform: scale(1.1);
+  transform: scale(1.15);
+  box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.3);
+}
+
+.slider::-webkit-slider-thumb:active {
+  cursor: grabbing;
+  transform: scale(0.95);
 }
 
 .slider::-moz-range-thumb {
   width: 20px;
   height: 20px;
-  background: var(--color-ring-primary, #3b82f6);
-  border: 3px solid white;
-  border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-  cursor: pointer;
+  background: var(--bouch-cream, #FAF9F5);
+  border: 3px solid var(--bouch-orange, #D97757);
+  border-radius: 0;
+  cursor: grab;
+}
+
+.slider::-moz-range-thumb:active {
+  cursor: grabbing;
 }
 
 .range-labels {
   display: flex;
   justify-content: space-between;
+  font-family: 'Space Mono', monospace;
   font-size: 10px;
-  color: var(--color-text-tertiary, #94a3b8);
-  margin-top: 4px;
+  letter-spacing: 1px;
+  color: var(--bouch-mid-gray, #b0aea5);
+  margin-top: 8px;
 }
 </style>

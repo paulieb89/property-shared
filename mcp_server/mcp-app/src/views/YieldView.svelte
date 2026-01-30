@@ -1,12 +1,10 @@
 <script lang="ts">
 /**
  * Yield analysis view.
- * Displays yield gauge, stats, and data quality indicator.
- * Includes interactive price slider for "what-if" yield calculations.
- * Includes search controls for re-querying with different parameters.
+ * BOUCH Design System - Professional brutalist yield dashboard
  */
 import type { YieldData } from "../lib/types";
-import { formatPrice, formatRent, getQualityColor, getQualityLabel, getYieldAssessment, getAssessmentColor, getAssessmentLabel } from "../lib/formatters";
+import { formatPrice, formatRent, getQualityColor, getQualityLabel, getYieldAssessment } from "../lib/formatters";
 import StatCard from "../components/StatCard.svelte";
 import DataBadge from "../components/DataBadge.svelte";
 import YieldGauge from "../components/YieldGauge.svelte";
@@ -73,13 +71,15 @@ let priceMax = $derived(() => {
   {/if}
 
   <!-- Yield Gauge - shows custom yield when price adjusted, otherwise market yield -->
-  {#if isCustom() && customYield() !== null}
-    <YieldGauge yieldPct={customYield()} assessment={customAssessment()} />
-    <div class="custom-indicator">Custom calculation</div>
-  {:else}
-    <YieldGauge yieldPct={data.gross_yield_pct} assessment={data.yield_assessment} />
-    <div class="market-indicator">Based on market median</div>
-  {/if}
+  <div class="gauge-section">
+    {#if isCustom() && customYield() !== null}
+      <YieldGauge yieldPct={customYield()} assessment={customAssessment()} />
+      <div class="indicator custom-indicator">Custom calculation</div>
+    {:else}
+      <YieldGauge yieldPct={data.gross_yield_pct} assessment={data.yield_assessment} />
+      <div class="indicator market-indicator">Based on market median</div>
+    {/if}
+  </div>
 
   <!-- Price Slider for what-if analysis -->
   {#if data.median_monthly_rent}
@@ -119,77 +119,106 @@ let priceMax = $derived(() => {
 
   <!-- Thin Market Warning -->
   {#if data.thin_market}
-    <p class="thin-market-warning">
+    <div class="thin-market-warning">
+      <span class="warning-icon">!</span>
       Limited market data available for this area
-    </p>
+    </div>
   {/if}
 </div>
 
 <style>
 .yield-view {
   width: 100%;
+  font-family: 'Space Mono', monospace;
 }
 
-.custom-indicator,
-.market-indicator {
+.gauge-section {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--bouch-gray, rgba(28, 25, 23, 0.12));
+  margin-bottom: 0;
+}
+
+.indicator {
   text-align: center;
-  font-size: var(--font-text-xs-size, 11px);
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
   margin-top: -8px;
-  margin-bottom: 16px;
 }
 
 .custom-indicator {
-  color: var(--color-ring-primary, #3b82f6);
-  font-weight: var(--font-weight-semibold, 600);
+  color: var(--bouch-orange, #D97757);
 }
 
 .market-indicator {
-  color: var(--color-text-tertiary, #94a3b8);
+  color: var(--bouch-mid-gray, #b0aea5);
 }
 
 .slider-section {
-  background: var(--color-background-secondary, #f8fafc);
-  border-radius: var(--border-radius-md, 8px);
-  padding: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 .reset-btn {
   display: block;
-  margin: 12px auto 0;
-  padding: 6px 12px;
-  font-size: var(--font-text-xs-size, 12px);
-  color: var(--color-ring-primary, #3b82f6);
+  width: 100%;
+  margin-top: 0;
+  padding: 10px 16px;
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--bouch-cream, #FAF9F5);
   background: transparent;
-  border: 1px solid var(--color-ring-primary, #3b82f6);
-  border-radius: var(--border-radius-sm, 4px);
+  border: none;
+  border-top: 1px solid rgba(250, 249, 245, 0.2);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: all 0.2s ease;
 }
 
 .reset-btn:hover {
-  background: var(--color-background-ghost, rgba(59, 130, 246, 0.1));
+  background: rgba(250, 249, 245, 0.1);
+  color: var(--bouch-orange, #D97757);
 }
 
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 .badge-container {
   text-align: center;
-  margin-top: 8px;
+  padding: 16px 0;
 }
 
 .thin-market-warning {
-  text-align: center;
-  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 14px 16px;
   margin-top: 16px;
-  background: var(--color-background-warning-subtle, #fef3c7);
-  color: var(--color-text-warning, #92400e);
-  border-radius: var(--border-radius-md, 8px);
-  font-size: var(--font-text-sm-size, 14px);
+  background: var(--bouch-charcoal, #1C1917);
+  border: 2px solid var(--bouch-orange, #D97757);
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--bouch-cream, #FAF9F5);
+}
+
+.warning-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: var(--bouch-orange, #D97757);
+  color: var(--bouch-charcoal, #1C1917);
+  font-weight: 700;
 }
 </style>

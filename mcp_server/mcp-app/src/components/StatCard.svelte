@@ -1,7 +1,7 @@
 <script lang="ts">
 /**
  * Reusable stat display card.
- * Used by both CompsView and YieldView for consistent stat presentation.
+ * BOUCH Design System - Clean brutalist stat presentation
  */
 
 interface Props {
@@ -26,38 +26,49 @@ let { label, value, subtext, variant = "default" }: Props = $props();
 .stat-card {
   display: flex;
   flex-direction: column;
-  padding: 16px;
-  background: var(--color-background-secondary, #f5f5f5);
-  border-radius: var(--border-radius-md, 8px);
+  padding: 20px 16px;
+  background: var(--bouch-cream, #FAF9F5);
+  border: 1px solid var(--bouch-gray, rgba(28, 25, 23, 0.12));
+  border-left: 3px solid var(--bouch-orange, #D97757);
   text-align: center;
+  transition: all 0.2s ease;
+}
+
+.stat-card:hover {
+  border-left-width: 5px;
+  background: white;
 }
 
 .stat-label {
-  font-size: var(--font-text-sm-size, 12px);
-  color: var(--color-text-secondary, #666);
-  font-weight: var(--font-weight-semibold, 600);
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 4px;
+  letter-spacing: 2px;
+  color: var(--bouch-mid-gray, #b0aea5);
+  margin-bottom: 8px;
 }
 
 .stat-value {
-  font-size: var(--font-text-lg-size, 20px);
-  font-weight: var(--font-weight-bold, 700);
-  color: var(--color-text-primary, #1a1a1a);
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 28px;
+  letter-spacing: 1px;
+  color: var(--bouch-charcoal, #1C1917);
+  line-height: 1;
 }
 
 .stat-subtext {
-  font-size: var(--font-text-sm-size, 12px);
-  color: var(--color-text-tertiary, #999);
-  margin-top: 4px;
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  color: var(--bouch-mid-gray, #b0aea5);
+  margin-top: 6px;
 }
 
 .stat-card.positive .stat-value {
-  color: #22c55e;
+  color: var(--bouch-success, #38a169);
 }
 
 .stat-card.negative .stat-value {
-  color: #ef4444;
+  color: #dc2626;
 }
 </style>

@@ -1,9 +1,7 @@
 <script lang="ts">
 /**
  * Comparable sales view.
- * Displays price statistics and transaction table.
- * Optionally shows subject property context when address was provided.
- * Includes search controls for re-querying with different parameters.
+ * BOUCH Design System - Professional brutalist comps dashboard
  */
 import type { CompsData } from "../lib/types";
 import { formatPrice } from "../lib/formatters";
@@ -72,22 +70,32 @@ let showControls = $derived(() => params !== null && params !== undefined && onA
 
   <!-- Transaction Table -->
   {#if data.transactions && data.transactions.length > 0}
-    <TransactionTable transactions={data.transactions} />
+    <div class="table-section">
+      <div class="table-header">
+        <span class="table-title">Recent Sales</span>
+        <span class="table-count">{data.transactions.length} transactions</span>
+      </div>
+      <TransactionTable transactions={data.transactions} />
+    </div>
   {:else}
-    <p class="no-data">No transactions found</p>
+    <div class="no-data">
+      <span class="no-data-icon">?</span>
+      <span>No transactions found</span>
+    </div>
   {/if}
 </div>
 
 <style>
 .comps-view {
   width: 100%;
+  font-family: 'Space Mono', monospace;
 }
 
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 @media (min-width: 600px) {
@@ -96,9 +104,57 @@ let showControls = $derived(() => params !== null && params !== undefined && onA
   }
 }
 
+.table-section {
+  margin-top: 8px;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 2px solid var(--bouch-orange, #D97757);
+  margin-bottom: 0;
+}
+
+.table-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--bouch-charcoal, #1C1917);
+}
+
+.table-count {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--bouch-mid-gray, #b0aea5);
+}
+
 .no-data {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 24px;
+  background: var(--bouch-gray, #e8e6dc);
   text-align: center;
-  padding: 24px;
-  color: var(--color-text-secondary, #666);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--bouch-mid-gray, #b0aea5);
+}
+
+.no-data-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background: var(--bouch-charcoal, #1C1917);
+  color: var(--bouch-orange, #D97757);
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 24px;
 }
 </style>

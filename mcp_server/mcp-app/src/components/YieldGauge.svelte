@@ -1,6 +1,7 @@
 <script lang="ts">
 /**
  * Circular gauge component for displaying yield percentage.
+ * BOUCH Design System - Animated gauge with brutalist aesthetic
  */
 import { getAssessmentColor, getAssessmentLabel } from "../lib/formatters";
 
@@ -13,8 +14,18 @@ let { yieldPct, assessment }: Props = $props();
 
 const circumference = 2 * Math.PI * 45;
 
+// Map assessment to BOUCH colors
+function getBouchColor(a: string | undefined): string {
+  switch (a) {
+    case "strong": return "#38a169"; // success green
+    case "average": return "#D97757"; // orange accent
+    case "weak": return "#dc2626"; // red
+    default: return "#b0aea5"; // mid-gray
+  }
+}
+
 // Derived values
-let color = $derived(getAssessmentColor(assessment));
+let color = $derived(getBouchColor(assessment));
 let label = $derived(getAssessmentLabel(assessment));
 
 let displayPct = $derived(() => {
@@ -36,8 +47,8 @@ let strokeDashoffset = $derived(() => {
       cy="50"
       r="45"
       fill="none"
-      stroke="var(--color-border-primary, #e0e0e0)"
-      stroke-width="8"
+      stroke="var(--bouch-gray, #e8e6dc)"
+      stroke-width="6"
     />
     <!-- Progress circle -->
     <circle
@@ -46,13 +57,21 @@ let strokeDashoffset = $derived(() => {
       r="45"
       fill="none"
       stroke={color}
-      stroke-width="8"
-      stroke-linecap="round"
+      stroke-width="6"
       stroke-dasharray={circumference}
       stroke-dashoffset={strokeDashoffset()}
       transform="rotate(-90 50 50)"
       class="progress"
     />
+    <!-- Corner markers for brutalist feel -->
+    <rect x="4" y="4" width="8" height="2" fill="var(--bouch-charcoal, #1C1917)" />
+    <rect x="4" y="4" width="2" height="8" fill="var(--bouch-charcoal, #1C1917)" />
+    <rect x="88" y="4" width="8" height="2" fill="var(--bouch-charcoal, #1C1917)" />
+    <rect x="94" y="4" width="2" height="8" fill="var(--bouch-charcoal, #1C1917)" />
+    <rect x="4" y="94" width="8" height="2" fill="var(--bouch-charcoal, #1C1917)" />
+    <rect x="4" y="88" width="2" height="8" fill="var(--bouch-charcoal, #1C1917)" />
+    <rect x="88" y="94" width="8" height="2" fill="var(--bouch-charcoal, #1C1917)" />
+    <rect x="94" y="88" width="2" height="8" fill="var(--bouch-charcoal, #1C1917)" />
   </svg>
   <div class="gauge-text">
     <span class="yield-value">{displayPct()}</span>
@@ -63,9 +82,9 @@ let strokeDashoffset = $derived(() => {
 <style>
 .gauge-container {
   position: relative;
-  width: 160px;
-  height: 160px;
-  margin: 0 auto 16px;
+  width: 180px;
+  height: 180px;
+  margin: 0 auto 20px;
 }
 
 .gauge {
@@ -74,7 +93,7 @@ let strokeDashoffset = $derived(() => {
 }
 
 .progress {
-  transition: stroke-dashoffset 0.5s ease-out;
+  transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .gauge-text {
@@ -87,17 +106,20 @@ let strokeDashoffset = $derived(() => {
 
 .yield-value {
   display: block;
-  font-size: var(--font-heading-lg-size, 28px);
-  font-weight: var(--font-weight-bold, 700);
-  color: var(--color-text-primary, #1a1a1a);
-  line-height: 1.2;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 42px;
+  letter-spacing: 2px;
+  color: var(--bouch-charcoal, #1C1917);
+  line-height: 1;
 }
 
 .yield-label {
   display: block;
-  font-size: var(--font-text-sm-size, 14px);
-  font-weight: var(--font-weight-semibold, 600);
+  font-family: 'Space Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 2px;
+  margin-top: 4px;
 }
 </style>

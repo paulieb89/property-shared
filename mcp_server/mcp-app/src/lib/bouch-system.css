@@ -1,0 +1,397 @@
+/**
+ * BOUCH Design System for MCP Apps
+ * Professional brutalist aesthetic with reactive feedback
+ */
+
+/* ========================================
+   CSS Variables (override host when needed)
+   ======================================== */
+:root {
+  /* Brand colors */
+  --bouch-charcoal: #1C1917;
+  --bouch-orange: #D97757;
+  --bouch-cream: #FAF9F5;
+  --bouch-gray: #e8e6dc;
+  --bouch-mid-gray: #b0aea5;
+  --bouch-success: #38a169;
+  --bouch-warning: #c05621;
+
+  /* Semantic mapping */
+  --color-bg: var(--bouch-cream);
+  --color-card: #ffffff;
+  --color-text: var(--bouch-charcoal);
+  --color-text-muted: rgba(28, 25, 23, 0.6);
+  --color-border: rgba(28, 25, 23, 0.12);
+  --color-accent: var(--bouch-orange);
+  --color-accent-hover: #c45f3d;
+
+  /* Typography */
+  --font-mono: 'Space Mono', ui-monospace, monospace;
+  --font-display: 'Bebas Neue', system-ui, sans-serif;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+
+  /* Transitions */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
+}
+
+/* ========================================
+   Base Styles
+   ======================================== */
+* {
+  box-sizing: border-box;
+}
+
+/* ========================================
+   Interactive Button Styles
+   ======================================== */
+.btn {
+  padding: 12px 24px;
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 2px solid transparent;
+  background: var(--bouch-charcoal);
+  color: var(--bouch-cream);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn:hover:not(:disabled) {
+  background: #2d2926;
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Primary button - orange accent */
+.btn-primary {
+  background: var(--bouch-orange);
+  color: var(--bouch-charcoal);
+  border-color: var(--bouch-orange);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+/* Secondary/ghost button */
+.btn-secondary {
+  background: transparent;
+  color: var(--bouch-charcoal);
+  border: 2px solid var(--bouch-charcoal);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(28, 25, 23, 0.06);
+}
+
+/* ========================================
+   Loading Spinner
+   ======================================== */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(28, 25, 23, 0.2);
+  border-radius: 50%;
+  border-top-color: currentColor;
+  animation: spin 0.8s linear infinite;
+}
+
+.spinner-light {
+  border-color: rgba(250, 249, 245, 0.3);
+  border-top-color: var(--bouch-cream);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ========================================
+   Labels & Badges
+   ======================================== */
+.label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--color-text-muted);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.badge-accent {
+  background: var(--bouch-orange);
+  color: var(--bouch-charcoal);
+}
+
+.badge-success {
+  background: var(--bouch-success);
+  color: white;
+}
+
+.badge-muted {
+  background: var(--bouch-gray);
+  color: var(--bouch-charcoal);
+}
+
+/* ========================================
+   Form Controls
+   ======================================== */
+.select {
+  appearance: none;
+  padding: 10px 32px 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%231C1917' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.select:hover:not(:disabled) {
+  border-color: var(--bouch-charcoal);
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--bouch-charcoal);
+  box-shadow: 0 0 0 3px rgba(28, 25, 23, 0.1);
+}
+
+.select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ========================================
+   Slider/Range Input
+   ======================================== */
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  background: var(--bouch-gray);
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  background: var(--bouch-charcoal);
+  border: 3px solid var(--bouch-orange);
+  cursor: grab;
+  transition: transform var(--transition-fast);
+}
+
+.slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+}
+
+.slider::-webkit-slider-thumb:active {
+  cursor: grabbing;
+  transform: scale(0.95);
+}
+
+.slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  background: var(--bouch-charcoal);
+  border: 3px solid var(--bouch-orange);
+  border-radius: 0;
+  cursor: grab;
+}
+
+/* ========================================
+   Cards
+   ======================================== */
+.card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  margin-bottom: var(--space-md);
+}
+
+.card-header {
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-header-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--bouch-orange);
+}
+
+.card-body {
+  padding: var(--space-md);
+}
+
+/* ========================================
+   Tables
+   ======================================== */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.table th {
+  padding: 12px 10px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--color-text-muted);
+  border-bottom: 2px solid var(--color-border);
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--transition-fast);
+}
+
+.table th:hover {
+  color: var(--bouch-charcoal);
+  background: var(--bouch-gray);
+}
+
+.table th.sorted {
+  color: var(--bouch-orange);
+  border-bottom-color: var(--bouch-orange);
+}
+
+.table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--color-border);
+  transition: background var(--transition-fast);
+}
+
+.table tbody tr {
+  cursor: pointer;
+}
+
+.table tbody tr:hover {
+  background: var(--bouch-gray);
+}
+
+.table tbody tr:active {
+  background: var(--bouch-mid-gray);
+}
+
+/* ========================================
+   Animations
+   ======================================== */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.3s ease-out;
+}
+
+.animate-pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* ========================================
+   State Feedback
+   ======================================== */
+.clickable {
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.clickable:hover {
+  opacity: 0.9;
+}
+
+.clickable:active {
+  transform: scale(0.98);
+}
+
+/* Ripple effect for buttons */
+.ripple {
+  position: relative;
+  overflow: hidden;
+}
+
+.ripple::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: width 0.3s ease, height 0.3s ease;
+}
+
+.ripple:active::after {
+  width: 200%;
+  height: 200%;
+}
