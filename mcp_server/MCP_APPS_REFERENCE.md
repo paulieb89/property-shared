@@ -606,49 +606,93 @@ Example:
 
 ## Host Quirks
 
-Documented host-specific behaviors:
+Documented host-specific behaviors from real-world testing.
 
 ### ChatGPT
-- **Skips `ontoolinput`**: Goes straight to `ontoolresult`. Infer params from result data.
-- **No serverTools proxy**: `callServerTool()` fails. Use `sendMessage()` fallback.
+
+ChatGPT uses the OpenAI Apps SDK bridge, NOT pure MCP notifications:
+
+- **Skips `ontoolinput`**: Never fires. Infer params from result data.
+- **Data delivery**: Via `window.openai.toolOutput` (sync) or `openai:set_globals` event (async), NOT MCP `ontoolresult` notification.
+- **No serverTools proxy**: `callServerTool()` fails with "MCP proxy not enabled". Use `sendMessage()` fallback.
 - **`updateModelContext` works**: Supported with capability guard.
 
+**ChatGPT fallback pattern** (required for ChatGPT compatibility):
+
+```typescript
+// After app.connect(), check for OpenAI sync data
+if (window.openai?.toolOutput) {
+  // Data is available immediately (sync path)
+  const result = normalizeToolOutput(window.openai.toolOutput);
+  renderUI(result.structuredContent);
+}
+
+// Subscribe for late-arriving data (async path)
+window.addEventListener("openai:set_globals", (event) => {
+  const { globals } = event.detail;
+  if (globals?.toolOutput) {
+    const result = normalizeToolOutput(globals.toolOutput);
+    renderUI(result.structuredContent);
+  }
+});
+
+// Helper to normalize OpenAI format to MCP CallToolResult
+function normalizeToolOutput(toolOutput: unknown): CallToolResult {
+  if (typeof toolOutput === "object" && "structuredContent" in toolOutput) {
+    return toolOutput as CallToolResult;
+  }
+  if (typeof toolOutput === "object") {
+    return { content: [], structuredContent: toolOutput };
+  }
+  return { content: [{ type: "text", text: String(toolOutput) }] };
+}
+```
+
 ### Claude
+
+- **Full MCP lifecycle**: Both `ontoolinput` and `ontoolresult` fire via MCP notifications.
 - **Needs flat meta keys**: Use both `"ui": {"resourceUri": ...}` and `"ui/resourceUri": ...`
-- **Sends `ontoolinput`**: Full lifecycle works.
 - **`updateModelContext` works**: Supported with capability guard.
+- **`callServerTool` works**: Server tools proxy is enabled.
 
 ### Host Parity Matrix
 
 | Capability              | ChatGPT | Claude |
 |------------------------|---------|--------|
 | `ontoolinput`          | ❌ skipped | ✅ |
-| `ontoolresult`         | ✅      | ✅     |
+| `ontoolresult` (MCP)   | ❌ via OpenAI bridge | ✅ |
+| `window.openai.toolOutput` | ✅ | ❌ |
 | `updateModelContext`   | ✅      | ✅     |
-| `callServerTool` proxy | ❌      | ❓ untested |
+| `callServerTool` proxy | ❌      | ✅     |
 | Flat meta keys         | ✅      | ✅ required |
 | Nested meta keys       | ✅      | ❌      |
 | `safeAreaInsets`       | ✅      | ✅     |
 
 **Minimum manual test** (per host):
-1. Baseline tool call renders UI
+1. Baseline tool call renders UI with correct data
 2. User commits param change via Apply
 3. Model correctly references the delta in next response
 
 ### Defensive patterns
+
 ```typescript
-// Handle missing ontoolinput
+// Handle missing ontoolinput (ChatGPT)
 if (!currentParams && result.structuredContent) {
   currentParams = inferParamsFromResult(result.structuredContent);
 }
 
-// Handle missing serverTools proxy
+// Handle missing serverTools proxy (ChatGPT)
 try {
   await app.callServerTool(name, args);
 } catch (e) {
   if (e.message.includes("proxy not enabled")) {
     await app.sendMessage({ role: "user", content: [...] });
   }
+}
+
+// Check for OpenAI environment
+function isOpenAIEnvironment(): boolean {
+  return typeof window !== "undefined" && "openai" in window;
 }
 ```
 

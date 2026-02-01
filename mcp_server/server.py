@@ -30,6 +30,56 @@ mcp = FastMCP(
 _ppd = PPDService()
 
 # ---------------------------------------------------------------------------
+# Auto-Escalation for Thin Markets
+# ---------------------------------------------------------------------------
+
+MIN_RESULTS = 5  # Minimum results before auto-escalating
+ESCALATION_PATH = {"postcode": "sector", "sector": "district", "district": None}
+
+
+async def _fetch_comps_with_escalation(
+    postcode: str,
+    months: int,
+    limit: int,
+    search_level: str,
+    address: Optional[str],
+) -> tuple:
+    """Fetch comps, auto-escalating search level if thin market."""
+    original_level = search_level
+
+    result = await anyio.to_thread.run_sync(
+        partial(
+            _ppd.comps,
+            postcode=postcode,
+            months=months,
+            limit=limit,
+            search_level=search_level,
+            address=address,
+        )
+    )
+
+    # Auto-escalate if thin market
+    while result.thin_market and len(result.transactions) < MIN_RESULTS:
+        next_level = ESCALATION_PATH.get(search_level)
+        if not next_level:
+            break  # Can't escalate further
+
+        search_level = next_level
+        result = await anyio.to_thread.run_sync(
+            partial(
+                _ppd.comps,
+                postcode=postcode,
+                months=months,
+                limit=limit,
+                search_level=search_level,
+                address=address,
+            )
+        )
+
+    return result, original_level, search_level
+
+
+# ---------------------------------------------------------------------------
 # UI Resource
 # ---------------------------------------------------------------------------
 
@@ -75,28 +125,33 @@ async def property_comps(
         postcode: UK postcode (e.g. "SW1A 1AA", "NG11 9HD")
         months: Lookback period in months (default 24)
         limit: Max transactions to return (default 30)
-        search_level: "sector" (recommended), "district", or "postcode"
+        search_level: Search area granularity - usually leave as default
         address: Optional street address to identify subject property
     """
-    result = await anyio.to_thread.run_sync(
-        partial(
-            _ppd.comps,
-            postcode=postcode,
-            months=months,
-            limit=limit,
-            search_level=search_level,
-            address=address,
-        )
+    result, requested_level, actual_level = await _fetch_comps_with_escalation(
+        postcode, months, limit, search_level, address
     )
     data = result.model_dump(mode="json")
     count = len(data.get("transactions", []))
+
+    # Track escalation in response data
+    if requested_level != actual_level:
+        data["_escalated_from"] = requested_level
+        data["_escalated_to"] = actual_level
+        if data.get("query"):
+            data["query"]["search_level"] = actual_level
+
+    # Build summary
+    summary = f"Found {count} comparable sales for {postcode}"
+    if requested_level != actual_level:
+        summary += f" (expanded search from {requested_level} to {actual_level})"
 
     return types.CallToolResult(
         content=[
             types.TextContent(
                 type="text",
                 text=json.dumps({
-                    "summary": f"Found {count} comparable sales for {postcode}",
+                    "summary": summary,
                     "median": data.get("median"),
                     "count": count,
                 }),

@@ -21,6 +21,7 @@ import CompsView from "./views/CompsView.svelte";
 import YieldView from "./views/YieldView.svelte";
 
 import type { SearchParams } from "./components/SearchControls.svelte";
+import { getOpenAIFallbackData, onOpenAIGlobalsChange, type OpenAIGlobals } from "./lib/openai-fallback";
 
 // ---------------------------------------------------------------------------
 // State
@@ -34,8 +35,8 @@ let error = $state<string | null>(null);
 let data = $state<ToolData | null>(null);
 let dataType = $state<DataType | null>(null);
 
-// Debug state
-let debugLog = $state<string[]>([]);
+// Debug state - start with init message to verify render
+let debugLog = $state<string[]>(["init: waiting for messages..."]);
 
 // Current tool and params for re-querying
 let currentToolName = $state<string | null>(null);
@@ -320,6 +321,19 @@ function extractToolData(result: CallToolResult): { data: ToolData | null; type:
 // ---------------------------------------------------------------------------
 
 onMount(async () => {
+  // Early debug: log ALL postMessage events from parent
+  window.addEventListener("message", (event) => {
+    console.info("[MCP App] Raw postMessage received:", {
+      origin: event.origin,
+      dataType: typeof event.data,
+      dataKeys: event.data && typeof event.data === "object" ? Object.keys(event.data) : "N/A",
+      method: event.data?.method || event.data?.jsonrpc ? event.data.method : "unknown",
+    });
+    if (event.data?.method) {
+      debugLog = [...debugLog, `postMessage: ${event.data.method}`];
+    }
+  });
+
   const instance = new App({ name: "Property Dashboard", version: "1.0.0" });
 
   instance.onteardown = async () => {
@@ -360,6 +374,16 @@ onMount(async () => {
     console.info("[MCP App] Tool result:", result);
     debugLog = [...debugLog, `ontoolresult: hasStructured=${!!result.structuredContent}`];
     loading = false;
+
+    // Handle error results (e.g., timeout from host)
+    if (result.isError || (typeof result === "string" && result.includes("error"))) {
+      const errMsg = typeof result === "string" ? result :
+        result.content?.[0]?.text || "Tool execution failed";
+      debugLog = [...debugLog, `ERROR: ${errMsg}`];
+      error = errMsg;
+      return;
+    }
+
     const extracted = extractToolData(result);
     debugLog = [...debugLog, `extracted: type=${extracted.type}, hasData=${!!extracted.data}`];
 
@@ -414,9 +438,111 @@ onMount(async () => {
   };
 
   await instance.connect();
-  debugLog = [...debugLog, "connected"];
+  const caps = instance.getHostCapabilities();
+  const hostInfo = instance.getHostVersion();
+  debugLog = [
+    ...debugLog,
+    `connected to ${hostInfo?.name ?? "unknown"} v${hostInfo?.version ?? "?"}`,
+    `caps: serverTools=${!!caps?.serverTools}, updateModelContext=${!!caps?.updateModelContext}`,
+  ];
   app = instance;
   hostContext = instance.getHostContext();
+
+  // ---------------------------------------------------------------------------
+  // OpenAI Fallback: ChatGPT provides sync properties instead of MCP notifications
+  // ---------------------------------------------------------------------------
+  const fallback = getOpenAIFallbackData();
+  if (fallback.isOpenAI) {
+    debugLog = [...debugLog, "OpenAI env detected"];
+
+    // Process tool input (arguments)
+    if (fallback.toolInput) {
+      debugLog = [...debugLog, `toolInput: ${fallback.toolInput.name}`];
+      const args = fallback.toolInput.arguments;
+      currentToolName = fallback.toolInput.name;
+      currentParams = {
+        postcode: args.postcode as string | undefined,
+        months: (args.months as number) ?? 24,
+        radius: (args.radius as number) ?? 0.5,
+        search_level: (args.search_level as string) ?? "sector",
+        address: args.address as string | undefined,
+      };
+    }
+
+    // Process tool result (output)
+    if (fallback.toolResult) {
+      debugLog = [...debugLog, "toolOutput found - processing"];
+      loading = false;
+
+      const extracted = extractToolData(fallback.toolResult);
+      debugLog = [...debugLog, `extracted: type=${extracted.type}`];
+
+      if (extracted.data && extracted.type) {
+        // Infer params from result if toolInput wasn't available
+        if (!currentParams || !currentToolName) {
+          const inferredPostcode =
+            (extracted.data as CompsData).transactions?.[0]?.postcode ||
+            (extracted.data as YieldData).postcode || "";
+          currentToolName = extracted.type === "yield" ? "property_yield" : "property_comps";
+          currentParams = {
+            postcode: inferredPostcode,
+            months: 24,
+            radius: 0.5,
+            search_level: "sector",
+          };
+        }
+
+        data = extracted.data;
+        dataType = extracted.type;
+
+        // Push baseline to model context
+        const snapshot = buildSnapshot(currentToolName, currentParams, extracted.data, extracted.type, "baseline");
+        pushModelContext(instance, snapshot);
+      }
+    } else {
+      debugLog = [...debugLog, "No toolOutput - waiting for live result"];
+
+      // Subscribe to globals changes for when toolOutput becomes available later
+      const unsub = onOpenAIGlobalsChange((globals: Partial<OpenAIGlobals>) => {
+        debugLog = [...debugLog, `set_globals: keys=${Object.keys(globals).join(",")}`];
+
+        if (globals.toolOutput && loading) {
+          debugLog = [...debugLog, "toolOutput arrived via set_globals!"];
+          loading = false;
+
+          // Normalize and process
+          const toolResult = {
+            content: [],
+            structuredContent: typeof globals.toolOutput === "object" ? globals.toolOutput : undefined,
+          };
+          const extracted = extractToolData(toolResult as CallToolResult);
+
+          if (extracted.data && extracted.type) {
+            // Infer params if needed
+            if (!currentParams || !currentToolName) {
+              const inferredPostcode =
+                (extracted.data as CompsData).transactions?.[0]?.postcode ||
+                (extracted.data as YieldData).postcode || "";
+              currentToolName = extracted.type === "yield" ? "property_yield" : "property_comps";
+              currentParams = {
+                postcode: inferredPostcode,
+                months: 24,
+                radius: 0.5,
+                search_level: "sector",
+              };
+            }
+
+            data = extracted.data;
+            dataType = extracted.type;
+
+            const snapshot = buildSnapshot(currentToolName, currentParams, extracted.data, extracted.type, "baseline");
+            pushModelContext(instance, snapshot);
+            unsub(); // Stop listening once we have data
+          }
+        }
+      });
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -492,6 +618,14 @@ async function handleApply(params: SearchParams) {
       <div class="loading-dots">
         <span></span><span></span><span></span>
       </div>
+      {#if debugLog.length > 0}
+        <div class="debug-log">
+          <div class="debug-title">Debug:</div>
+          {#each debugLog as line}
+            <div>{line}</div>
+          {/each}
+        </div>
+      {/if}
     </div>
   {:else if error}
     <div class="error-state animate-fade-up">
@@ -539,7 +673,7 @@ async function handleApply(params: SearchParams) {
 </main>
 
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&display=swap');
+/* NOTE: External fonts blocked by MCP Apps CSP - using system fonts */
 
 .main {
   width: 100%;
@@ -547,7 +681,7 @@ async function handleApply(params: SearchParams) {
   margin: 0 auto;
   padding: 16px;
   box-sizing: border-box;
-  font-family: 'Space Mono', ui-monospace, monospace;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 }
 
 /* Loading State */

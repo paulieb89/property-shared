@@ -25,9 +25,9 @@
   --color-accent: var(--bouch-orange);
   --color-accent-hover: #c45f3d;
 
-  /* Typography */
-  --font-mono: 'Space Mono', ui-monospace, monospace;
-  --font-display: 'Bebas Neue', system-ui, sans-serif;
+  /* Typography - system fonts only (external fonts blocked by MCP Apps CSP) */
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-display: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
   /* Spacing */
   --space-xs: 4px;
