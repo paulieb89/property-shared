@@ -176,7 +176,11 @@ async def property_yield(
 # ---------------------------------------------------------------------------
 
 def main():
-    mcp.run()
+    import os
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    if transport not in ("stdio", "sse", "streamable-http"):
+        transport = "stdio"
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":

@@ -67,6 +67,25 @@ export type ToolData = CompsData | YieldData;
 export type DataType = "comps" | "yield";
 
 /**
+ * Search parameters for property tools.
+ */
+export interface SearchParams {
+  postcode?: string;
+  months?: number;
+  radius?: number;
+  search_level?: string;
+}
+
+/**
+ * Tool result envelope - matches what extractToolData consumes.
+ * Use this for typing callServerTool responses.
+ */
+export interface ToolEnvelope {
+  structuredContent?: unknown;
+  content?: Array<{ type: string; text?: string }>;
+}
+
+/**
  * Type guards for data detection.
  */
 export function isYieldData(obj: unknown): obj is YieldData {

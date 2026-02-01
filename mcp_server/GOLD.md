@@ -32,6 +32,39 @@ A tool reaches **gold** when it meets all criteria:
 - [ ] Rate limits / quotas handled
 - [ ] Ready for real users
 
+### Host Compatibility Gates
+- [ ] Functions without `updateModelContext` if host doesn't support it
+- [ ] Guards all optional host capabilities
+- [ ] Does not rely on `ontoolinput` being called
+- [ ] Uses both nested and flat meta keys (Claude compat)
+- [ ] Handles missing `safeAreaInsets` gracefully
+
+### Gold Evidence (required artifacts)
+
+For a tool to reach gold, include:
+
+1. **Screenshots** (2 required)
+   - 1 screenshot from Claude host
+   - 1 screenshot from ChatGPT host
+
+2. **Sample payloads** (2 required)
+   - 1 example `structuredContent` response (key fields)
+   - 1 example `updateModelContext` payload
+
+3. **Test fixtures**
+   - List of postcodes/inputs used for testing
+   - Edge case inputs tested (no results, thin market, etc.)
+
+### Performance Regression Triggers
+
+Fail if any of these occur:
+
+- Slider commit causes > 1 tool call per 150ms
+- `updateModelContext` payload > 2KB on repeated commits
+- Polling/animation continues when element hidden
+- UI renders before `structuredContent` available
+- Multiple identical context updates sent
+
 ## Gold Tools
 
 | Tool | Gold Date | Notes |

@@ -34,6 +34,9 @@ let error = $state<string | null>(null);
 let data = $state<ToolData | null>(null);
 let dataType = $state<DataType | null>(null);
 
+// Debug state
+let debugLog = $state<string[]>([]);
+
 // Current tool and params for re-querying
 let currentToolName = $state<string | null>(null);
 let currentParams = $state<SearchParams | null>(null);
@@ -326,6 +329,7 @@ onMount(async () => {
 
   instance.ontoolinput = (params) => {
     console.info("[MCP App] Tool input:", params);
+    debugLog = [...debugLog, `ontoolinput: ${params.name || "?"}`];
     loading = true;
     error = null;
 
@@ -354,9 +358,28 @@ onMount(async () => {
 
   instance.ontoolresult = (result) => {
     console.info("[MCP App] Tool result:", result);
+    debugLog = [...debugLog, `ontoolresult: hasStructured=${!!result.structuredContent}`];
     loading = false;
     const extracted = extractToolData(result);
-    if (extracted.data && extracted.type && currentParams && currentToolName) {
+    debugLog = [...debugLog, `extracted: type=${extracted.type}, hasData=${!!extracted.data}`];
+
+    if (extracted.data && extracted.type) {
+      // If ontoolinput wasn't called (ChatGPT skips it), infer params from data
+      if (!currentParams || !currentToolName) {
+        debugLog = [...debugLog, "inferring params from result data"];
+        const inferredPostcode =
+          (extracted.data as CompsData).transactions?.[0]?.postcode ||
+          (extracted.data as YieldData).postcode ||
+          "";
+        currentToolName = extracted.type === "yield" ? "property_yield" : "property_comps";
+        currentParams = {
+          postcode: inferredPostcode,
+          months: 24,
+          radius: 0.5,
+          search_level: "sector",
+        };
+      }
+
       data = extracted.data;
       dataType = extracted.type;
 
@@ -369,6 +392,8 @@ onMount(async () => {
         "baseline"
       );
       pushModelContext(instance, snapshot);
+    } else {
+      debugLog = [...debugLog, `SKIP: no data extracted`];
     }
   };
 
@@ -389,6 +414,7 @@ onMount(async () => {
   };
 
   await instance.connect();
+  debugLog = [...debugLog, "connected"];
   app = instance;
   hostContext = instance.getHostContext();
 });
@@ -501,6 +527,13 @@ async function handleApply(params: SearchParams) {
       <div class="empty-icon">P</div>
       <div class="empty-title">Property Dashboard</div>
       <div class="empty-text">Waiting for data...</div>
+      {#if debugLog.length > 0}
+        <div class="debug-log">
+          {#each debugLog as line}
+            <div>{line}</div>
+          {/each}
+        </div>
+      {/if}
     </div>
   {/if}
 </main>
@@ -695,5 +728,22 @@ async function handleApply(params: SearchParams) {
 .main.hidden .loading-spinner,
 .main.hidden .loading-dots span {
   animation-play-state: paused;
+}
+
+/* Debug log */
+.debug-log {
+  margin-top: 1rem;
+  padding: 0.5rem;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-align: left;
+  max-height: 100px;
+  overflow-y: auto;
+}
+.debug-log div {
+  color: #0f0;
+  margin: 2px 0;
 }
 </style>

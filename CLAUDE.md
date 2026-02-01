@@ -75,6 +75,10 @@ app/                        # FastAPI service (thin HTTP wrapper)
 
 property_cli/               # Typer CLI (imports only from property_core)
 └── main.py                 # All commands; --api-url switches to HTTP mode
+
+mcp_server/                 # MCP server for AI hosts (wraps property_core)
+├── server.py               # FastMCP tools + resources
+└── mcp-app/                # Svelte UI for interactive results
 ```
 
 **Three-layer separation**:
@@ -122,3 +126,115 @@ from property_core.models.report import PropertyReport
 # Planning scraper (requires playwright, openai)
 from property_core.planning_scraper import scrape_planning_application, search_planning_by_postcode
 ```
+
+## MCP Server
+
+The MCP server (`mcp_server/`) exposes property_core tools to AI hosts like ChatGPT and Claude. It's a thin wrapper—all business logic lives in property_core.
+
+```
+mcp_server/
+├── server.py               # FastMCP server (wraps property_core services)
+├── mcp-app/                # Svelte UI for interactive tool results
+│   └── src/App.svelte      # Main component with BOUCH design system
+├── ui/                     # Built HTML served as MCP resources
+│   └── property_dashboard.html
+├── MCP_APPS_REFERENCE.md   # SDK patterns documentation
+└── GOLD.md                 # Production readiness checklist
+```
+
+### Commands
+
+```bash
+# Run MCP server locally
+cd mcp_server && uv run property-mcp
+
+# Build the MCP App UI
+cd mcp_server/mcp-app && npm run build
+# Output goes to mcp_server/ui/property_dashboard.html
+
+# Deploy to Fly.io
+fly deploy
+```
+
+### Architecture
+
+**Data flow**: AI Host → MCP Server → property_core → Land Registry/Rightmove
+
+The server returns two things:
+1. `content` - Text summary for the model
+2. `structuredContent` - Full data for the UI to render
+
+The UI receives data via `ontoolresult` callback and renders interactive dashboards.
+
+### Tools
+
+| Tool | Description |
+|------|-------------|
+| `property_comps` | Get comparable sales for a UK postcode |
+| `property_yield` | Calculate rental yield (sales + rentals) |
+
+### Host Quirks (ChatGPT)
+
+Testing revealed ChatGPT's MCP host has specific behaviors:
+
+- **Skips `ontoolinput`**: Goes straight to `ontoolresult`. The UI infers params from result data.
+- **No serverTools proxy**: `callServerTool()` fails with "MCP proxy not enabled". UI-triggered re-queries require `sendMessage()` fallback.
+- **Model Context Sync works**: `updateModelContext()` is supported with capability guard.
+
+### MCP App Contract
+
+Non-negotiable patterns for all MCP Apps in this repo:
+
+**Invariant**: Local state changes that affect model interpretation → commit-level `updateModelContext`
+
+**Commit triggers** (fire on these, not continuously):
+- Slider/control mouseup or Apply button
+- Selection changes (scenario, property, tab)
+- Assumption toggles
+- Navigation changes
+
+**Payload format** (YAML frontmatter + markdown):
+```yaml
+---
+tool: property_yield
+scenario: what-if
+postcode: NG1 1AA
+view: yield
+---
+
+## Changes
+- radius: 0.5mi → 2mi
+- gross_yield: 6.5% → 5.4%
+
+## Current View
+- gross_yield: 5.4%
+- assessment: average
+```
+
+**Capability guard** (required):
+```typescript
+const caps = app.getHostCapabilities();
+if (!caps?.updateModelContext) return;
+```
+
+### Tool Result Contract
+
+- **UI renders from `structuredContent` only** — never parse `content[]`
+- **`content[]` is fallback** — model summary for non-UI hosts
+- **Include `data_quality` field** where meaningful (good/low/insufficient)
+- **Include source counts** (`sale_count`, `rental_count`) for transparency
+
+### Debugging Host Behavior
+
+When UI doesn't render or context sync fails:
+
+1. **Check browser console** — look for `[MCP App]` prefixed logs
+2. **Use `app.sendLog()`** — logs visible to host, not just iframe console
+3. **Add debug panel** — render last tool args, structuredContent keys, host capabilities
+4. **Test both hosts** — ChatGPT skips `ontoolinput`, Claude sends both
+
+**Debug panel should show**:
+- `getHostCapabilities()` snapshot
+- Last `ontoolinput` args (or "skipped")
+- Last `structuredContent` keys
+- Last `updateModelContext` payload

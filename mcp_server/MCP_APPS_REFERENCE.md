@@ -6,6 +6,26 @@ Quick reference for `@modelcontextprotocol/ext-apps` - building interactive UIs 
 
 ---
 
+## Pattern Index
+
+Quick jump to patterns:
+
+| Pattern | Section |
+|---------|---------|
+| Server-side registration | [Server-Side Registration](#server-side-registration) |
+| Client-side handlers | [Client-Side App Class](#client-side-app-class) |
+| Commit-based context sync | [Model Context Sync](#model-context-sync) |
+| Snapshot + delta tracking | [Delta Tracking Pattern](#delta-tracking-pattern) |
+| YAML frontmatter payload | [Payload Shape](#payload-shape-yaml-frontmatter) |
+| Debounced apply | [Debounced Apply Pattern](#debounced-apply-pattern) |
+| Visibility-aware pause | [Visibility-Based Resource Management](#visibility-based-resource-management) |
+| Streaming partial input | [Streaming Partial Input](#streaming-partial-input-progressive-rendering) |
+| Fullscreen toggle | [Fullscreen Toggle](#fullscreen-toggle) |
+| Host quirks / compatibility | [Host Quirks](#host-quirks) |
+| UI state model | [UI State Model](#ui-state-model) |
+
+---
+
 ## Core Concept
 
 MCP Apps = Tool + Resource linked via `_meta.ui.resourceUri`
@@ -512,6 +532,124 @@ export default defineConfig({
     },
   },
 });
+```
+
+---
+
+## UI State Model
+
+Canonical state model for MCP Apps:
+
+```typescript
+interface AppState {
+  // What the user is currently editing (not yet committed)
+  inputsDraft: SearchParams;
+
+  // What triggered the last tool call
+  inputsCommitted: SearchParams;
+
+  // Server response (structuredContent)
+  resultSnapshot: ToolData;
+
+  // Local UI state (tabs, filters, selection)
+  viewState: ViewState;
+
+  // Debug: last context payload sent
+  lastContextPayload: string;
+}
+```
+
+**Rules**:
+- Only `inputsCommitted` generates deltas + context sync
+- UI renders outputs from `resultSnapshot` only
+- `inputsDraft` updates on every interaction, `inputsCommitted` on Apply
+- `viewState` changes trigger context sync if they affect interpretation
+
+---
+
+## Payload Hygiene
+
+### commit_id for ordering
+
+Include monotonic commit ID in YAML frontmatter to help debug stale interpretation:
+
+```yaml
+---
+tool: property_yield
+commit_id: 3
+scenario: what-if
+view: yield
+---
+```
+
+### structuredContent schema hygiene
+
+For portability across versions:
+
+- **Include inputs echo** — mirror the params in response for auditability
+- **Include data quality** — `data_quality: "good" | "low" | "insufficient"`
+- **Include source counts** — `sale_count`, `rental_count` for transparency
+- **Keep stable keys** — don't rename fields across versions
+
+Example:
+```json
+{
+  "inputs": { "postcode": "NG11", "months": 24 },
+  "median": 250000,
+  "count": 15,
+  "data_quality": "good",
+  "thin_market": false
+}
+```
+
+---
+
+## Host Quirks
+
+Documented host-specific behaviors:
+
+### ChatGPT
+- **Skips `ontoolinput`**: Goes straight to `ontoolresult`. Infer params from result data.
+- **No serverTools proxy**: `callServerTool()` fails. Use `sendMessage()` fallback.
+- **`updateModelContext` works**: Supported with capability guard.
+
+### Claude
+- **Needs flat meta keys**: Use both `"ui": {"resourceUri": ...}` and `"ui/resourceUri": ...`
+- **Sends `ontoolinput`**: Full lifecycle works.
+- **`updateModelContext` works**: Supported with capability guard.
+
+### Host Parity Matrix
+
+| Capability              | ChatGPT | Claude |
+|------------------------|---------|--------|
+| `ontoolinput`          | ❌ skipped | ✅ |
+| `ontoolresult`         | ✅      | ✅     |
+| `updateModelContext`   | ✅      | ✅     |
+| `callServerTool` proxy | ❌      | ❓ untested |
+| Flat meta keys         | ✅      | ✅ required |
+| Nested meta keys       | ✅      | ❌      |
+| `safeAreaInsets`       | ✅      | ✅     |
+
+**Minimum manual test** (per host):
+1. Baseline tool call renders UI
+2. User commits param change via Apply
+3. Model correctly references the delta in next response
+
+### Defensive patterns
+```typescript
+// Handle missing ontoolinput
+if (!currentParams && result.structuredContent) {
+  currentParams = inferParamsFromResult(result.structuredContent);
+}
+
+// Handle missing serverTools proxy
+try {
+  await app.callServerTool(name, args);
+} catch (e) {
+  if (e.message.includes("proxy not enabled")) {
+    await app.sendMessage({ role: "user", content: [...] });
+  }
+}
 ```
 
 ---
