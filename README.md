@@ -61,6 +61,8 @@ Generate a typed client from the running service OpenAPI:
 ## Notes
 - Rightmove politeness is in-memory (`app/utils/polite.py`) for now; projects can swap in Redis later if needed.
 - Rightmove search URLs built from full postcodes default to a small radius (0.25 miles) so the initial query returns results; override `radius` to widen/narrow the area in both the API and CLI.
+- Station distances in listing details are rounded to 1 decimal place (e.g., "1.9 miles").
+- Rental analysis (`analyze_rentals`) uses IQR-based outlier filtering for the rent range to exclude extreme values.
 - OpenAPI/SDK generation will be added after endpoints land.
 
 ## API I/O contracts (summary)

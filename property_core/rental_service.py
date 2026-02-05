@@ -8,11 +8,27 @@ from __future__ import annotations
 
 import asyncio
 import os
+from statistics import quantiles
 from typing import Optional
 
 from property_core.models.report import RentalAnalysis
 from property_core.rightmove_location import RightmoveLocationAPI
 from property_core.rightmove_scraper import fetch_listings
+
+
+def _filter_outliers(prices: list[int]) -> list[int]:
+    """Remove outliers using IQR method.
+
+    Filters values outside 1.5 * IQR from Q1/Q3 quartiles.
+    Returns original list if too few values for meaningful filtering.
+    """
+    if len(prices) < 4:
+        return prices
+    q = quantiles(sorted(prices), n=4)
+    iqr = q[2] - q[0]  # Q3 - Q1
+    lower = q[0] - 1.5 * iqr
+    upper = q[2] + 1.5 * iqr
+    return [p for p in prices if lower <= p <= upper]
 
 
 def _calculate_yield(rental: RentalAnalysis, purchase_price: int) -> None:
@@ -78,13 +94,16 @@ async def analyze_rentals(
     median_rent = prices[len(prices) // 2] if prices else None
     avg_rent = int(sum(prices) / len(prices)) if prices else None
 
+    # Filter outliers for range display (keeps median/avg on full dataset)
+    filtered_prices = _filter_outliers(prices)
+
     rental = RentalAnalysis(
         search_radius_miles=radius,
         rental_listings_count=len(listings),
         average_rent_monthly=avg_rent,
         median_rent_monthly=median_rent,
-        rent_range_low=min(prices) if prices else None,
-        rent_range_high=max(prices) if prices else None,
+        rent_range_low=min(filtered_prices) if filtered_prices else None,
+        rent_range_high=max(filtered_prices) if filtered_prices else None,
     )
 
     if purchase_price is not None:

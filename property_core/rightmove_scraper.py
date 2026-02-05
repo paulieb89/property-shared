@@ -379,6 +379,16 @@ def _safe_float(val: Any) -> Optional[float]:
         return None
 
 
+def _round_distance(val: Any, decimals: int = 1) -> Optional[float]:
+    """Round a distance value to specified decimal places."""
+    if val is None:
+        return None
+    try:
+        return round(float(val), decimals)
+    except (ValueError, TypeError):
+        return None
+
+
 def _extract_floorplans(data: Dict[str, Any]) -> List[str]:
     """Extract floorplan image URLs from propertyData."""
     floorplans: List[str] = []
@@ -488,7 +498,7 @@ def _to_listing_detail(
     stations_raw = data.get("nearestStations") or []
     nearest_stations = [
         {"name": s.get("name"), "types": s.get("types", []),
-         "distance": s.get("distance"), "unit": s.get("unit")}
+         "distance": _round_distance(s.get("distance")), "unit": s.get("unit")}
         for s in stations_raw if isinstance(s, dict)
     ]
 
