@@ -90,7 +90,13 @@ async def analyze_rentals(
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"Rental analysis failed: {exc}") from exc
 
-    prices = sorted([l.price for l in listings if l.price and l.price > 0])
+    # Normalize all prices to monthly (weekly × 52/12 ≈ 4.33)
+    def _to_monthly(listing) -> int:
+        if listing.price_frequency == "weekly":
+            return int(listing.price * 52 / 12)
+        return listing.price
+
+    prices = sorted([_to_monthly(l) for l in listings if l.price and l.price > 0])
     median_rent = prices[len(prices) // 2] if prices else None
     avg_rent = int(sum(prices) / len(prices)) if prices else None
 
