@@ -411,7 +411,13 @@ class PropertyReportService:
                     ),
                 }
 
-            prices = [l.price for l in listings if l.price and l.price > 0]
+            # Normalize weekly rents to monthly (weekly × 52/12)
+            def _to_monthly(listing) -> int:
+                if listing.price_frequency == "weekly":
+                    return int(listing.price * 52 / 12)
+                return listing.price
+
+            prices = [_to_monthly(l) for l in listings if l.price and l.price > 0]
             if not prices:
                 return {
                     "success": True,
@@ -427,13 +433,25 @@ class PropertyReportService:
             median = prices[median_idx] if prices else None
             avg = int(sum(prices) / len(prices)) if prices else None
 
+            # Filter outliers for range (IQR method, keeps median/avg on full data)
+            def _filter_outliers(vals: list) -> list:
+                if len(vals) < 4:
+                    return vals
+                from statistics import quantiles
+                q = quantiles(vals, n=4)
+                iqr = q[2] - q[0]
+                lower, upper = q[0] - 1.5 * iqr, q[2] + 1.5 * iqr
+                return [v for v in vals if lower <= v <= upper]
+
+            filtered = _filter_outliers(prices)
+
             rental = RentalAnalysis(
                 search_radius_miles=radius,
                 rental_listings_count=len(listings),
                 average_rent_monthly=avg,
                 median_rent_monthly=median,
-                rent_range_low=min(prices) if prices else None,
-                rent_range_high=max(prices) if prices else None,
+                rent_range_low=min(filtered) if filtered else None,
+                rent_range_high=max(filtered) if filtered else None,
             )
 
             return {
