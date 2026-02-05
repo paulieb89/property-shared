@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import json
 import pathlib
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -39,6 +41,9 @@ from typing import Any, Dict, List, Optional
 S3_BASE = "http://prod2.publicdata.landregistry.gov.uk.s3-website-eu-west-1.amazonaws.com"
 LINKED_DATA_BASE = "https://landregistry.data.gov.uk"
 SPARQL_ENDPOINT = "https://landregistry.data.gov.uk/landregistry/sparql"
+
+SPARQL_RETRY_ATTEMPTS = 3
+SPARQL_RETRY_BACKOFF_SECONDS = 0.5
 
 # Property type codes match the CSV column values.
 PROPERTY_TYPE_URIS: Dict[str, str] = {
@@ -248,13 +253,7 @@ class PricePaidDataClient:
         )
 
         encoded = urllib.parse.urlencode({"query": query}).encode()
-        req = urllib.request.Request(
-            self.sparql_endpoint,
-            data=encoded,
-            headers={"Accept": "application/sparql-results+json", "User-Agent": self.user_agent},
-        )
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            return json.load(resp)
+        return self._fetch_sparql(encoded)
 
     # --------
     # Address-form search (web-form style)
@@ -267,6 +266,8 @@ class PricePaidDataClient:
         street: Optional[str] = None,
         town: Optional[str] = None,
         county: Optional[str] = None,
+        locality: Optional[str] = None,
+        district: Optional[str] = None,
         postcode: Optional[str] = None,
         postcode_prefix: Optional[str] = None,
         limit: int = 25,
@@ -283,6 +284,8 @@ class PricePaidDataClient:
             "street": street,
             "town": town,
             "county": county,
+            "locality": locality,
+            "district": district,
             "postcode": postcode,
             "postcode_prefix": postcode_prefix,
         }
@@ -322,6 +325,12 @@ class PricePaidDataClient:
         if county:
             safe = _clean(county)
             filters.append(f'FILTER(CONTAINS(LCASE(?county), "{safe}"))')
+        if locality:
+            safe = _clean(locality)
+            filters.append(f'FILTER(CONTAINS(LCASE(?locality), "{safe}"))')
+        if district:
+            safe = _clean(district)
+            filters.append(f'FILTER(CONTAINS(LCASE(?district), "{safe}"))')
 
         query = "\n".join(
             [
@@ -359,13 +368,7 @@ class PricePaidDataClient:
         )
 
         encoded = urllib.parse.urlencode({"query": query}).encode()
-        req = urllib.request.Request(
-            self.sparql_endpoint,
-            data=encoded,
-            headers={"Accept": "application/sparql-results+json", "User-Agent": self.user_agent},
-        )
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            return json.load(resp)
+        return self._fetch_sparql(encoded)
 
     # --------
     # Comps helper
@@ -529,6 +532,32 @@ class PricePaidDataClient:
         req = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             return json.load(resp)
+
+    def _fetch_sparql(self, encoded_query: bytes) -> Dict:
+        last_exc: Exception | None = None
+        for attempt in range(1, SPARQL_RETRY_ATTEMPTS + 1):
+            req = urllib.request.Request(
+                self.sparql_endpoint,
+                data=encoded_query,
+                headers={"Accept": "application/sparql-results+json", "User-Agent": self.user_agent},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    return json.load(resp)
+            except urllib.error.HTTPError as exc:
+                if exc.code not in {503}:
+                    raise
+                last_exc = exc
+            except (TimeoutError, urllib.error.URLError) as exc:
+                last_exc = exc
+
+            if attempt < SPARQL_RETRY_ATTEMPTS:
+                backoff = SPARQL_RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                time.sleep(backoff)
+
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("SPARQL request failed without a captured exception.")
 
     @staticmethod
     def _resolve_uri(value: str, mapping: Dict[str, str]) -> Optional[str]:

@@ -9,6 +9,52 @@ MCP server with interactive UI for UK property data tools. Deployed at https://p
 | `property_comps` | Comparable property sales with price statistics | Stats grid + transaction table |
 | `property_yield` | Rental yield analysis (PPD + Rightmove) | Gauge + stats + quality badge |
 
+The pattern is:
+
+
+property_core/           ← Business logic lives here
+├── *_client.py            Transport (HTTP/SPARQL → raw dicts)
+├── *_service.py           Domain (parsing → typed Pydantic models)
+└── models/*.py            Data models
+
+app/                     ← Thin FastAPI wrapper
+└── api/v1/*.py            Calls property_core, adds HTTP envelopes
+
+mcp_server/              ← Thin FastMCP wrapper  
+└── server.py              Calls property_core, adds MCP tool metadata
+To add a new feature:
+
+Core service in property_core/
+
+
+# property_core/stamp_duty_service.py
+from property_core.models.stamp_duty import StampDutyResult
+
+def calculate_stamp_duty(price: int, first_time: bool) -> StampDutyResult:
+    # Business logic here
+    return StampDutyResult(...)
+FastAPI route in app/api/v1/
+
+
+from property_core import calculate_stamp_duty
+
+@router.get("/stamp-duty")
+async def stamp_duty_endpoint(price: int, first_time: bool = False):
+    return calculate_stamp_duty(price, first_time)
+MCP tool in mcp_server/server.py
+
+
+from property_core import calculate_stamp_duty
+
+@mcp.tool(meta=TOOL_UI_META)
+def stamp_duty(price: int, first_time: bool = False) -> types.CallToolResult:
+    result = calculate_stamp_duty(price, first_time)
+    return types.CallToolResult(
+        content=[types.TextContent(type="text", text=f"Stamp duty: £{result.total}")],
+        structuredContent=result.model_dump(),
+    )
+Core stays framework-agnostic. Both APIs are just thin wrappers calling the same logic.
+
 ## Architecture
 
 ```

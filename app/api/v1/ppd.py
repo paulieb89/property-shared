@@ -90,13 +90,19 @@ def address_search(
     street: Optional[str] = Query(None, min_length=2),
     town: Optional[str] = Query(None, min_length=2),
     county: Optional[str] = Query(None, min_length=2),
+    locality: Optional[str] = Query(None, min_length=2),
+    district: Optional[str] = Query(None, min_length=2),
     postcode: Optional[str] = Query(None, min_length=2),
     postcode_prefix: Optional[str] = Query(None, min_length=2),
     limit: int = Query(25, ge=1, le=50),
     include_raw: bool = Query(False, description="Include raw SPARQL bindings"),
 ) -> PPDSearchResponse:
     """Web-form style address search (requires at least two fields)."""
-    provided = [v for v in (paon, saon, street, town, county, postcode, postcode_prefix) if v]
+    provided = [
+        v
+        for v in (paon, saon, street, town, county, locality, district, postcode, postcode_prefix)
+        if v
+    ]
     if len(provided) < 2:
         raise HTTPException(
             status_code=422, detail="Provide at least two address fields (e.g., postcode + street)."
@@ -109,6 +115,8 @@ def address_search(
             street=street,
             town=town,
             county=county,
+            locality=locality,
+            district=district,
             postcode=postcode,
             postcode_prefix=postcode_prefix,
             limit=limit,

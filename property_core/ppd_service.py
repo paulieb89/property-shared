@@ -261,6 +261,8 @@ class PPDService:
         street: Optional[str] = None,
         town: Optional[str] = None,
         county: Optional[str] = None,
+        locality: Optional[str] = None,
+        district: Optional[str] = None,
         postcode: Optional[str] = None,
         postcode_prefix: Optional[str] = None,
         limit: int = 25,
@@ -277,18 +279,38 @@ class PPDService:
             warnings.append(f"limit capped to {FORM_MAX_LIMIT}")
             limit = FORM_MAX_LIMIT
 
-        raw = self.client.form_search(
-            paon=paon,
-            saon=saon,
-            street=street,
-            town=town,
-            county=county,
-            postcode=postcode,
-            postcode_prefix=postcode_prefix,
-            limit=limit,
-        )
+        def _run_search(search_town: Optional[str]) -> Dict[str, Any]:
+            return self.client.form_search(
+                paon=paon,
+                saon=saon,
+                street=street,
+                town=search_town,
+                county=county,
+                locality=locality,
+                district=district,
+                postcode=postcode,
+                postcode_prefix=postcode_prefix,
+                limit=limit,
+            )
 
-        bindings = raw.get("results", {}).get("bindings", [])
+        raw = None
+        bindings: List[Dict[str, Any]] = []
+        try:
+            raw = _run_search(town)
+            bindings = raw.get("results", {}).get("bindings", [])
+        except Exception as exc:  # noqa: BLE001
+            if town:
+                warnings.append("town filter failed; retrying without town")
+                raw = _run_search(None)
+                bindings = raw.get("results", {}).get("bindings", [])
+            else:
+                raise
+
+        if town and not bindings:
+            warnings.append("town filter returned no results; retrying without town")
+            raw = _run_search(None)
+            bindings = raw.get("results", {}).get("bindings", [])
+
         results = _parse_sparql_bindings(bindings)
         return {
             "count": len(results),
