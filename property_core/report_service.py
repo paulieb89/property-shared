@@ -25,6 +25,7 @@ from property_core.models.report import (
     SaleRecord,
 )
 from property_core.ppd_service import PPDService
+from property_core.rental_service import analyze_rentals
 from property_core.rightmove_location import RightmoveLocationAPI
 from property_core.rightmove_scraper import fetch_listings
 
@@ -386,77 +387,17 @@ class PropertyReportService:
     async def _fetch_rental_data(
         self, postcode: str, radius: float
     ) -> Dict[str, Any]:
-        """Fetch rental market data from Rightmove (sync, wrapped in thread)."""
+        """Fetch rental market data using the standalone rental analysis module."""
         try:
-            url = await asyncio.to_thread(
-                self.rightmove.build_search_url,
+            rental = await analyze_rentals(
                 postcode,
-                property_type="rent",
                 radius=radius,
+                rightmove_delay=self._rightmove_delay,
+                rightmove_location=self.rightmove,
             )
-            listings = await asyncio.to_thread(
-                fetch_listings,
-                url,
-                max_pages=1,
-                rate_limit_seconds=self._rightmove_delay,
-            )
-
-            if not listings:
-                return {
-                    "success": True,
-                    "listing_count": 0,
-                    "rental_analysis": RentalAnalysis(
-                        search_radius_miles=radius,
-                        rental_listings_count=0,
-                    ),
-                }
-
-            # Normalize weekly rents to monthly (weekly × 52/12)
-            def _to_monthly(listing) -> int:
-                if listing.price_frequency == "weekly":
-                    return int(listing.price * 52 / 12)
-                return listing.price
-
-            prices = [_to_monthly(l) for l in listings if l.price and l.price > 0]
-            if not prices:
-                return {
-                    "success": True,
-                    "listing_count": len(listings),
-                    "rental_analysis": RentalAnalysis(
-                        search_radius_miles=radius,
-                        rental_listings_count=len(listings),
-                    ),
-                }
-
-            prices.sort()
-            median_idx = len(prices) // 2
-            median = prices[median_idx] if prices else None
-            avg = int(sum(prices) / len(prices)) if prices else None
-
-            # Filter outliers for range (IQR method, keeps median/avg on full data)
-            def _filter_outliers(vals: list) -> list:
-                if len(vals) < 4:
-                    return vals
-                from statistics import quantiles
-                q = quantiles(vals, n=4)
-                iqr = q[2] - q[0]
-                lower, upper = q[0] - 1.5 * iqr, q[2] + 1.5 * iqr
-                return [v for v in vals if lower <= v <= upper]
-
-            filtered = _filter_outliers(prices)
-
-            rental = RentalAnalysis(
-                search_radius_miles=radius,
-                rental_listings_count=len(listings),
-                average_rent_monthly=avg,
-                median_rent_monthly=median,
-                rent_range_low=min(filtered) if filtered else None,
-                rent_range_high=max(filtered) if filtered else None,
-            )
-
             return {
                 "success": True,
-                "listing_count": len(listings),
+                "listing_count": rental.rental_listings_count,
                 "rental_analysis": rental,
             }
         except Exception as e:
