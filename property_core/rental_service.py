@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from statistics import quantiles
+from statistics import median, quantiles
 from typing import Optional
 
 from property_core.models.report import RentalAnalysis
@@ -97,7 +97,7 @@ async def analyze_rentals(
         return listing.price
 
     prices = sorted([_to_monthly(l) for l in listings if l.price and l.price > 0])
-    median_rent = prices[len(prices) // 2] if prices else None
+    median_rent = int(median(prices)) if prices else None
     avg_rent = int(sum(prices) / len(prices)) if prices else None
 
     # Filter outliers for range display (keeps median/avg on full dataset)

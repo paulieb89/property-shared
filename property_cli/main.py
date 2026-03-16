@@ -452,7 +452,7 @@ def rightmove_listing(
         detail = data.get("result", {})
     else:
         result = fetch_listing(url_or_id, include_raw=include_raw)
-        detail = result.to_dict()
+        detail = result.model_dump()
 
     # Display structured output
     table = Table(title=f"Listing: {detail.get('address', url_or_id)}")
