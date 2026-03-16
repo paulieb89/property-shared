@@ -9,6 +9,8 @@ from typing import Any, Dict, Optional
 
 import httpx
 
+from property_core.models.postcode import PostcodeResult
+
 
 class PostcodeClient:
     """Client for postcodes.io API."""
@@ -18,12 +20,12 @@ class PostcodeClient:
     def __init__(self, timeout: float = 10.0):
         self.timeout = timeout
 
-    def lookup(self, postcode: str) -> Optional[Dict[str, Any]]:
+    def lookup(self, postcode: str) -> Optional[PostcodeResult]:
         """Look up a UK postcode.
 
         Returns:
-            Dict with postcode info including admin_district (local authority),
-            or None if not found.
+            PostcodeResult with postcode info including admin_district
+            (local authority), or None if not found.
         """
         # Normalize postcode (remove spaces, uppercase)
         postcode_clean = postcode.replace(" ", "").upper()
@@ -35,7 +37,10 @@ class PostcodeClient:
                     return None
                 resp.raise_for_status()
                 data = resp.json()
-                return data.get("result")
+                result = data.get("result")
+                if not result:
+                    return None
+                return PostcodeResult.from_api_response(result)
             except httpx.HTTPError:
                 return None
 
@@ -54,16 +59,16 @@ class PostcodeClient:
             return None
 
         data: Dict[str, Any] = {
-            "name": result.get("admin_district"),
-            "code": result.get("codes", {}).get("admin_district"),
-            "county": result.get("admin_county"),
-            "region": result.get("region"),
-            "country": result.get("country"),
-            "postcode": result.get("postcode"),
-            "latitude": result.get("latitude"),
-            "longitude": result.get("longitude"),
-            "rural_urban": result.get("ruc21"),  # Rural Urban Classification 2021
+            "name": result.admin_district,
+            "code": result.codes.get("admin_district") if result.codes else None,
+            "county": result.admin_county,
+            "region": result.region,
+            "country": result.country,
+            "postcode": result.postcode,
+            "latitude": result.latitude,
+            "longitude": result.longitude,
+            "rural_urban": result.rural_urban,
         }
         if include_raw:
-            data["raw"] = result
+            data["raw"] = result.raw
         return data
