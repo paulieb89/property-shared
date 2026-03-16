@@ -1,173 +1,34 @@
-"""PPD domain service: parsing + orchestration over the transport client.
+"""PPD domain service: orchestration over the typed transport client.
 
-This is the domain layer that converts raw SPARQL/Linked Data dicts from
-PricePaidDataClient into typed Pydantic models. Sync throughout.
+The transport client (PricePaidDataClient) now returns typed Pydantic models
+directly. This service layer handles guardrails, search-level prefix logic,
+stats computation, and subject-property matching. Sync throughout.
 """
 
 from __future__ import annotations
 
-from statistics import quantiles
-from typing import Any, Dict, Iterable, List, Optional
+from datetime import date, timedelta
+from statistics import mean, median, quantiles
+from typing import Any, Dict, List, Optional
 
 from property_core.models.ppd import (
     PPDCompsQuery,
     PPDCompsResponse,
     PPDTransaction,
-    PPDTransactionRecord,
     SubjectProperty,
 )
-from property_core.ppd_client import (
-    ESTATE_TYPE_URIS,
-    PROPERTY_TYPE_URIS,
-    TRANSACTION_CATEGORY_URIS,
-    PricePaidDataClient,
-)
+from property_core.ppd_client import PricePaidDataClient
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
 FORM_MAX_LIMIT = 50
 
-PROPERTY_TYPE_BY_URI = {v: k for k, v in PROPERTY_TYPE_URIS.items()}
-ESTATE_TYPE_BY_URI = {v: k for k, v in ESTATE_TYPE_URIS.items()}
-TRANSACTION_CATEGORY_BY_URI = {v: k for k, v in TRANSACTION_CATEGORY_URIS.items()}
-
-
-def _binding_value(binding: Dict[str, Any], key: str) -> Optional[str]:
-    """Extract a SPARQL binding value (or None)."""
-    item = binding.get(key)
-    if not isinstance(item, dict):
-        return None
-    return item.get("value")
-
-
-def _parse_sparql_bindings(bindings: Iterable[Dict[str, Any]]) -> List[PPDTransaction]:
-    """Convert SPARQL results into normalized transaction rows."""
-    results: List[PPDTransaction] = []
-    for binding in bindings:
-        price_raw = _binding_value(binding, "pricePaid")
-        new_build_raw = _binding_value(binding, "newBuild")
-        property_type_uri = _binding_value(binding, "propertyType")
-        estate_type_uri = _binding_value(binding, "estateType")
-        transaction_category_uri = _binding_value(binding, "transactionCategory")
-
-        transaction = PPDTransaction(
-            transaction_id=_binding_value(binding, "transactionId"),
-            price=int(price_raw) if price_raw and price_raw.isdigit() else None,
-            date=_binding_value(binding, "transactionDate"),
-            postcode=_binding_value(binding, "postcode"),
-            property_type=PROPERTY_TYPE_BY_URI.get(property_type_uri),
-            estate_type=ESTATE_TYPE_BY_URI.get(estate_type_uri),
-            transaction_category=TRANSACTION_CATEGORY_BY_URI.get(transaction_category_uri),
-            new_build=(new_build_raw == "true") if new_build_raw is not None else None,
-            paon=_binding_value(binding, "paon"),
-            saon=_binding_value(binding, "saon"),
-            street=_binding_value(binding, "street"),
-            town=_binding_value(binding, "town"),
-            county=_binding_value(binding, "county"),
-            locality=_binding_value(binding, "locality"),
-            district=_binding_value(binding, "district"),
-        )
-        results.append(transaction)
-    return results
-
-
-def _parse_comps_transactions(rows: Iterable[Dict[str, Any]]) -> List[PPDTransaction]:
-    """Normalize comps rows returned by PricePaidDataClient.get_comps_summary."""
-    results: List[PPDTransaction] = []
-    for row in rows:
-        results.append(
-            PPDTransaction(
-                transaction_id=row.get("transaction_id"),
-                price=row.get("price"),
-                date=row.get("date"),
-                postcode=row.get("postcode"),
-                property_type=row.get("property_type"),
-                estate_type=row.get("estate_type"),
-                transaction_category=None,
-                new_build=row.get("new_build"),
-                paon=row.get("paon"),
-                saon=row.get("saon"),
-                street=row.get("street"),
-                town=row.get("town"),
-                county=row.get("county"),
-                locality=row.get("locality"),
-                district=row.get("district"),
-            )
-        )
-    return results
-
-
-def _label_from(node: Any) -> Optional[str]:
-    """Get the first English label from a linked-data node."""
-    if not isinstance(node, dict):
-        return None
-    labels = node.get("label")
-    if isinstance(labels, list) and labels:
-        first = labels[0]
-        if isinstance(first, dict):
-            return first.get("_value")
-    return None
-
-
-def _about_from(node: Any) -> Optional[str]:
-    """Get the _about URI from a linked-data node or URI string."""
-    if isinstance(node, dict):
-        return node.get("_about")
-    if isinstance(node, str):
-        return node
-    return None
-
-
-def _safe_int(value: Any) -> Optional[int]:
-    """Convert simple numeric fields that may be int or numeric string."""
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str) and value.isdigit():
-        return int(value)
-    return None
-
-
-def _normalize_transaction_record(raw: Dict[str, Any]) -> PPDTransactionRecord:
-    """Normalize Linked Data API JSON into a flat record."""
-    result = raw.get("result", {}) if isinstance(raw, dict) else {}
-    primary = result.get("primaryTopic", {}) if isinstance(result, dict) else {}
-
-    property_type_node = primary.get("propertyType")
-    estate_type_node = primary.get("estateType")
-    category_node = primary.get("transactionCategory")
-    record_status_node = primary.get("recordStatus")
-
-    new_build_raw = primary.get("newBuild")
-    if isinstance(new_build_raw, bool):
-        new_build = new_build_raw
-    elif isinstance(new_build_raw, str):
-        new_build = new_build_raw.lower() == "true"
-    else:
-        new_build = None
-
-    return PPDTransactionRecord(
-        transaction_id=primary.get("transactionId"),
-        transaction_uri=_about_from(primary),
-        transaction_date=primary.get("transactionDate"),
-        price_paid=_safe_int(primary.get("pricePaid")),
-        new_build=new_build,
-        property_address_uri=_about_from(primary.get("propertyAddress")),
-        property_type=_label_from(property_type_node),
-        property_type_uri=_about_from(property_type_node),
-        estate_type=_label_from(estate_type_node),
-        estate_type_uri=_about_from(estate_type_node),
-        transaction_category=_label_from(category_node),
-        transaction_category_uri=_about_from(category_node),
-        record_status=_label_from(record_status_node),
-        record_status_uri=_about_from(record_status_node),
-        source_url=result.get("_about"),
-    )
-
 
 class PPDService:
     """Domain service for PPD operations.
 
-    Converts raw dicts from PricePaidDataClient into typed models.
+    Orchestrates PricePaidDataClient (which returns typed models) and adds
+    guardrails, stats computation, and subject-property matching.
     All methods are synchronous.
     """
     def __init__(self, client: Optional[PricePaidDataClient] = None):
@@ -224,7 +85,7 @@ class PPDService:
             warnings.append(f"limit capped to {MAX_LIMIT}")
             limit = MAX_LIMIT
 
-        raw = self.client.sparql_search(
+        results = self.client.sparql_search(
             postcode=postcode,
             postcode_prefix=postcode_prefix,
             from_date=from_date,
@@ -241,16 +102,13 @@ class PPDService:
             order_desc=order_desc,
         )
 
-        bindings = raw.get("results", {}).get("bindings", [])
-        results = _parse_sparql_bindings(bindings)
-
         return {
             "count": len(results),
             "limit": limit,
             "offset": offset,
             "results": results,
             "warnings": warnings,
-            "raw": bindings if include_raw else None,
+            "raw": [t.raw for t in results] if include_raw else None,
         }
 
     def address_search(
@@ -279,7 +137,7 @@ class PPDService:
             warnings.append(f"limit capped to {FORM_MAX_LIMIT}")
             limit = FORM_MAX_LIMIT
 
-        def _run_search(search_town: Optional[str]) -> Dict[str, Any]:
+        def _run_search(search_town: Optional[str]) -> list[PPDTransaction]:
             return self.client.form_search(
                 paon=paon,
                 saon=saon,
@@ -293,32 +151,27 @@ class PPDService:
                 limit=limit,
             )
 
-        raw = None
-        bindings: List[Dict[str, Any]] = []
+        results: list[PPDTransaction] = []
         try:
-            raw = _run_search(town)
-            bindings = raw.get("results", {}).get("bindings", [])
-        except Exception as exc:  # noqa: BLE001
+            results = _run_search(town)
+        except Exception:  # noqa: BLE001
             if town:
                 warnings.append("town filter failed; retrying without town")
-                raw = _run_search(None)
-                bindings = raw.get("results", {}).get("bindings", [])
+                results = _run_search(None)
             else:
                 raise
 
-        if town and not bindings:
+        if town and not results:
             warnings.append("town filter returned no results; retrying without town")
-            raw = _run_search(None)
-            bindings = raw.get("results", {}).get("bindings", [])
+            results = _run_search(None)
 
-        results = _parse_sparql_bindings(bindings)
         return {
             "count": len(results),
             "limit": limit,
             "offset": 0,
             "results": results,
             "warnings": warnings,
-            "raw": bindings if include_raw else None,
+            "raw": [t.raw for t in results] if include_raw else None,
         }
 
     def comps(
@@ -334,47 +187,72 @@ class PPDService:
         """Return comparable sales and summary stats for a postcode.
 
         If address is provided, also returns subject_property with its transaction history.
+
+        All stats (median, mean, percentiles, min, max) are computed from the
+        final filtered transaction list — after property-type filtering and
+        subject-property removal — so they are always consistent.
         """
         if limit <= 0:
             limit = DEFAULT_LIMIT
         if limit > MAX_LIMIT:
             limit = MAX_LIMIT
 
-        raw = self.client.get_comps_summary(
-            postcode=postcode,
-            property_type=property_type,
-            months=months,
-            limit=limit,
-            search_level=search_level,
+        # 1. Derive search prefix from postcode
+        pc = postcode.upper().strip()
+        if search_level == "postcode":
+            prefix = None
+            exact_postcode = pc
+        elif search_level == "sector":
+            parts = pc.split()
+            if len(parts) == 2 and len(parts[1]) >= 1:
+                prefix = f"{parts[0]} {parts[1][0]}"
+            else:
+                prefix = pc.split()[0] if pc else pc
+            exact_postcode = None
+        else:  # district
+            prefix = pc.split()[0] if " " in pc else pc
+            exact_postcode = None
+
+        # 2. Fetch transactions via SPARQL
+        from_date = (date.today() - timedelta(days=months * 30)).isoformat()
+        fetch_limit = limit * 3 if property_type else limit
+
+        all_transactions = self.client.sparql_search(
+            postcode=exact_postcode,
+            postcode_prefix=prefix,
+            from_date=from_date,
+            limit=fetch_limit,
+            order_desc=True,
         )
 
-        query = PPDCompsQuery(
-            postcode=raw["query"]["postcode"],
-            property_type=raw["query"]["property_type"],
-            months=raw["query"]["months"],
-            search_level=raw["query"]["search_level"],
-            address=address,
-        )
-        transactions = _parse_comps_transactions(raw.get("transactions", []))
+        # 3. Client-side property_type filter (SPARQL filter causes 503)
+        if property_type:
+            pt = property_type.upper()
+            all_transactions = [t for t in all_transactions if t.property_type == pt]
+        transactions = all_transactions[:limit]
 
-        # If address provided, search for subject property transactions
+        # 4. Subject property matching
         subject_property = None
         if address:
             subject_property = self._find_subject_property(postcode, address)
-            # Filter out subject property transactions from comps
             if subject_property and subject_property.transaction_history:
                 subject_ids = {t.transaction_id for t in subject_property.transaction_history}
                 transactions = [t for t in transactions if t.transaction_id not in subject_ids]
 
+        # 5. Compute ALL stats from the final filtered list (fixes stats bug)
         prices = [t.price for t in transactions if t.price is not None]
+        count = len(prices)
 
-        percentile_25 = raw.get("percentile_25")
-        percentile_75 = raw.get("percentile_75")
-        if subject_property and len(prices) >= 4:
+        computed_median = int(median(prices)) if prices else None
+        computed_mean = int(round(mean(prices))) if prices else None
+        p25 = None
+        p75 = None
+        if len(prices) >= 4:
             q = quantiles(prices, n=4)
-            percentile_25 = int(round(q[0]))
-            percentile_75 = int(round(q[2]))
+            p25 = int(round(q[0]))
+            p75 = int(round(q[2]))
 
+        # 6. Subject comparison
         subject_price_percentile = None
         subject_vs_median_pct = None
         last_sale_price = (
@@ -385,20 +263,29 @@ class PPDService:
         if last_sale_price is not None and prices:
             below = sum(1 for p in prices if p < last_sale_price)
             subject_price_percentile = int((below / len(prices)) * 100)
-            median_price = raw.get("median")
-            if isinstance(median_price, int) and median_price > 0:
-                subject_vs_median_pct = round(((last_sale_price - median_price) / median_price) * 100, 1)
+            if isinstance(computed_median, int) and computed_median > 0:
+                subject_vs_median_pct = round(
+                    ((last_sale_price - computed_median) / computed_median) * 100, 1
+                )
+
+        query = PPDCompsQuery(
+            postcode=postcode,
+            property_type=property_type,
+            months=months,
+            search_level=search_level,
+            address=address,
+        )
 
         return PPDCompsResponse(
             query=query,
-            count=raw["count"],
-            median=raw["median"],
-            mean=raw["mean"],
-            percentile_25=percentile_25,
-            percentile_75=percentile_75,
-            min=raw["min"],
-            max=raw["max"],
-            thin_market=raw["thin_market"],
+            count=count,
+            median=computed_median,
+            mean=computed_mean,
+            percentile_25=p25,
+            percentile_75=p75,
+            min=min(prices) if prices else None,
+            max=max(prices) if prices else None,
+            thin_market=count < 5,
             transactions=transactions,
             subject_property=subject_property,
             subject_price_percentile=subject_price_percentile,
@@ -431,24 +318,20 @@ class PPDService:
 
         try:
             # Search for this specific property
-            raw = self.client.form_search(
+            transactions = self.client.form_search(
                 postcode=postcode,
                 paon=paon,
                 street=street,
                 limit=50,  # Get full history
             )
-            bindings = raw.get("results", {}).get("bindings", [])
-            transactions = _parse_sparql_bindings(bindings)
 
             if not transactions:
                 # Try with just postcode and full address as street
-                raw = self.client.form_search(
+                transactions = self.client.form_search(
                     postcode=postcode,
                     street=address_clean,
                     limit=50,
                 )
-                bindings = raw.get("results", {}).get("bindings", [])
-                transactions = _parse_sparql_bindings(bindings)
 
             if transactions:
                 # Sort by date descending
@@ -490,6 +373,5 @@ class PPDService:
 
         Returns dict with keys: record (PPDTransactionRecord), raw (optional).
         """
-        raw = self.client.get_transaction_record(transaction_id, view=view)
-        record = _normalize_transaction_record(raw)
-        return {"record": record, "raw": raw if include_raw else None}
+        record = self.client.get_transaction_record(transaction_id, view=view)
+        return {"record": record, "raw": record.raw if include_raw else None}
