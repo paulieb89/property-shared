@@ -10,7 +10,6 @@ from app.schemas.ppd import (
     PPDCompsResponse,
     PPDDownloadURLResponse,
     PPDSearchResponse,
-    PPDTransaction,
     PPDTransactionRecordResponse,
 )
 from property_core.enrichment import compute_enriched_stats, enrich_comps_with_epc
@@ -157,9 +156,7 @@ async def comps(
         raise HTTPException(status_code=502, detail=f"PPD comps failed: {exc}") from exc
 
     if enrich_epc:
-        comp_dicts = [t.model_dump() for t in result.transactions]
-        enriched = await enrich_comps_with_epc(comp_dicts)
-        result.transactions = [PPDTransaction(**d) for d in enriched]
+        await enrich_comps_with_epc(result.transactions)
         compute_enriched_stats(result)
 
     return result

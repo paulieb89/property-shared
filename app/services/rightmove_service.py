@@ -77,7 +77,7 @@ class RightmoveService:
                 include_raw=include_raw,
             )
             results = await anyio.to_thread.run_sync(fn)
-        return [RightmoveListing.model_validate(item.model_dump()) for item in results]
+        return results
 
     async def listing_detail(
         self,
@@ -92,4 +92,4 @@ class RightmoveService:
                 include_raw=include_raw,
             )
             result = await anyio.to_thread.run_sync(fn)
-        return RightmoveListingDetail.model_validate(result.model_dump())
+        return result

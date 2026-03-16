@@ -34,9 +34,7 @@ class EPCService:
         result = await self.client.get_certificate(certificate_hash)
         if result is None:
             return None
-        record_dict, raw = result
-        record = EPCData.model_validate(record_dict)
-        return EPCRecordResponse(record=record, raw=raw if include_raw else None)
+        return EPCRecordResponse(record=result, raw=result.raw if include_raw else None)
 
     async def search(
         self,
@@ -47,6 +45,4 @@ class EPCService:
         result = await self.client.search_by_postcode(postcode, address=address)
         if result is None:
             return None
-        record_dict, raw = result
-        record = EPCData.model_validate(record_dict)
-        return EPCRecordResponse(record=record, raw=raw if include_raw else None)
+        return EPCRecordResponse(record=result, raw=result.raw if include_raw else None)
