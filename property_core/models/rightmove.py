@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 # --- Pure mapping helpers (moved from rightmove_scraper.py) ---
 
 def _safe_int(val: Any) -> Optional[int]:
-    if val is None:
+    if val is None or val == "":
         return None
     try:
         return int(val)
@@ -20,7 +20,7 @@ def _safe_int(val: Any) -> Optional[int]:
 
 
 def _safe_float(val: Any) -> Optional[float]:
-    if val is None:
+    if val is None or val == "":
         return None
     try:
         return float(val)

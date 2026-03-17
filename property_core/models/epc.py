@@ -135,6 +135,7 @@ class EPCData(BaseModel):
             co2_emissions_potential=_float_or_none(row.get("co2-emissions-potential")),
             # Metadata
             inspection_date=_str_or_none(row.get("inspection-date")),
+            certificate_hash=_str_or_none(row.get("lmk-key")),
             # Additional fields
             lmk_key=_str_or_none(row.get("lmk-key")),
             postcode=_str_or_none(row.get("postcode")),

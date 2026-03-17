@@ -50,7 +50,6 @@ def fetch_listing(
     timeout: float = 15.0,
     retry_attempts: int = 3,
     retry_backoff: float = 1.5,
-    include_raw: bool = False,
 ) -> RightmoveListingDetail:
     """Fetch full property details from an individual Rightmove listing page.
 
@@ -59,7 +58,6 @@ def fetch_listing(
         timeout: HTTP request timeout in seconds.
         retry_attempts: Number of retries on transient errors.
         retry_backoff: Exponential backoff multiplier.
-        include_raw: Kept for backward compatibility (raw is always populated).
 
     Returns:
         RightmoveListingDetail with all available fields from the detail page.
@@ -85,7 +83,6 @@ def fetch_listings(
     rate_limit_seconds: float = 0.6,
     retry_attempts: int = 3,
     retry_backoff: float = 1.5,
-    include_raw: bool = False,
 ) -> list[RightmoveListing]:
     """Fetch listings from a Rightmove search URL across pages."""
     listings: list[RightmoveListing] = []

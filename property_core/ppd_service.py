@@ -240,8 +240,9 @@ class PPDService:
                 transactions = [t for t in transactions if t.transaction_id not in subject_ids]
 
         # 5. Compute ALL stats from the final filtered list (fixes stats bug)
-        prices = [t.price for t in transactions if t.price is not None]
-        count = len(prices)
+        transactions = [t for t in transactions if t.price is not None]
+        prices = [t.price for t in transactions]
+        count = len(transactions)
 
         computed_median = int(median(prices)) if prices else None
         computed_mean = int(round(mean(prices))) if prices else None

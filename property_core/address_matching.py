@@ -7,7 +7,7 @@ epc_client.py so they can be used independently of the HTTP client.
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Optional
 
 from property_core.models.epc import EPCData
 

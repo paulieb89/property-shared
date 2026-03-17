@@ -31,6 +31,13 @@ def _filter_outliers(prices: list[int]) -> list[int]:
     return [p for p in prices if lower <= p <= upper]
 
 
+def to_monthly(listing) -> int:
+    """Normalize a listing's price to monthly (handles weekly frequency)."""
+    if listing.price_frequency == "weekly":
+        return int(listing.price * 52 / 12)
+    return listing.price
+
+
 def _calculate_yield(rental: RentalAnalysis, purchase_price: int) -> None:
     """Calculate gross yield based on rental and purchase price."""
     if rental.median_rent_monthly and purchase_price > 0:
@@ -91,12 +98,7 @@ async def analyze_rentals(
         raise RuntimeError(f"Rental analysis failed: {exc}") from exc
 
     # Normalize all prices to monthly (weekly × 52/12 ≈ 4.33)
-    def _to_monthly(listing) -> int:
-        if listing.price_frequency == "weekly":
-            return int(listing.price * 52 / 12)
-        return listing.price
-
-    prices = sorted([_to_monthly(l) for l in listings if l.price and l.price > 0])
+    prices = sorted([to_monthly(l) for l in listings if l.price and l.price > 0])
     median_rent = int(median(prices)) if prices else None
     avg_rent = int(sum(prices) / len(prices)) if prices else None
 

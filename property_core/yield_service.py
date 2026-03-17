@@ -13,15 +13,9 @@ from typing import Optional
 
 from property_core.models.report import YieldAnalysis
 from property_core.ppd_service import PPDService
+from property_core.rental_service import to_monthly
 from property_core.rightmove_location import RightmoveLocationAPI
 from property_core.rightmove_scraper import fetch_listings
-
-
-def _to_monthly(listing) -> int:
-    """Normalize a listing's price to monthly (handles weekly frequency)."""
-    if listing.price_frequency == "weekly":
-        return int(listing.price * 52 / 12)
-    return listing.price
 
 
 async def calculate_yield(
@@ -107,7 +101,7 @@ async def calculate_yield(
         )
 
     # Calculate median rent (normalize weekly → monthly)
-    prices = sorted([_to_monthly(l) for l in active])
+    prices = sorted([to_monthly(l) for l in active])
     median_rent = int(stat_median(prices))
 
     # Calculate yield

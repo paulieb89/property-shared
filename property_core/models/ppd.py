@@ -36,12 +36,13 @@ def _binding_val(binding: Dict[str, Any], key: str) -> Optional[str]:
 
 
 def _safe_int(val: Any) -> Optional[int]:
-    """Convert simple numeric fields that may be int or numeric string."""
-    if isinstance(val, int):
-        return val
-    if isinstance(val, str) and val.isdigit():
+    """Coerce val to int, or None if empty/missing/invalid."""
+    if val is None or val == "":
+        return None
+    try:
         return int(val)
-    return None
+    except (ValueError, TypeError):
+        return None
 
 
 def _label_from(node: Any) -> Optional[str]:

@@ -11,6 +11,7 @@ import os
 import re
 import uuid
 from datetime import datetime
+from statistics import median as stat_median
 from typing import Any, Dict, List, Optional, Tuple
 
 from property_core.epc_client import EPCClient
@@ -441,7 +442,6 @@ class PropertyReportService:
                     ),
                 }
 
-            from statistics import median as stat_median
             prices.sort()
             median_val = int(stat_median(prices)) if prices else None
             avg = int(sum(prices) / len(prices)) if prices else None
