@@ -89,7 +89,7 @@ Conventions for consistent tools:
 - **Not found**: Return `None` (let caller decide)
 - **Invalid input**: Raise `ValueError` with helpful message
 - **Network errors**: Let bubble up or wrap in domain-specific exception
-- **Debugging**: Use `include_raw=True` instead of logging
+- **Debugging**: All models carry `raw` field with source data — inspect directly, no extra parameter needed
 
 ## Testing
 

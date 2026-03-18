@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 import uuid
 from datetime import datetime
 from statistics import median as stat_median
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
+from property_core.address_matching import parse_address
 from property_core.epc_client import EPCClient
 from property_core.models.report import (
     CurrentMarket,
@@ -26,30 +26,11 @@ from property_core.models.report import (
     SaleRecord,
 )
 from property_core.ppd_service import PPDService
-from property_core.rental_service import analyze_rentals
+from property_core.rental_service import _calculate_yield, analyze_rentals
 from property_core.rightmove_location import RightmoveLocationAPI
 from property_core.rightmove_scraper import fetch_listings
 
 
-# UK postcode regex
-UK_POSTCODE_RE = re.compile(
-    r"([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\s*$",
-    re.IGNORECASE,
-)
-
-
-def _parse_address(q: str) -> Tuple[Optional[str], Optional[str]]:
-    """Parse combined address into (postcode, street_address)."""
-    q = q.strip()
-    match = UK_POSTCODE_RE.search(q)
-    if match:
-        postcode = match.group(1).upper()
-        # Normalize postcode spacing
-        if " " not in postcode and len(postcode) >= 5:
-            postcode = postcode[:-3] + " " + postcode[-3:]
-        address = q[: match.start()].strip().rstrip(",").strip()
-        return (postcode, address if address else None)
-    return (None, None)
 
 
 def _get_postcode_sector(postcode: str) -> str:
@@ -108,7 +89,7 @@ class PropertyReportService:
             PropertyReport with all available data
         """
         # Parse address
-        postcode, street_address = _parse_address(address_query)
+        postcode, street_address = parse_address(address_query)
         if not postcode:
             raise ValueError(
                 f"Could not parse postcode from: {address_query}. "
@@ -200,7 +181,7 @@ class PropertyReportService:
                         ))
                         # Calculate yield if we have sale price
                         if rental_analysis and sale_history and sale_history.last_sale:
-                            self._calculate_yield(
+                            _calculate_yield(
                                 rental_analysis, sale_history.last_sale.price
                             )
                             if rental_analysis.gross_yield_pct:
@@ -463,19 +444,3 @@ class PropertyReportService:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def _calculate_yield(
-        self, rental: RentalAnalysis, purchase_price: int
-    ) -> None:
-        """Calculate gross yield based on rental and purchase price."""
-        if rental.median_rent_monthly and purchase_price > 0:
-            annual_rent = rental.median_rent_monthly * 12
-            rental.estimated_annual_rent = annual_rent
-            gross_yield = (annual_rent / purchase_price) * 100
-            rental.gross_yield_pct = round(gross_yield, 2)
-
-            if gross_yield >= 6:
-                rental.yield_assessment = "strong"
-            elif gross_yield >= 4:
-                rental.yield_assessment = "average"
-            else:
-                rental.yield_assessment = "weak"

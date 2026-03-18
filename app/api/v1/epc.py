@@ -2,39 +2,16 @@
 
 from __future__ import annotations
 
-import re
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas.epc import EPCRecordResponse
 from app.services.epc_service import EPCService
+from property_core.address_matching import parse_address
 
 router = APIRouter(prefix="/epc", tags=["epc"])
 service = EPCService()
-
-# UK postcode regex for parsing combined address strings
-UK_POSTCODE_RE = re.compile(
-    r"([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\s*$",
-    re.IGNORECASE,
-)
-
-
-def _parse_address_query(q: str) -> tuple[Optional[str], Optional[str]]:
-    """Parse a combined address string into (postcode, address).
-
-    Examples:
-        "10 Downing Street, SW1A 2AA" -> ("SW1A 2AA", "10 Downing Street")
-        "SW1A 2AA" -> ("SW1A 2AA", None)
-    """
-    q = q.strip()
-    match = UK_POSTCODE_RE.search(q)
-    if match:
-        postcode = match.group(1).upper()
-        # Everything before the postcode is the address
-        address_part = q[: match.start()].strip().rstrip(",").strip()
-        return (postcode, address_part if address_part else None)
-    return (None, None)
 
 
 @router.get("/certificate/{certificate_hash}", response_model=EPCRecordResponse)
@@ -72,7 +49,7 @@ async def search(
 
     # Parse combined query if provided
     if q:
-        parsed_postcode, parsed_address = _parse_address_query(q)
+        parsed_postcode, parsed_address = parse_address(q)
         if not parsed_postcode:
             raise HTTPException(
                 status_code=422,

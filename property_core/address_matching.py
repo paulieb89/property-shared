@@ -1,7 +1,7 @@
-"""Address matching utilities for EPC certificate lookups.
+"""Address matching and parsing utilities.
 
-Pure functions for normalizing and scoring address matches — extracted from
-epc_client.py so they can be used independently of the HTTP client.
+Pure functions for normalizing, scoring, and parsing UK property addresses.
+Extracted so they can be used independently across the codebase.
 """
 
 from __future__ import annotations
@@ -10,6 +10,34 @@ import re
 from typing import Optional
 
 from property_core.models.epc import EPCData
+
+# UK postcode regex — matches at end of string (e.g., "10 Downing Street, SW1A 2AA")
+UK_POSTCODE_RE = re.compile(
+    r"([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\s*$",
+    re.IGNORECASE,
+)
+
+
+def parse_address(q: str) -> tuple[str | None, str | None]:
+    """Parse combined address string into (postcode, street_address).
+
+    Extracts postcode from end of string, normalizes spacing.
+
+    Examples:
+        "10 Downing Street, SW1A 2AA" -> ("SW1A 2AA", "10 Downing Street")
+        "SW1A2AA" -> ("SW1A 2AA", None)
+        "not a postcode" -> (None, None)
+    """
+    q = q.strip()
+    match = UK_POSTCODE_RE.search(q)
+    if match:
+        postcode = match.group(1).upper()
+        # Normalize postcode spacing (e.g., "SW1A2AA" -> "SW1A 2AA")
+        if " " not in postcode and len(postcode) >= 5:
+            postcode = postcode[:-3] + " " + postcode[-3:]
+        address = q[: match.start()].strip().rstrip(",").strip()
+        return (postcode, address if address else None)
+    return (None, None)
 
 
 def normalize_address(address: str) -> str:
