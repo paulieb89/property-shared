@@ -189,8 +189,10 @@ The UI receives data via `ontoolresult` callback and renders interactive dashboa
 
 | Tool | Description |
 |------|-------------|
-| `property_comps` | Get comparable sales for a UK postcode |
+| `property_report` | Full deal analysis in one call (comps + EPC + yield + market) |
+| `property_comps` | Comparable sales with optional EPC enrichment and property type filter |
 | `property_yield` | Calculate rental yield (sales + rentals) |
+| `property_epc` | Direct EPC certificate lookup (rating, floor area, costs) |
 | `property_blocks` | Find flat blocks with multiple unit sales |
 | `stamp_duty` | Calculate SDLT for a purchase price |
 

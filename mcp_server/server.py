@@ -1,4 +1,4 @@
-"""Property MCP server — minimal version with one tool + UI.
+"""Property MCP server — UK property data tools for AI hosts.
 
 Run:  uv run property-mcp
 """
@@ -14,13 +14,21 @@ import anyio
 import mcp.types as types
 from mcp.server.fastmcp import FastMCP
 
-from property_core import PPDService, calculate_yield
+from property_core import PPDService, PropertyReportService, calculate_yield
+from property_core.epc_client import EPCClient
+from property_core.enrichment import compute_enriched_stats, enrich_comps_with_epc
 
 UI_DIR = Path(__file__).parent / "ui"
 
 mcp = FastMCP(
     "property-server",
-    instructions="UK property data tools. Use property_comps for comparable sales, property_yield for rental yield analysis.",
+    instructions=(
+        "UK property data tools. Use property_report for full deal analysis "
+        "(one call: comps + EPC + yield + market). Use property_comps for "
+        "granular comparable sales, property_yield for yield breakdown, "
+        "property_epc for energy certificates, stamp_duty for SDLT, "
+        "property_blocks for block-buy opportunities."
+    ),
     host="0.0.0.0",
     port=8080,
     stateless_http=True,
@@ -43,6 +51,7 @@ async def _fetch_comps_with_escalation(
     limit: int,
     search_level: str,
     address: Optional[str],
+    property_type: Optional[str] = None,
 ) -> tuple:
     """Fetch comps, auto-escalating search level if thin market."""
     original_level = search_level
@@ -55,6 +64,7 @@ async def _fetch_comps_with_escalation(
             limit=limit,
             search_level=search_level,
             address=address,
+            property_type=property_type,
         )
     )
 
@@ -73,6 +83,7 @@ async def _fetch_comps_with_escalation(
                 limit=limit,
                 search_level=search_level,
                 address=address,
+                property_type=property_type,
             )
         )
 
@@ -118,19 +129,33 @@ async def property_comps(
     limit: int = 30,
     search_level: str = "sector",
     address: Optional[str] = None,
+    property_type: Optional[str] = None,
+    enrich_epc: bool = False,
 ) -> types.CallToolResult:
-    """Get comparable property sales for a UK postcode.
+    """Comparable property sales from Land Registry Price Paid Data.
 
     Args:
         postcode: UK postcode (e.g. "SW1A 1AA", "NG11 9HD")
         months: Lookback period in months (default 24)
         limit: Max transactions to return (default 30)
         search_level: Search area granularity - usually leave as default
-        address: Optional street address to identify subject property
+        address: Optional street address to identify subject property and show percentile rank
+        property_type: Filter by type: F=flat, D=detached, S=semi, T=terraced (default all)
+        enrich_epc: Set true to add floor area, price/sqft, and EPC rating to each comp
     """
     result, requested_level, actual_level = await _fetch_comps_with_escalation(
-        postcode, months, limit, search_level, address
+        postcode, months, limit, search_level, address, property_type
     )
+
+    # EPC enrichment if requested
+    if enrich_epc and result.transactions:
+        epc = EPCClient()
+        if epc.is_configured():
+            result.transactions = await enrich_comps_with_epc(
+                result.transactions, epc
+            )
+            result = compute_enriched_stats(result)
+
     data = result.model_dump(mode="json")
     count = len(data.get("transactions", []))
 
@@ -145,6 +170,10 @@ async def property_comps(
     summary = f"Found {count} comparable sales for {postcode}"
     if requested_level != actual_level:
         summary += f" (expanded search from {requested_level} to {actual_level})"
+    if enrich_epc:
+        match_rate = data.get("epc_match_rate")
+        if match_rate is not None:
+            summary += f" (EPC matched {match_rate}%)"
 
     return types.CallToolResult(
         content=[
@@ -154,6 +183,7 @@ async def property_comps(
                     "summary": summary,
                     "median": data.get("median"),
                     "count": count,
+                    "median_price_per_sqft": data.get("median_price_per_sqft"),
                 }),
             )
         ],
@@ -311,6 +341,124 @@ async def stamp_duty(
                     "total_sdlt": result.total_sdlt,
                     "effective_rate": result.effective_rate,
                 }),
+            )
+        ],
+        structuredContent=data,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Property Report — full deal analysis in one call
+# ---------------------------------------------------------------------------
+
+_report_service = PropertyReportService()
+
+
+@mcp.tool(meta=TOOL_UI_META)
+async def property_report(
+    address: str,
+    include_rentals: bool = True,
+    include_sales_market: bool = True,
+    ppd_months: int = 24,
+    search_radius: float = 0.5,
+) -> types.CallToolResult:
+    """Full deal analysis for a UK property in one call.
+
+    Returns sale history, area comps, EPC rating with refurb potential,
+    rental market, current sales market, yield estimate, and value range.
+
+    Args:
+        address: Address with postcode, e.g. "10 Downing Street, SW1A 2AA"
+        include_rentals: Include Rightmove rental market analysis (default true)
+        include_sales_market: Include Rightmove sales market (default true)
+        ppd_months: Lookback period for comparable sales (default 24)
+        search_radius: Radius in miles for Rightmove searches (default 0.5)
+    """
+    report = await _report_service.generate_report(
+        address_query=address,
+        include_rentals=include_rentals,
+        include_sales_market=include_sales_market,
+        ppd_months=ppd_months,
+        search_radius=search_radius,
+    )
+    data = report.model_dump(mode="json", exclude_none=True)
+
+    # Build summary from key insights
+    insights = report.key_insights or []
+    summary_parts = [f"Property report for {report.query_postcode}"]
+    summary_parts.extend(insights[:5])
+
+    sources_available = [s.name for s in (report.sources or []) if s.available]
+    if sources_available:
+        summary_parts.append(f"Sources: {', '.join(sources_available)}")
+
+    return types.CallToolResult(
+        content=[
+            types.TextContent(
+                type="text",
+                text="\n".join(summary_parts),
+            )
+        ],
+        structuredContent=data,
+        _meta=TOOL_UI_META,
+    )
+
+
+# ---------------------------------------------------------------------------
+# EPC Direct Lookup
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+async def property_epc(
+    postcode: str,
+    address: Optional[str] = None,
+) -> types.CallToolResult:
+    """EPC certificate for a UK property — rating, score, floor area,
+    construction age, heating costs, CO2 emissions, and improvement potential.
+
+    Args:
+        postcode: UK postcode (e.g. "SW1A 1AA")
+        address: Optional street address for exact match
+    """
+    epc = EPCClient()
+    if not epc.is_configured():
+        return types.CallToolResult(
+            content=[
+                types.TextContent(
+                    type="text",
+                    text="EPC service not configured (set EPC_API_EMAIL and EPC_API_KEY)",
+                )
+            ],
+        )
+
+    result = await epc.search_by_postcode(postcode, address=address)
+    if not result:
+        return types.CallToolResult(
+            content=[
+                types.TextContent(
+                    type="text",
+                    text=f"No EPC found for {address or ''} {postcode}".strip(),
+                )
+            ],
+        )
+
+    data = result.model_dump(mode="json", exclude_none=True)
+
+    summary_parts = [f"EPC for {address or postcode}"]
+    if result.rating:
+        summary_parts.append(f"Rating: {result.rating} (score {result.score})")
+    if result.floor_area:
+        summary_parts.append(f"Floor area: {result.floor_area} sqm")
+    if result.property_type:
+        summary_parts.append(f"Type: {result.property_type}")
+    if result.construction_age:
+        summary_parts.append(f"Built: {result.construction_age}")
+
+    return types.CallToolResult(
+        content=[
+            types.TextContent(
+                type="text",
+                text="\n".join(summary_parts),
             )
         ],
         structuredContent=data,
