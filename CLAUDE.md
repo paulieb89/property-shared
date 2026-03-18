@@ -179,22 +179,19 @@ fly deploy
 
 **Data flow**: AI Host → MCP Server → property_core → Land Registry/Rightmove
 
-The server returns two things:
-1. `content` - Text summary for the model
-2. `structuredContent` - Full data for the UI to render
-
-The UI receives data via `ontoolresult` callback and renders interactive dashboards.
+The server is a thin wrapper — each tool calls a property_core service and returns `model_dump()`. FastMCP auto-serializes dict returns as JSON `content` (for the model) and `structuredContent` (for programmatic access). No manual `CallToolResult` construction needed.
 
 ### Tools
 
 | Tool | Description |
 |------|-------------|
 | `property_report` | Full deal analysis in one call (comps + EPC + yield + market) |
-| `property_comps` | Comparable sales with optional EPC enrichment and property type filter |
+| `property_comps` | Comparable sales with auto-escalation, optional EPC enrichment |
 | `property_yield` | Calculate rental yield (sales + rentals) |
 | `property_epc` | Direct EPC certificate lookup (rating, floor area, costs) |
 | `property_blocks` | Find flat blocks with multiple unit sales |
 | `stamp_duty` | Calculate SDLT for a purchase price |
+| `company_search` | Companies House lookup by name or number |
 
 ### Host Quirks (ChatGPT)
 

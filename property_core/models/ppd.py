@@ -159,6 +159,9 @@ class PPDCompsResponse(BaseModel):
     min: Optional[int] = None
     max: Optional[int] = None
     thin_market: bool
+    # Auto-escalation tracking (populated when auto_escalate=True)
+    escalated_from: Optional[str] = None
+    escalated_to: Optional[str] = None
     # EPC-enriched stats (populated when enrich_epc=True on callers)
     median_price_per_sqft: Optional[int] = None
     epc_match_rate: Optional[float] = None

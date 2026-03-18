@@ -183,6 +183,7 @@ class PPDService:
         limit: int = DEFAULT_LIMIT,
         search_level: str = "sector",
         address: Optional[str] = None,
+        auto_escalate: bool = False,
     ) -> PPDCompsResponse:
         """Return comparable sales and summary stats for a postcode.
 
@@ -277,7 +278,7 @@ class PPDService:
             address=address,
         )
 
-        return PPDCompsResponse(
+        response = PPDCompsResponse(
             query=query,
             count=count,
             median=computed_median,
@@ -292,6 +293,25 @@ class PPDService:
             subject_price_percentile=subject_price_percentile,
             subject_vs_median_pct=subject_vs_median_pct,
         )
+
+        # Auto-escalate to wider search area if thin market
+        if auto_escalate and response.thin_market and response.count < 5:
+            next_level = {"postcode": "sector", "sector": "district"}.get(search_level)
+            if next_level:
+                wider = self.comps(
+                    postcode=postcode,
+                    property_type=property_type,
+                    months=months,
+                    limit=limit,
+                    search_level=next_level,
+                    address=address,
+                    auto_escalate=True,
+                )
+                wider.escalated_from = search_level
+                wider.escalated_to = wider.query.search_level
+                return wider
+
+        return response
 
     def _find_subject_property(
         self, postcode: str, address: str
