@@ -2,6 +2,14 @@
 
 import os
 
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
+if load_dotenv:
+    load_dotenv()
+
 import pytest
 
 from property_core.block_service import analyze_blocks

@@ -2,6 +2,14 @@
 
 import os
 
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
+if load_dotenv:
+    load_dotenv()
+
 import pytest
 
 from property_core.companies_house_client import CompaniesHouseClient
@@ -19,6 +27,10 @@ def client():
     c = CompaniesHouseClient()
     if not c.is_configured():
         pytest.skip("COMPANIES_HOUSE_API_KEY not set")
+    # Verify the key is actually valid (401 = invalid key)
+    probe = c.search("test", items_per_page=1)
+    if probe.total_results == 0 and len(probe.companies) == 0:
+        pytest.skip("COMPANIES_HOUSE_API_KEY appears invalid (got empty probe result)")
     return c
 
 
