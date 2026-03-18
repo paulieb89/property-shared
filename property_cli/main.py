@@ -261,6 +261,67 @@ def ppd_download_url(
         typer.echo(url)
 
 
+@ppd.command("blocks")
+def ppd_blocks(
+    postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
+    months: int = typer.Option(24, help="Lookback months"),
+    limit: int = typer.Option(50, help="Target blocks"),
+    min_transactions: int = typer.Option(2, "--min", help="Min sales per building"),
+    search_level: str = typer.Option("sector", help="postcode|sector|district"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """Find buildings with multiple flat sales (block buyers)."""
+    postcode_value = _join_tokens(postcode)
+    http = _maybe_http_client(api_url)
+    if http:
+        data = http.get(
+            "/v1/ppd/blocks",
+            params={
+                "postcode": postcode_value,
+                "months": months,
+                "limit": limit,
+                "min_transactions": min_transactions,
+                "search_level": search_level,
+            },
+        )
+        _echo_json(data)
+    else:
+        from property_core.block_service import analyze_blocks
+
+        result = analyze_blocks(
+            postcode=postcode_value,
+            months=months,
+            limit=limit,
+            min_transactions=min_transactions,
+            search_level=search_level,
+        )
+
+        if not result.blocks:
+            rprint(f"No blocks found with {min_transactions}+ flat sales")
+            return
+
+        table = Table(title=f"Flat Blocks — {postcode_value} ({result.blocks_found} found)")
+        table.add_column("Building")
+        table.add_column("Street")
+        table.add_column("Sales", justify="right")
+        table.add_column("Avg Price", justify="right")
+        table.add_column("Range", justify="right")
+        table.add_column("Dates")
+        for b in result.blocks[:20]:
+            price_range = ""
+            if b.min_price and b.max_price:
+                price_range = f"£{b.min_price:,} - £{b.max_price:,}"
+            table.add_row(
+                b.building_name or "",
+                b.street or "",
+                str(b.transaction_count),
+                f"£{b.avg_price:,}" if b.avg_price else "",
+                price_range,
+                b.date_range or "",
+            )
+        rprint(table)
+
+
 epc = typer.Typer(help="EPC commands")
 app.add_typer(epc, name="epc")
 
@@ -797,6 +858,132 @@ def planning_council_for_postcode(
     else:
         rprint(f"\n[yellow]No planning portal found in database for this local authority.[/yellow]")
         rprint("[dim]Use 'planning councils' to see available councils.[/dim]")
+
+
+# =============================================================================
+# Calculator Commands
+# =============================================================================
+
+calc = typer.Typer(help="Property calculators")
+app.add_typer(calc, name="calc")
+
+
+@calc.command("stamp-duty")
+def calc_stamp_duty(
+    price: int = typer.Argument(..., help="Purchase price in £"),
+    additional: bool = typer.Option(True, "--additional/--no-additional", help="Additional property surcharge (+5%)"),
+    ftb: bool = typer.Option(False, "--ftb", help="First-time buyer relief"),
+    non_resident: bool = typer.Option(False, "--non-resident", help="Non-UK resident surcharge (+2%)"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """Calculate UK Stamp Duty Land Tax (SDLT)."""
+    http = _maybe_http_client(api_url)
+    if http:
+        data = http.get(
+            "/v1/calculators/stamp-duty",
+            params={
+                "price": price,
+                "additional_property": additional,
+                "first_time_buyer": ftb,
+                "non_resident": non_resident,
+            },
+        )
+        _echo_json(data)
+    else:
+        from property_core.stamp_duty import calculate_stamp_duty
+
+        result = calculate_stamp_duty(
+            price=price,
+            additional_property=additional,
+            first_time_buyer=ftb,
+            non_resident=non_resident,
+        )
+
+        table = Table(title=f"SDLT for £{price:,}")
+        table.add_column("Band", style="bold")
+        table.add_column("Amount", justify="right")
+        table.add_column("Rate", justify="right")
+        table.add_column("Tax", justify="right")
+        for b in result.breakdown:
+            table.add_row(b.band, f"£{b.amount:,}", f"{b.rate}%", f"£{b.tax:,.2f}")
+        table.add_section()
+        table.add_row("Total SDLT", "", f"{result.effective_rate}%", f"£{result.total_sdlt:,.2f}")
+        rprint(table)
+
+
+# =============================================================================
+# Companies House Commands
+# =============================================================================
+
+companies = typer.Typer(help="Companies House commands")
+app.add_typer(companies, name="companies")
+
+
+@companies.command("search")
+def companies_search(
+    query: list[str] = typer.Argument(..., help="Company name or number"),
+    limit: int = typer.Option(5, help="Max results"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """Search Companies House for company information."""
+    query_value = _join_tokens(query)
+    http = _maybe_http_client(api_url)
+    if http:
+        data = http.get("/v1/companies/search", params={"q": query_value, "limit": limit})
+        _echo_json(data)
+    else:
+        from property_core.companies_house_client import CompaniesHouseClient
+        from property_core.models.companies_house import CompanyRecord
+
+        client = CompaniesHouseClient()
+        if not client.is_configured():
+            typer.echo("Companies House not configured (set COMPANIES_HOUSE_API_KEY)")
+            raise typer.Exit(code=1)
+
+        result = client.lookup(query_value)
+
+        if isinstance(result, CompanyRecord):
+            # Direct company lookup
+            table = Table(title=f"Company: {result.company_name}")
+            table.add_column("Field", style="bold")
+            table.add_column("Value")
+            table.add_row("Number", result.company_number or "")
+            table.add_row("Status", result.company_status or "")
+            table.add_row("Type", result.company_type or "")
+            table.add_row("Created", result.date_of_creation or "")
+            if result.registered_office:
+                addr = result.registered_office
+                table.add_row("Address", ", ".join(v for v in [
+                    addr.get("address_line_1"),
+                    addr.get("address_line_2"),
+                    addr.get("locality"),
+                    addr.get("postal_code"),
+                ] if v))
+            if result.sic_codes:
+                table.add_row("SIC Codes", ", ".join(result.sic_codes))
+            rprint(table)
+
+            if result.officers:
+                rprint("\n[bold]Officers:[/bold]")
+                for o in result.officers:
+                    rprint(f"  {o.name} — {o.role} (appointed {o.appointed or '?'})")
+        else:
+            # Search results
+            table = Table(title=f"Companies matching '{query_value}' ({result.total_results} total)")
+            table.add_column("Number")
+            table.add_column("Name")
+            table.add_column("Status")
+            table.add_column("Type")
+            table.add_column("Address")
+            for c in result.companies:
+                table.add_row(
+                    c.company_number or "",
+                    c.company_name or "",
+                    c.company_status or "",
+                    c.company_type or "",
+                    (c.address_snippet or "")[:40],
+                )
+            rprint(table)
 
 
 # =============================================================================

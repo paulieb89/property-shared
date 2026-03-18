@@ -1,5 +1,12 @@
 """Domain models for property_core."""
 
+from property_core.models.block import BlockAnalysisResponse, BlockBuilding, BlockUnit
+from property_core.models.companies_house import (
+    CompanyOfficer,
+    CompanyRecord,
+    CompanySearchItem,
+    CompanySearchResult,
+)
 from property_core.models.epc import EPCData
 from property_core.models.planning import (
     Council,
@@ -28,6 +35,13 @@ from property_core.models.report import (
 from property_core.models.rightmove import RightmoveListingDetail, RightmoveListing
 
 __all__ = [
+    "BlockAnalysisResponse",
+    "BlockBuilding",
+    "BlockUnit",
+    "CompanyOfficer",
+    "CompanyRecord",
+    "CompanySearchItem",
+    "CompanySearchResult",
     "Council",
     "CouncilSummary",
     "CurrentMarket",

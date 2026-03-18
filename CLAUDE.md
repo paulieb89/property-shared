@@ -9,6 +9,9 @@ Property Shared is a FastAPI service + pure-Python core library for UK property 
 - **EPC** - Energy Performance Certificates (requires API credentials)
 - **Rightmove** - Property listings via scraping with built-in politeness
 - **Planning** - UK council planning applications via vision-guided browser automation (98 verified councils)
+- **Stamp Duty** - SDLT calculator with April 2025 bands, additional property/FTB/non-resident surcharges
+- **Block Analyzer** - Groups PPD flat transactions by building to find investor exits and bulk-buy opportunities
+- **Companies House** - Company search and lookup via free API (requires API key)
 
 ## Commands
 
@@ -30,6 +33,9 @@ uv run uvicorn app.main:app --reload             # dev mode with reload
 uv run --extra cli property-cli meta
 uv run --extra cli property-cli ppd comps "SW1A 1AA" --months 24
 uv run --extra cli property-cli rightmove search-url "SW1A 1AA"
+uv run --extra cli property-cli calc stamp-duty 300000
+uv run --extra cli property-cli ppd blocks "B1 1AA"
+uv run --extra cli property-cli companies search "Tesco"
 
 # CLI targeting running API (add --api-url)
 uv run --extra cli property-cli ppd comps "SW1A 1AA" --api-url http://localhost:8000
@@ -50,7 +56,9 @@ property_core/              # Pure Python library (no FastAPI, no DB assumptions
 │   ├── ppd.py              # PPDTransaction, PPDCompsResponse, SubjectProperty, etc.
 │   ├── epc.py              # EPCData
 │   ├── rightmove.py        # RightmoveListing, RightmoveListingDetail
-│   └── report.py           # PropertyReport, SaleHistory, MarketAnalysis, etc.
+│   ├── report.py           # PropertyReport, SaleHistory, MarketAnalysis, etc.
+│   ├── block.py            # BlockUnit, BlockBuilding, BlockAnalysisResponse
+│   └── companies_house.py  # CompanyRecord, CompanySearchResult, CompanyOfficer
 ├── ppd_client.py           # Transport: Land Registry SPARQL + Linked Data API → typed models
 ├── epc_client.py           # Transport: EPC registry (async) → typed EPCData models
 ├── rightmove_scraper.py    # Transport: listings scraper (sync) → typed Pydantic models
@@ -63,6 +71,9 @@ property_core/              # Pure Python library (no FastAPI, no DB assumptions
 ├── enrichment.py           # EPC enrichment pipeline + compute_enriched_stats()
 ├── address_matching.py     # Fuzzy address matching for EPC enrichment
 ├── yield_service.py        # Yield analysis: PPD sales + Rightmove rentals → YieldAnalysis
+├── stamp_duty.py           # SDLT calculator: April 2025 bands, surcharges, FTB relief
+├── block_service.py        # Block analyzer: groups PPD flats by building
+├── companies_house_client.py # Transport: Companies House API (sync httpx, basic auth)
 ├── planning_scraper.py     # Vision-guided planning portal scraper (Playwright + OpenAI)
 └── planning_councils.json  # Verified council database (98 councils, 6 system types)
 
@@ -108,6 +119,8 @@ Copy `.env.example` to `.env`. Key variables:
 - `RIGHTMOVE_DELAY_SECONDS` - Rate limit delay (default 0.6s)
 - `OPENAI_API_KEY` - Required for planning scraper (vision extraction)
 - `PLAYWRIGHT_PROXY_URL` - Optional residential proxy for planning scraper (councils block datacenter IPs)
+- `COMPANIES_HOUSE_API_KEY` - Required for Companies House endpoints (free key from https://developer.company-information.service.gov.uk/)
+- `COMPANIES_HOUSE_SANDBOX` - Set to `true` to use sandbox API (default `false`)
 
 ## Using as a Library
 
@@ -120,7 +133,8 @@ from property_core import PPDService, PlanningService, PropertyReportService
 # Transport clients (typed models)
 from property_core import PricePaidDataClient, EPCClient, RightmoveLocationAPI, fetch_listings, PostcodeClient
 from property_core import enrich_comps_with_epc, compute_enriched_stats, fetch_listing, analyze_rentals
-from property_core import calculate_yield
+from property_core import calculate_yield, calculate_stamp_duty, StampDutyResult
+from property_core import analyze_blocks, CompaniesHouseClient
 
 # Domain models
 from property_core.models.ppd import PPDTransaction, PPDCompsResponse
@@ -177,6 +191,8 @@ The UI receives data via `ontoolresult` callback and renders interactive dashboa
 |------|-------------|
 | `property_comps` | Get comparable sales for a UK postcode |
 | `property_yield` | Calculate rental yield (sales + rentals) |
+| `property_blocks` | Find flat blocks with multiple unit sales |
+| `stamp_duty` | Calculate SDLT for a purchase price |
 
 ### Host Quirks (ChatGPT)
 

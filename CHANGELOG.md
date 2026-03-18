@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.0 (2026-03-18)
+
+### New Features
+- **Stamp Duty Calculator**: `calculate_stamp_duty()` — April 2025 SDLT bands with additional property (+5%), non-resident (+2%), and first-time buyer relief. API: `GET /v1/calculators/stamp-duty`, CLI: `property-cli calc stamp-duty`
+- **Block Analyzer**: `analyze_blocks()` — groups PPD flat transactions by building to find blocks with multiple unit sales (investor exits, bulk-buy opportunities). API: `GET /v1/ppd/blocks`, CLI: `property-cli ppd blocks`
+- **Companies House Client**: `CompaniesHouseClient` — search by name or lookup by company number, returns typed models with officers. API: `GET /v1/companies/search`, `GET /v1/companies/{number}`, CLI: `property-cli companies search`
+
+### MCP Server
+- Added `stamp_duty` and `property_blocks` tools
+
 ## v1.0.0 (2026-03-18)
 
 First public release. Full-featured UK property data library + API.

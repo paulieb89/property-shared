@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     epc_api_email: Optional[str] = None
     epc_api_key: Optional[str] = None
+    companies_house_api_key: Optional[str] = None
+    companies_house_sandbox: bool = False
 
     # Polite scraping defaults (in-memory; per-process)
     rightmove_delay_seconds: float = Field(0.6, description="Delay between Rightmove requests")

@@ -12,7 +12,9 @@ from app.schemas.ppd import (
     PPDSearchResponse,
     PPDTransactionRecordResponse,
 )
+from property_core.block_service import analyze_blocks
 from property_core.enrichment import compute_enriched_stats, enrich_comps_with_epc
+from property_core.models.block import BlockAnalysisResponse
 from property_core.ppd_service import PPDService
 
 router = APIRouter(prefix="/ppd", tags=["ppd"])
@@ -180,4 +182,28 @@ def transaction_record(
         raise HTTPException(
             status_code=502,
             detail=f"PPD transaction lookup failed: {exc}",
+        ) from exc
+
+
+@router.get("/blocks", response_model=BlockAnalysisResponse)
+def blocks(
+    postcode: str = Query(..., description="UK postcode"),
+    months: int = Query(24, ge=1, description="Lookback months"),
+    limit: int = Query(50, ge=1, le=200, description="Target blocks"),
+    min_transactions: int = Query(2, ge=2, description="Min sales per building"),
+    search_level: str = Query("sector", description="postcode|sector|district"),
+) -> BlockAnalysisResponse:
+    """Find buildings with multiple flat sales — useful for block buyers."""
+    try:
+        return analyze_blocks(
+            postcode=postcode,
+            months=months,
+            limit=limit,
+            min_transactions=min_transactions,
+            search_level=search_level,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"Block analysis failed: {exc}",
         ) from exc

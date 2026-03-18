@@ -227,6 +227,97 @@ async def property_yield(
 
 
 # ---------------------------------------------------------------------------
+# Block Analyzer
+# ---------------------------------------------------------------------------
+
+@mcp.tool(meta=TOOL_UI_META)
+async def property_blocks(
+    postcode: str,
+    months: int = 24,
+    min_transactions: int = 2,
+) -> types.CallToolResult:
+    """Find buildings with multiple flat sales — block buying opportunities.
+
+    Groups Land Registry transactions by building to identify blocks being
+    sold off, investor exits, and bulk-buy opportunities.
+
+    Args:
+        postcode: UK postcode (e.g. "B1 1AA")
+        months: Lookback period in months (default 24)
+        min_transactions: Minimum sales per building to qualify (default 2)
+    """
+    from property_core.block_service import analyze_blocks
+
+    result = await anyio.to_thread.run_sync(
+        partial(
+            analyze_blocks,
+            postcode=postcode,
+            months=months,
+            min_transactions=min_transactions,
+        )
+    )
+    data = result.model_dump(mode="json")
+
+    return types.CallToolResult(
+        content=[
+            types.TextContent(
+                type="text",
+                text=json.dumps({
+                    "summary": f"Found {result.blocks_found} flat blocks for {postcode}",
+                    "blocks_found": result.blocks_found,
+                }),
+            )
+        ],
+        structuredContent=data,
+        _meta=TOOL_UI_META,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stamp Duty Calculator
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+async def stamp_duty(
+    price: int,
+    additional_property: bool = True,
+    first_time_buyer: bool = False,
+    non_resident: bool = False,
+) -> types.CallToolResult:
+    """Calculate UK Stamp Duty Land Tax (SDLT) for a residential property.
+
+    Args:
+        price: Purchase price in £
+        additional_property: True if buying additional property (+5% surcharge)
+        first_time_buyer: True for first-time buyer relief (up to £300k nil rate)
+        non_resident: True if buyer not UK resident (+2% surcharge)
+    """
+    from property_core.stamp_duty import calculate_stamp_duty
+
+    result = calculate_stamp_duty(
+        price=price,
+        additional_property=additional_property,
+        first_time_buyer=first_time_buyer,
+        non_resident=non_resident,
+    )
+    data = result.model_dump(mode="json")
+
+    return types.CallToolResult(
+        content=[
+            types.TextContent(
+                type="text",
+                text=json.dumps({
+                    "summary": f"SDLT for £{price:,}: £{result.total_sdlt:,.0f} ({result.effective_rate}%)",
+                    "total_sdlt": result.total_sdlt,
+                    "effective_rate": result.effective_rate,
+                }),
+            )
+        ],
+        structuredContent=data,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

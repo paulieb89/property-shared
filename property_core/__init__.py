@@ -5,6 +5,8 @@ no database/redis). The API service in `app/` wraps this package.
 """
 
 from property_core.address_matching import match_epc_address
+from property_core.block_service import analyze_blocks
+from property_core.companies_house_client import CompaniesHouseClient
 from property_core.epc_client import EPCClient
 from property_core.enrichment import compute_enriched_stats, enrich_comps_with_epc
 from property_core.models.postcode import PostcodeResult
@@ -14,11 +16,13 @@ from property_core.ppd_client import PricePaidDataClient
 from property_core.ppd_service import PPDService
 from property_core.rental_service import analyze_rentals
 from property_core.report_service import PropertyReportService
+from property_core.stamp_duty import StampDutyResult, calculate_stamp_duty
 from property_core.yield_service import calculate_yield
 from property_core.rightmove_location import RightmoveLocationAPI
 from property_core.rightmove_scraper import fetch_listing, fetch_listings
 
 __all__ = [
+    "CompaniesHouseClient",
     "EPCClient",
     "PlanningService",
     "PostcodeClient",
@@ -27,7 +31,10 @@ __all__ = [
     "PricePaidDataClient",
     "PropertyReportService",
     "RightmoveLocationAPI",
+    "StampDutyResult",
+    "analyze_blocks",
     "analyze_rentals",
+    "calculate_stamp_duty",
     "calculate_yield",
     "compute_enriched_stats",
     "enrich_comps_with_epc",
