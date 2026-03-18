@@ -51,9 +51,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["property_core", "app", "property_cli", "mcp_server"]
 include = ["app/web/templates/**", "app/templates/**", "mcp_server/ui/**"]
+exclude = ["mcp_server/mcp-app/node_modules/**"]
 
 [tool.hatch.build.targets.sdist]
-exclude = [".uv-cache", ".venv", "*.pyc", "__pycache__", ".pytest_cache", ".git"]
+exclude = [".uv-cache", ".venv", "*.pyc", "__pycache__", ".pytest_cache", ".git", "mcp_server/mcp-app/node_modules/**"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"
