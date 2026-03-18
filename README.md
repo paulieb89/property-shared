@@ -1,6 +1,6 @@
 # Property Shared
 
-FastAPI service + pure-Python core library for UK property data. Integrates Land Registry (PPD), EPC, Rightmove, and Planning portals. Use as a library, HTTP API, CLI, or MCP server.
+FastAPI service + pure-Python core library for UK property data. Integrates Land Registry (PPD), EPC, Rightmove, and Planning portal lookup (98 councils; optional vision-guided scraping via Playwright + OpenAI). Use as a library, HTTP API, CLI, or MCP server.
 
 ## How to run
 ### Dev (uv)
@@ -15,7 +15,7 @@ FastAPI service + pure-Python core library for UK property data. Integrates Land
    - Rightmove: `curl 'http://localhost:8000/v1/rightmove/search-url?postcode=SW1A%201AA&radius=0.25'`
      then `curl 'http://localhost:8000/v1/rightmove/listings?search_url=<pasted_url>&max_pages=1'`
    - PPD address search: `curl 'http://localhost:8000/v1/ppd/address-search?postcode_prefix=B1&street=Broad%20Street&limit=5'`
-   - Planning search: `curl 'http://localhost:8000/v1/planning/search?postcode=SW1A%201AA'`
+   - PPD comps: `curl 'http://localhost:8000/v1/ppd/comps?postcode=NG1%201GF&months=24&limit=5'`
 
 ### Live integration tests
 Live tests make real network calls and are gated:
@@ -51,7 +51,7 @@ Generate a typed client from the running service OpenAPI:
   - `services/` – API-specific adapters (async threading, rate limiting)
   - `core/config.py` – settings via pydantic-settings
 - `property_cli/` – Typer CLI with dual mode (core direct vs API)
-- `example_ref/` – reference-only example code
+- `docs/` – examples and reference documentation
 - `USER_GUIDE.md` – quickstart and endpoint/CLI usage
 
 ## Local setup
@@ -79,13 +79,7 @@ Generate a typed client from the running service OpenAPI:
 - `GET /v1/rightmove/search-url?postcode&property_type=sale|rent&radius?&min/max price/bedrooms?` → `{ url }`
 - `GET /v1/rightmove/listings?search_url&max_pages?` → `{ count, results: [ { id, url, price, currency, bedrooms, bathrooms, address, summary, property_type, agent_name, agent_branch, first_visible_date, images, raw } ] }` (raw always included)
 - `GET /v1/rightmove/listing/{property_id}` → `{ result: { id, url, price, bedrooms, bathrooms, address, description, property_type, tenure_type, years_remaining_on_lease, annual_service_charge, annual_ground_rent, ground_rent_review_period_years, council_tax_band, latitude, longitude, floorplans, key_features, display_size, raw, ... } }`
-- `GET /v1/planning/search?postcode` → `{ postcode, local_authority, council_found, council, search_urls }`
-- `GET /v1/planning/councils` → `{ verified_count, untested_count, councils, systems }`
-- `GET /v1/planning/council-for-postcode?postcode&include_raw=bool` → `{ postcode, local_authority, council, council_found, postcode_data? }`
-- `GET /v1/planning/council/{code}` → council details
-- `POST /v1/planning/search-results` body: `{ postcode, portal_url?, system?, max_results? }` → `{ postcode, council_name, system, portal_url, results: [{ reference, address, description, status, link }], count }`
-- `POST /v1/planning/scrape` body: `{ url, save_screenshots? }` → `{ url, council_system, screenshots_captured, data }`
-- `POST /v1/planning/probe` body: `{ url, timeout_ms? }` → `{ url, success, page_title, blocking_indicators, error }`
+- Planning API routes exist in code (`app/api/v1/planning.py`) but are **disabled** in the router — scraping requires a UK residential IP. Use `property_core.PlanningService` and `property_core.planning_scraper` directly as a library instead.
 - `POST /v1/property/report` body: `{ address, include_rentals?, include_sales_market?, ppd_months?, search_radius? }` → `PropertyReport { report_id, key_insights, estimated_value_low/high, sale_history, market_analysis, energy_performance, rental_analysis, current_market, sources }` (supports `?format=html`)
 
 ## Rightmove CLI snippets
