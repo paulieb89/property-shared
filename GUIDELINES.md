@@ -5,7 +5,7 @@
 Three-layer pattern:
 
 1. **Transport clients** (`property_core/*_client.py`)
-   - Raw HTTP calls → dicts
+   - HTTP/SPARQL calls → typed Pydantic models
    - Handle rate limiting, retries, auth
    - Examples: `epc_client.py`, `ppd_client.py`, `postcode_client.py`
 

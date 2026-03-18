@@ -33,14 +33,16 @@ Generate a typed client from the running service OpenAPI:
 ## Structure
 - `property_core/` – pure-Python core library (no FastAPI, no DB/Redis assumptions)
   - `models/` – domain Pydantic models (PPDTransaction, EPCData, PropertyReport, etc.)
-  - `ppd_client.py` – transport: Land Registry SPARQL + Linked Data API
-  - `epc_client.py` – transport: EPC registry (async)
-  - `rightmove_scraper.py` – transport: listings scraper (sync)
+  - `ppd_client.py` – transport: Land Registry SPARQL + Linked Data API → typed PPD models
+  - `epc_client.py` – transport: EPC registry (async) → typed EPCData models
+  - `rightmove_scraper.py` – transport: listings scraper (sync) → typed Pydantic models
   - `rightmove_location.py` – transport: search URL builder
   - `ppd_service.py` – domain service: SPARQL parsing → typed PPD models (sync)
   - `planning_service.py` – domain service: council matching + URL building (sync)
   - `report_service.py` – product pipeline: multi-source aggregation → PropertyReport (async)
   - `enrichment.py` – EPC enrichment pipeline for PPD comps
+  - `address_matching.py` – fuzzy address matching for EPC enrichment
+  - `yield_service.py` – yield analysis: PPD sales + Rightmove rentals
   - `planning_scraper.py` – vision-guided planning portal scraper (Playwright + OpenAI)
   - `planning_councils.json` – verified council database (98 councils, 6 system types)
 - `app/` – FastAPI service wrapping property_core
@@ -75,8 +77,8 @@ Generate a typed client from the running service OpenAPI:
 - `GET /v1/ppd/transaction/{id}?view=all|basic&include_raw=bool` → `{ record: { transaction_id, price_paid, transaction_date, property/transaction metadata... }, raw? }`
 - `GET /v1/epc/search?postcode&address?&include_raw=bool` → `{ record, raw? }` (returns 501-style response if EPC creds not configured)
 - `GET /v1/rightmove/search-url?postcode&property_type=sale|rent&radius?&min/max price/bedrooms?` → `{ url }`
-- `GET /v1/rightmove/listings?search_url&max_pages?&include_raw=bool` → `{ count, results: [ { id, url, price, currency, bedrooms, bathrooms, address, summary, property_type, agent_name, agent_branch, first_visible_date, images, raw? } ] }`
-- `GET /v1/rightmove/listing/{property_id}?include_raw=bool` → `{ result: { id, url, price, bedrooms, bathrooms, address, description, property_type, tenure_type, years_remaining_on_lease, annual_service_charge, annual_ground_rent, ground_rent_review_period_years, council_tax_band, latitude, longitude, floorplans, key_features, display_size, ... } }`
+- `GET /v1/rightmove/listings?search_url&max_pages?` → `{ count, results: [ { id, url, price, currency, bedrooms, bathrooms, address, summary, property_type, agent_name, agent_branch, first_visible_date, images, raw } ] }` (raw always included)
+- `GET /v1/rightmove/listing/{property_id}` → `{ result: { id, url, price, bedrooms, bathrooms, address, description, property_type, tenure_type, years_remaining_on_lease, annual_service_charge, annual_ground_rent, ground_rent_review_period_years, council_tax_band, latitude, longitude, floorplans, key_features, display_size, raw, ... } }`
 - `GET /v1/planning/search?postcode` → `{ postcode, local_authority, council_found, council, search_urls }`
 - `GET /v1/planning/councils` → `{ verified_count, untested_count, councils, systems }`
 - `GET /v1/planning/council-for-postcode?postcode&include_raw=bool` → `{ postcode, local_authority, council, council_found, postcode_data? }`
@@ -102,8 +104,8 @@ Generate a typed client from the running service OpenAPI:
 
 Library also contains:
 
-✅ Dataclasses/Pydantic where structure is stable (Rightmove, PPD models)
-✅ Dict[str, Any] where wrapping external APIs with many optional fields (EPC raw)
-✅ include_raw pattern for debugging without logging overhead
+✅ Typed Pydantic models throughout — all transport clients and domain services return typed models
+✅ Every model carries `raw` field with original source data (always populated)
+✅ Standalone address matching module for EPC enrichment
 ✅ CLAUDE.md as living documentation
 ✅ Tests catch regressions
