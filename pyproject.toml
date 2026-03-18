@@ -1,7 +1,7 @@
 [project]
 name = "property-shared"
-version = "0.1.0"
-description = "Shared property tooling: core Python library plus FastAPI wrapper."
+version = "1.0.0"
+description = "Pure-Python core library + FastAPI service for UK property data (PPD, EPC, Rightmove, Planning)."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -42,7 +42,6 @@ mcp = [
 [project.scripts]
 property-api = "app.main:run"
 property-cli = "property_cli.main:app"
-property-demo = "app.main:run"
 property-mcp = "mcp_server.server:main"
 
 [build-system]

@@ -23,6 +23,27 @@ Three-layer pattern:
    - Returns `content` (text summary) + `structuredContent` (full data)
    - UI in `mcp-app/` renders interactive dashboards
 
+## Core Package Files
+
+| File | Role |
+|------|------|
+| `__init__.py` | Package exports |
+| `address_matching.py` | Address parsing/matching (used by report_service, epc.py, enrichment) |
+| `enrichment.py` | EPC enrichment pipeline |
+| `epc_client.py` | Transport: EPC API |
+| `planning_councils.json` | Council database for planning_service |
+| `planning_scraper.py` | Vision-guided planning scraper |
+| `planning_service.py` | Council matching + URL building |
+| `postcode_client.py` | Transport: postcodes.io |
+| `ppd_client.py` | Transport: Land Registry SPARQL |
+| `ppd_service.py` | Domain service: PPD comps |
+| `py.typed` | PEP 561 marker (needed for typed package) |
+| `rental_service.py` | Rental analysis + yield calc |
+| `report_service.py` | Multi-source report pipeline |
+| `rightmove_location.py` | Search URL builder |
+| `rightmove_scraper.py` | Listings scraper |
+| `yield_service.py` | Standalone yield analysis |
+
 ## Adding a New Data Source
 
 1. Create transport client in `property_core/new_client.py`
