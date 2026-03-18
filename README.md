@@ -1,6 +1,6 @@
-# Property Shared API (scaffold)
+# Property Shared
 
-FastAPI service + pure-Python core library for shared property capabilities (PPD, EPC, Rightmove, Planning). Currently scaffolded with a health route and minimal settings/logging (no DB/Redis assumptions in this repo).
+FastAPI service + pure-Python core library for UK property data. Integrates Land Registry (PPD), EPC, Rightmove, and Planning portals. Use as a library, HTTP API, CLI, or MCP server.
 
 ## How to run
 ### Dev (uv)
@@ -55,17 +55,17 @@ Generate a typed client from the running service OpenAPI:
 - `USER_GUIDE.md` – quickstart and endpoint/CLI usage
 
 ## Local setup
-1) Create venv: `python -m venv .venv && source .venv/bin/activate`
-2) Install deps (later): `pip install fastapi uvicorn pydantic pydantic-settings httpx requests tenacity beautifulsoup4`
-3) Copy `.env.example` to `.env` and fill values (EPC keys, OPENAI_API_KEY for planning scraper)
-4) Run: `uvicorn app.main:app --reload`
+1) Copy `.env.example` to `.env` and fill values (EPC keys, OPENAI_API_KEY for planning scraper)
+2) Install deps: `uv sync --extra dev`
+3) Run: `uv run property-api` (or `uv run uvicorn app.main:app --reload`)
 
 ## Notes
-- Rightmove politeness is in-memory (`app/utils/polite.py`) for now; projects can swap in Redis later if needed.
-- Rightmove search URLs built from full postcodes default to a small radius (0.25 miles) so the initial query returns results; override `radius` to widen/narrow the area in both the API and CLI.
+- All domain models carry a `raw` field with original source data (always populated by classmethods).
+- Rightmove politeness is in-memory (`app/services/rightmove_service.py`) for now; projects can swap in Redis later if needed.
+- Rightmove search URLs default to a small radius (0.25 miles); override `radius` to widen/narrow.
 - Station distances in listing details are rounded to 1 decimal place (e.g., "1.9 miles").
-- Rental analysis (`analyze_rentals`) uses IQR-based outlier filtering for the rent range to exclude extreme values.
-- OpenAPI/SDK generation will be added after endpoints land.
+- Rental analysis (`analyze_rentals`) uses IQR-based outlier filtering for the rent range.
+- See `docs/examples.md` for copy-paste usage examples with real output.
 
 ## API I/O contracts (summary)
 - `GET /v1/health` → `{ "status": "ok" }`
