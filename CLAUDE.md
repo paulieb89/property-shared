@@ -51,16 +51,18 @@ property_core/              # Pure Python library (no FastAPI, no DB assumptions
 │   ├── epc.py              # EPCData
 │   ├── rightmove.py        # RightmoveListing, RightmoveListingDetail
 │   └── report.py           # PropertyReport, SaleHistory, MarketAnalysis, etc.
-├── ppd_client.py           # Transport: Land Registry SPARQL + Linked Data API → dicts
-├── epc_client.py           # Transport: EPC registry (async) → dicts/tuples
-├── rightmove_scraper.py    # Transport: listings scraper (sync) → dataclasses
+├── ppd_client.py           # Transport: Land Registry SPARQL + Linked Data API → typed models
+├── epc_client.py           # Transport: EPC registry (async) → typed EPCData models
+├── rightmove_scraper.py    # Transport: listings scraper (sync) → typed Pydantic models
 ├── rightmove_location.py   # Transport: search URL builder (sync)
-├── postcode_client.py      # Transport: postcodes.io → dicts
+├── postcode_client.py      # Transport: postcodes.io → typed PostcodeResult model
 ├── ppd_service.py          # Domain service: SPARQL parsing → typed PPD models (sync)
 ├── planning_service.py     # Domain service: council matching + URL building (sync)
 ├── report_service.py       # Product pipeline: multi-source aggregation (async)
 ├── rental_service.py       # Standalone rental analysis with yield calculation (async)
 ├── enrichment.py           # EPC enrichment pipeline + compute_enriched_stats()
+├── address_matching.py     # Fuzzy address matching for EPC enrichment
+├── yield_service.py        # Yield analysis: PPD sales + Rightmove rentals → YieldAnalysis
 ├── planning_scraper.py     # Vision-guided planning portal scraper (Playwright + OpenAI)
 └── planning_councils.json  # Verified council database (98 councils, 6 system types)
 
@@ -82,7 +84,7 @@ mcp_server/                 # MCP server for AI hosts (wraps property_core)
 ```
 
 **Three-layer separation**:
-- Transport clients (raw HTTP/SPARQL → dicts)
+- Transport clients (HTTP/SPARQL → typed Pydantic models)
 - Domain services (parsing + orchestration → typed Pydantic models)
 - API layer (envelopes, async threading, rate limiting)
 
@@ -92,7 +94,7 @@ mcp_server/                 # MCP server for AI hosts (wraps property_core)
 
 - **Dual-mode CLI**: Commands call `property_core` directly by default (fast, offline-capable). Add `--api-url` to route through the HTTP API instead.
 - **Domain service guardrails**: `property_core/ppd_service.py` enforces limits (MAX_LIMIT=200, FORM_MAX_LIMIT=50) and normalizes responses. API routers are thin wrappers.
-- **`include_raw` pattern**: All endpoints normalize data by default. Pass `include_raw=true` to get the original source data alongside normalized fields. EPC, PPD (transactions/address-search), Rightmove (listings), and Planning (council-for-postcode) all support this.
+- **`raw` field pattern**: All domain models carry a `raw: dict | None` field, always populated by classmethods with the original source data. At the API layer, PPD, EPC, and Planning endpoints still accept `include_raw=true` to control whether raw data appears in HTTP responses. Rightmove models always include raw data (the API `include_raw` parameter is accepted but ignored for backward compatibility).
 - **Area stats**: `PPDCompsResponse` includes `percentile_25`, `percentile_75` for price quartiles. When an address is provided and found, also includes `subject_price_percentile` (0-100) and `subject_vs_median_pct` (e.g., +10.8 means 10.8% above median).
 - **EPC enrichment**: PPD comps can be enriched with EPC floor area via `enrich_epc=true` on the comps endpoint (or `--enrich-epc` in CLI). Groups comps by postcode, fetches all EPC certs per postcode (one API call each), fuzzy-matches addresses, and attaches derived fields (`epc_floor_area_sqm`, `price_per_sqft`, `epc_rating`, etc.) plus the full matched cert (`epc_match`) and confidence score (`epc_match_score`). After enrichment, call `compute_enriched_stats()` to populate `median_price_per_sqft` and `epc_match_rate`.
 - **Standalone rental analysis**: `analyze_rentals(postcode, purchase_price=N)` returns rental market stats (median/average rent, listing count) with optional gross yield calculation. Rental range uses IQR-based outlier filtering to exclude extreme values (e.g., filters £108 and £2,132 from a typical £650-£1,200 range).
@@ -115,14 +117,16 @@ Install in another project: `pip install /path/to/property_shared` or add to dep
 # Domain services (typed models, no FastAPI needed)
 from property_core import PPDService, PlanningService, PropertyReportService
 
-# Transport clients (raw dicts)
+# Transport clients (typed models)
 from property_core import PricePaidDataClient, EPCClient, RightmoveLocationAPI, fetch_listings, PostcodeClient
 from property_core import enrich_comps_with_epc, compute_enriched_stats, fetch_listing, analyze_rentals
+from property_core import calculate_yield
 
 # Domain models
 from property_core.models.ppd import PPDTransaction, PPDCompsResponse
 from property_core.models.epc import EPCData
 from property_core.models.report import PropertyReport
+from property_core.models.rightmove import RightmoveListing, RightmoveListingDetail
 
 # Planning scraper (requires playwright, openai)
 from property_core.planning_scraper import scrape_planning_application, search_planning_by_postcode

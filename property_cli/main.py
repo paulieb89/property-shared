@@ -117,10 +117,7 @@ def ppd_comps(
         if enrich_epc:
             import asyncio
             from property_core.enrichment import compute_enriched_stats, enrich_comps_with_epc
-            comp_dicts = [t.model_dump() for t in result.transactions]
-            enriched = asyncio.run(enrich_comps_with_epc(comp_dicts))
-            from property_core.models.ppd import PPDTransaction
-            result.transactions = [PPDTransaction(**d) for d in enriched]
+            asyncio.run(enrich_comps_with_epc(result.transactions))
             compute_enriched_stats(result)
         _echo_json(result.model_dump())
 
@@ -140,8 +137,8 @@ def ppd_transaction(
         _echo_json(data)
     else:
         client = PricePaidDataClient()
-        raw = client.get_transaction_record(transaction_id)
-        output = {"record": raw, "raw": raw if include_raw else None}
+        record = client.get_transaction_record(transaction_id)
+        output = {"record": record.model_dump(), "raw": record.raw if include_raw else None}
         _echo_json(output)
 
 
@@ -168,12 +165,12 @@ def ppd_search(
         _echo_json(data)
     else:
         client = PricePaidDataClient()
-        res = client.sparql_search(
+        results = client.sparql_search(
             postcode=postcode,
             postcode_prefix=postcode_prefix,
             limit=limit,
         )
-        _echo_json(res.get("results", {}))
+        _echo_json([t.model_dump() for t in results])
 
 
 @ppd.command("address-search")
@@ -216,7 +213,7 @@ def ppd_address_search(
         _echo_json(data)
     else:
         client = PricePaidDataClient()
-        result = client.form_search(
+        results = client.form_search(
             paon=paon,
             saon=saon,
             street=street,
@@ -226,7 +223,7 @@ def ppd_address_search(
             postcode_prefix=postcode_prefix,
             limit=limit,
         )
-        _echo_json(result)
+        _echo_json([t.model_dump() for t in results])
 
 
 @ppd.command("download-url")
@@ -323,8 +320,7 @@ def epc_search(
     if not result:
         typer.echo("No EPC found")
         raise typer.Exit(code=1)
-    record, raw = result
-    output = {"record": record, "raw": raw if include_raw else None}
+    output = {"record": result.model_dump(), "raw": result.raw if include_raw else None}
     _echo_json(output)
 
 
@@ -354,8 +350,7 @@ def epc_certificate(
     if not result:
         typer.echo("No EPC found for this certificate hash")
         raise typer.Exit(code=1)
-    record, raw = result
-    output = {"record": record, "raw": raw if include_raw else None}
+    output = {"record": result.model_dump(), "raw": result.raw if include_raw else None}
     _echo_json(output)
 
 
@@ -452,7 +447,7 @@ def rightmove_listing(
         detail = data.get("result", {})
     else:
         result = fetch_listing(url_or_id, include_raw=include_raw)
-        detail = result.to_dict()
+        detail = result.model_dump()
 
     # Display structured output
     table = Table(title=f"Listing: {detail.get('address', url_or_id)}")

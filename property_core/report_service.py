@@ -11,6 +11,7 @@ import os
 import re
 import uuid
 from datetime import datetime
+from statistics import median as stat_median
 from typing import Any, Dict, List, Optional, Tuple
 
 from property_core.epc_client import EPCClient
@@ -350,34 +351,33 @@ class PropertyReportService:
                     "error": "No EPC found",
                 }
 
-            record_dict, _raw = result
             total_cost = None
-            heating = record_dict.get("heating_cost_current")
-            hot_water = record_dict.get("hot_water_cost_current")
-            lighting = record_dict.get("lighting_cost_current")
+            heating = result.heating_cost_current
+            hot_water = result.hot_water_cost_current
+            lighting = result.lighting_cost_current
             if heating or hot_water or lighting:
                 total_cost = (heating or 0) + (hot_water or 0) + (lighting or 0)
 
             potential_savings = None
-            if heating and record_dict.get("heating_cost_potential"):
-                potential_savings = heating - record_dict["heating_cost_potential"]
+            if heating and result.heating_cost_potential:
+                potential_savings = heating - result.heating_cost_potential
 
             energy = EnergyPerformance(
-                rating=record_dict.get("rating", "?"),
-                score=record_dict.get("score", 0),
-                potential_rating=record_dict.get("potential_rating"),
-                potential_score=record_dict.get("potential_score"),
-                floor_area_sqm=record_dict.get("floor_area"),
-                property_type=record_dict.get("property_type"),
-                construction_age=record_dict.get("construction_age"),
+                rating=result.rating or "?",
+                score=result.score or 0,
+                potential_rating=result.potential_rating,
+                potential_score=result.potential_score,
+                floor_area_sqm=result.floor_area,
+                property_type=result.property_type,
+                construction_age=result.construction_age,
                 heating_cost=heating,
                 hot_water_cost=hot_water,
                 lighting_cost=lighting,
                 total_annual_cost=total_cost,
-                potential_heating_cost=record_dict.get("heating_cost_potential"),
+                potential_heating_cost=result.heating_cost_potential,
                 potential_savings=potential_savings,
-                inspection_date=record_dict.get("inspection_date"),
-                certificate_hash=record_dict.get("certificate_hash"),
+                inspection_date=result.inspection_date,
+                certificate_hash=result.lmk_key,
             )
 
             return {"success": True, "energy_performance": energy}
@@ -443,15 +443,14 @@ class PropertyReportService:
                 }
 
             prices.sort()
-            median_idx = len(prices) // 2
-            median = prices[median_idx] if prices else None
+            median_val = int(stat_median(prices)) if prices else None
             avg = int(sum(prices) / len(prices)) if prices else None
 
             market = CurrentMarket(
                 search_radius_miles=radius,
                 for_sale_count=len(listings),
                 average_asking_price=avg,
-                median_asking_price=median,
+                median_asking_price=median_val,
                 asking_range_low=min(prices) if prices else None,
                 asking_range_high=max(prices) if prices else None,
             )

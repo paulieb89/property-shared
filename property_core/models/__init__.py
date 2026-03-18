@@ -7,6 +7,7 @@ from property_core.models.planning import (
     LocalAuthority,
     SearchUrls,
 )
+from property_core.models.postcode import PostcodeResult
 from property_core.models.ppd import (
     PPDCompsQuery,
     PPDCompsResponse,
@@ -39,6 +40,7 @@ __all__ = [
     "PPDCompsResponse",
     "PPDTransaction",
     "PPDTransactionRecord",
+    "PostcodeResult",
     "PropertyReport",
     "RentalAnalysis",
     "RightmoveListing",

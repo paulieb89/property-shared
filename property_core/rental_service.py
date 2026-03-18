@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from statistics import quantiles
+from statistics import median, quantiles
 from typing import Optional
 
 from property_core.models.report import RentalAnalysis
@@ -29,6 +29,13 @@ def _filter_outliers(prices: list[int]) -> list[int]:
     lower = q[0] - 1.5 * iqr
     upper = q[2] + 1.5 * iqr
     return [p for p in prices if lower <= p <= upper]
+
+
+def to_monthly(listing) -> int:
+    """Normalize a listing's price to monthly (handles weekly frequency)."""
+    if listing.price_frequency == "weekly":
+        return int(listing.price * 52 / 12)
+    return listing.price
 
 
 def _calculate_yield(rental: RentalAnalysis, purchase_price: int) -> None:
@@ -91,13 +98,8 @@ async def analyze_rentals(
         raise RuntimeError(f"Rental analysis failed: {exc}") from exc
 
     # Normalize all prices to monthly (weekly × 52/12 ≈ 4.33)
-    def _to_monthly(listing) -> int:
-        if listing.price_frequency == "weekly":
-            return int(listing.price * 52 / 12)
-        return listing.price
-
-    prices = sorted([_to_monthly(l) for l in listings if l.price and l.price > 0])
-    median_rent = prices[len(prices) // 2] if prices else None
+    prices = sorted([to_monthly(l) for l in listings if l.price and l.price > 0])
+    median_rent = int(median(prices)) if prices else None
     avg_rent = int(sum(prices) / len(prices)) if prices else None
 
     # Filter outliers for range display (keeps median/avg on full dataset)

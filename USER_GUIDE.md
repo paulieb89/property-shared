@@ -177,11 +177,11 @@ Results include `locality` and `district` fields from the Land Registry address 
 ### Rightmove
 - `GET /v1/rightmove/search-url?postcode=SW1A%201AA&property_type=sale&radius=0.25` — Sales
 - `GET /v1/rightmove/search-url?postcode=SW1A%201AA&property_type=rent&radius=0.25` — Rentals
-- `GET /v1/rightmove/listings?search_url=<url>&max_pages=1&include_raw=true`
-- `GET /v1/rightmove/listing/{property_id}?include_raw=false` — Full listing detail (tenure, costs, floorplans)
+- `GET /v1/rightmove/listings?search_url=<url>&max_pages=1`
+- `GET /v1/rightmove/listing/{property_id}` — Full listing detail (tenure, costs, floorplans)
 
-With `include_raw=true` on listings, each result includes the full `__NEXT_DATA__` property object.
-With `include_raw=true` on listing detail, the response includes the full `PAGE_MODEL.propertyData` dict.
+All listing results include `raw` with the full `__NEXT_DATA__` property object.
+Listing detail results include `raw` with the full `PAGE_MODEL.propertyData` dict.
 
 ### Planning
 - `GET /v1/planning/search?postcode=S1%202HH` — Search by postcode (returns search URLs)
@@ -227,12 +227,15 @@ from property_core import (
 )
 from property_core.rightmove_scraper import fetch_listing
 
-# PPD
+# PPD (transport client — returns typed models)
 client = PricePaidDataClient()
-client.get_comps_summary(postcode="SW1A 1AA", months=24, limit=20, search_level="sector")
-client.sparql_search(postcode_prefix="SW1A", limit=10)
-client.form_search(postcode="SW1A", street="Downing", limit=5)  # requires ≥2 fields
-client.get_transaction_record("<transaction_id>")
+transactions = client.sparql_search(postcode_prefix="SW1A", limit=10)  # list[PPDTransaction]
+transactions = client.form_search(postcode="SW1A", street="Downing", limit=5)  # list[PPDTransaction]
+record = client.get_transaction_record("<transaction_id>")  # PPDTransactionRecord
+
+# PPD comps (domain service — adds stats, guardrails)
+service = PPDService()
+result = service.comps(postcode="SW1A 1AA", months=24, limit=20, search_level="sector")
 
 # EPC (requires EPC_API_EMAIL/EPC_API_KEY in env)
 epc = EPCClient()
@@ -243,8 +246,8 @@ api = RightmoveLocationAPI()
 url = api.build_search_url("SW1A 1AA", property_type="sale", radius=0.25)
 listings = fetch_listings(url, max_pages=1, rate_limit_seconds=0.6)
 
-# Rightmove - with raw __NEXT_DATA__ (lat/lon, tenure, key features, floorplan flags)
-listings = fetch_listings(url, max_pages=1, include_raw=True)
+# Rightmove - raw data is always populated (no include_raw parameter needed)
+listings = fetch_listings(url, max_pages=1)
 for listing in listings:
     print(listing.raw["location"])  # {"latitude": ..., "longitude": ...}
 
@@ -266,14 +269,16 @@ print(f"Service charge: £{detail.annual_service_charge}/yr")
 print(f"Ground rent: £{detail.annual_ground_rent}/yr")
 print(f"Size: {detail.display_size}, Council tax: {detail.council_tax_band}")
 
-# Postcode lookup (full postcodes.io data)
-from property_core.postcode_client import PostcodeClient
+# Postcode lookup (returns typed PostcodeResult)
+from property_core import PostcodeClient
 pc = PostcodeClient()
+result = pc.lookup("SW1A 1AA")  # Optional[PostcodeResult]
+print(result.admin_district)    # "Westminster"
+print(result.latitude, result.longitude)
+
+# Or use get_local_authority() for structured dict
 la = pc.get_local_authority("SW1A 1AA", include_raw=True)
-print(la["name"])           # "Westminster"
-print(la["rural_urban"])    # Rural Urban Classification 2021 (ruc21)
-print(la["raw"]["lsoa"])    # "Westminster 018C"
-print(la["raw"]["parliamentary_constituency"])  # "Cities of London and Westminster"
+print(la["name"])  # "Westminster"
 
 # Rental analysis (standalone, no full report needed)
 import asyncio
@@ -341,7 +346,7 @@ print(report.estimated_value_low, report.estimated_value_high)
 
 ## Notes
 
-- **`include_raw` pattern**: All data endpoints support `include_raw=true` to return the original source data alongside normalized fields. This exposes fields that are dropped during normalization (e.g. Rightmove's latitude/longitude/tenure, PPD's full SPARQL bindings, postcodes.io's NHS/constituency/LSOA data). Default is `false` for backwards compatibility.
+- **`raw` field pattern**: All core models carry a `raw` field always populated with source data. At the API layer, PPD/EPC/Planning endpoints support `include_raw=true` to control raw data in HTTP responses. Rightmove models always include raw data; the API parameter is accepted but ignored for backward compatibility.
 - **Planning scraper** requires UK residential IP — councils block all datacenter IPs. Set `PLAYWRIGHT_PROXY_URL` for proxy support.
 - **Planning search-results** endpoint takes 30-60 seconds (browser automation + vision extraction).
 - **Rightmove scraping** is polite by default (0.6s delay); respect rate limits.

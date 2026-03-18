@@ -66,7 +66,6 @@ class RightmoveService:
         *,
         search_url: str,
         max_pages: int | None = None,
-        include_raw: bool = False,
     ) -> list[RightmoveListing]:
         async with self.limiter:
             fn = partial(
@@ -74,22 +73,19 @@ class RightmoveService:
                 search_url,
                 max_pages=max_pages,
                 rate_limit_seconds=self._delay,
-                include_raw=include_raw,
             )
             results = await anyio.to_thread.run_sync(fn)
-        return [RightmoveListing.model_validate(item.to_dict()) for item in results]
+        return results
 
     async def listing_detail(
         self,
         *,
         property_url_or_id: str,
-        include_raw: bool = False,
     ) -> RightmoveListingDetail:
         async with self.limiter:
             fn = partial(
                 fetch_listing,
                 property_url_or_id,
-                include_raw=include_raw,
             )
             result = await anyio.to_thread.run_sync(fn)
-        return RightmoveListingDetail.model_validate(result.to_dict())
+        return result

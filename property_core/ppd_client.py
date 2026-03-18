@@ -29,14 +29,15 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import date, timedelta
-from statistics import mean, median, quantiles
-from typing import Any, Dict, List, Optional
+from typing import Dict, Optional
+
+from property_core.models.ppd import PPDTransaction, PPDTransactionRecord
 
 S3_BASE = "http://prod2.publicdata.landregistry.gov.uk.s3-website-eu-west-1.amazonaws.com"
 LINKED_DATA_BASE = "https://landregistry.data.gov.uk"
@@ -72,6 +73,22 @@ RECORD_STATUS_URIS: Dict[str, str] = {
 
 # The Land Registry site currently splits some recent years into two files.
 YEARS_WITH_PARTS = {2018, 2019, 2020, 2021, 2022, 2023}
+
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _validate_iso_date(s: str) -> str:
+    """Validate that *s* looks like an ISO date (YYYY-MM-DD). Raises ValueError."""
+    if not _ISO_DATE_RE.match(s):
+        raise ValueError(f"Invalid ISO date: {s!r}")
+    return s
+
+
+def _validate_positive_int(n: int) -> int:
+    """Validate that *n* is a non-negative integer. Raises ValueError/TypeError."""
+    if not isinstance(n, int) or n < 0:
+        raise ValueError(f"Expected non-negative int, got {n!r}")
+    return n
 
 
 @dataclass
@@ -117,11 +134,12 @@ class PricePaidDataClient:
     # --------
     # Linked data helpers
     # --------
-    def get_transaction_record(self, transaction_id: str, view: str = "all") -> Dict:
+    def get_transaction_record(self, transaction_id: str, view: str = "all") -> PPDTransactionRecord:
         """Fetch a transaction record by its UUID from the Linked Data API."""
         endpoint = f"{self.linked_data_base}/data/ppi/transaction/{transaction_id}/current.json"
         url = f"{endpoint}?{urllib.parse.urlencode({'_view': view})}"
-        return self._fetch_json(url)
+        raw = self._fetch_json(url)
+        return PPDTransactionRecord.from_linked_data(raw)
 
     def get_address(self, address_id_or_uri: str, view: str = "all") -> Dict:
         """Fetch address details by URI or ID. Returns paon, saon, street, town, etc."""
@@ -154,7 +172,7 @@ class PricePaidDataClient:
         limit: int = 20,
         offset: int = 0,
         order_desc: bool = True,
-    ) -> Dict:
+    ) -> list[PPDTransaction]:
         """
         Search Price Paid transactions via SPARQL.
 
@@ -175,13 +193,17 @@ class PricePaidDataClient:
             filters.append(f'FILTER(STRSTARTS(?postcode, "{safe_prefix}"))')
 
         if from_date:
+            _validate_iso_date(from_date)
             filters.append(f'FILTER(?transactionDate >= "{from_date}"^^xsd:date)')
         if to_date:
+            _validate_iso_date(to_date)
             filters.append(f'FILTER(?transactionDate <= "{to_date}"^^xsd:date)')
 
         if min_price is not None:
+            _validate_positive_int(min_price)
             filters.append(f"FILTER(?pricePaid >= {min_price})")
         if max_price is not None:
+            _validate_positive_int(max_price)
             filters.append(f"FILTER(?pricePaid <= {max_price})")
 
         if property_type:
@@ -253,7 +275,9 @@ class PricePaidDataClient:
         )
 
         encoded = urllib.parse.urlencode({"query": query}).encode()
-        return self._fetch_sparql(encoded)
+        raw = self._fetch_sparql(encoded)
+        bindings = raw.get("results", {}).get("bindings", [])
+        return [PPDTransaction.from_sparql_binding(b) for b in bindings]
 
     # --------
     # Address-form search (web-form style)
@@ -271,7 +295,7 @@ class PricePaidDataClient:
         postcode: Optional[str] = None,
         postcode_prefix: Optional[str] = None,
         limit: int = 25,
-    ) -> Dict:
+    ) -> list[PPDTransaction]:
         """
         Search PPD using web-form style address filters.
 
@@ -368,162 +392,9 @@ class PricePaidDataClient:
         )
 
         encoded = urllib.parse.urlencode({"query": query}).encode()
-        return self._fetch_sparql(encoded)
-
-    # --------
-    # Comps helper
-    # --------
-    def get_comps_summary(
-        self,
-        postcode: str,
-        property_type: Optional[str] = None,
-        months: int = 24,
-        limit: int = 50,
-        search_level: str = "sector",
-    ) -> Dict[str, Any]:
-        """
-        Get comparable sales with summary statistics.
-
-        Args:
-            postcode: Target postcode (e.g., "DE12 6DZ")
-            property_type: Filter by D/S/T/F/O (None = all types)
-            months: Lookback period in months (default 24)
-            limit: Max transactions to return (default 50)
-            search_level: "postcode" (exact), "sector" (DE12 6), or "district" (DE12)
-
-        Returns:
-            Dict with keys:
-                - query: search parameters used
-                - count: number of transactions found
-                - median: median price (None if no results)
-                - mean: mean price (None if no results)
-                - percentile_25: 25th percentile price (None if insufficient results)
-                - percentile_75: 75th percentile price (None if insufficient results)
-                - min: minimum price
-                - max: maximum price
-                - transactions: list of transaction dicts
-                - thin_market: True if count < 5 (low confidence)
-        """
-        # Derive search prefix from postcode
-        pc = postcode.upper().strip()
-        if search_level == "postcode":
-            prefix = None
-            exact_postcode = pc
-        elif search_level == "sector":
-            # "DE12 6DZ" -> "DE12 6"
-            parts = pc.split()
-            if len(parts) == 2 and len(parts[1]) >= 1:
-                prefix = f"{parts[0]} {parts[1][0]}"
-            else:
-                prefix = pc.split()[0] if pc else pc
-            exact_postcode = None
-        else:  # district
-            prefix = pc.split()[0] if " " in pc else pc
-            exact_postcode = None
-
-        from_date = (date.today() - timedelta(days=months * 30)).isoformat()
-
-        # Fetch transactions - DON'T filter property_type in SPARQL (causes 503)
-        # Instead, fetch more results and filter client-side
-        fetch_limit = limit * 3 if property_type else limit
-
-        raw = self.sparql_search(
-            postcode=exact_postcode,
-            postcode_prefix=prefix,
-            property_type=None,  # Filter in Python to avoid 503
-            from_date=from_date,
-            limit=fetch_limit,
-            order_desc=True,
-        )
-
+        raw = self._fetch_sparql(encoded)
         bindings = raw.get("results", {}).get("bindings", [])
-
-        # Parse transactions
-        transactions: List[Dict[str, Any]] = []
-        prices: List[int] = []
-
-        for b in bindings:
-            # Extract property type code from URI
-            pt_uri = b.get("propertyType", {}).get("value", "")
-            pt_code = None
-            for code, uri in PROPERTY_TYPE_URIS.items():
-                if uri == pt_uri:
-                    pt_code = code
-                    break
-
-            # Client-side filter for property_type (SPARQL filter causes 503)
-            if property_type and pt_code != property_type.upper():
-                continue
-
-            # Stop if we've collected enough
-            if len(transactions) >= limit:
-                break
-
-            price = int(b["pricePaid"]["value"])
-            prices.append(price)
-
-            # Extract estate type code from URI
-            et_uri = b.get("estateType", {}).get("value", "")
-            et_code = None
-            for code, uri in ESTATE_TYPE_URIS.items():
-                if uri == et_uri:
-                    et_code = code
-                    break
-
-            # Build address from optional fields
-            paon = b.get("paon", {}).get("value")
-            saon = b.get("saon", {}).get("value")
-            street = b.get("street", {}).get("value")
-            town = b.get("town", {}).get("value")
-            county = b.get("county", {}).get("value")
-            locality = b.get("locality", {}).get("value")
-            district = b.get("district", {}).get("value")
-
-            transactions.append({
-                "transaction_id": b["transactionId"]["value"],
-                "price": price,
-                "date": b["transactionDate"]["value"],
-                "postcode": b["postcode"]["value"],
-                "property_type": pt_code,
-                "estate_type": et_code,
-                "new_build": b.get("newBuild", {}).get("value") == "true",
-                "paon": paon,
-                "saon": saon,
-                "street": street,
-                "town": town,
-                "county": county,
-                "locality": locality,
-                "district": district,
-            })
-
-        # Calculate stats
-        count = len(prices)
-        percentile_25 = None
-        percentile_75 = None
-        if len(prices) >= 4:
-            q = quantiles(prices, n=4)
-            percentile_25 = int(round(q[0]))
-            percentile_75 = int(round(q[2]))
-        result: Dict[str, Any] = {
-            "query": {
-                "postcode": postcode,
-                "property_type": property_type,
-                "months": months,
-                "search_level": search_level,
-                "from_date": from_date,
-            },
-            "count": count,
-            "median": int(median(prices)) if prices else None,
-            "mean": int(round(mean(prices))) if prices else None,
-            "percentile_25": percentile_25,
-            "percentile_75": percentile_75,
-            "min": min(prices) if prices else None,
-            "max": max(prices) if prices else None,
-            "transactions": transactions,
-            "thin_market": count < 5,
-        }
-
-        return result
+        return [PPDTransaction.from_sparql_binding(b) for b in bindings]
 
     # --------
     # Internals

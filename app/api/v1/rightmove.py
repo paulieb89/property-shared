@@ -47,12 +47,12 @@ async def search_url(
 async def listings(
     search_url: str = Query(..., min_length=10),
     max_pages: Optional[int] = Query(None, ge=1, le=20),
-    include_raw: bool = Query(False, description="Include raw __NEXT_DATA__ property dict"),
+    include_raw: bool = Query(False, description="Ignored (raw is always included in v2)"),
 ) -> RightmoveListingsResponse:
     """Fetch listing results from a Rightmove search URL."""
     try:
         results = await service.listings(
-            search_url=search_url, max_pages=max_pages, include_raw=include_raw
+            search_url=search_url, max_pages=max_pages,
         )
         return RightmoveListingsResponse(count=len(results), results=results)
     except Exception as exc:  # noqa: BLE001
@@ -62,12 +62,12 @@ async def listings(
 @router.get("/listing/{property_id}", response_model=RightmoveListingDetailResponse)
 async def listing_detail(
     property_id: str,
-    include_raw: bool = Query(False, description="Include raw PAGE_MODEL propertyData dict"),
+    include_raw: bool = Query(False, description="Ignored (raw is always included in v2)"),
 ) -> RightmoveListingDetailResponse:
     """Fetch full details for an individual Rightmove property listing."""
     try:
         result = await service.listing_detail(
-            property_url_or_id=property_id, include_raw=include_raw
+            property_url_or_id=property_id,
         )
         return RightmoveListingDetailResponse(result=result)
     except Exception as exc:  # noqa: BLE001

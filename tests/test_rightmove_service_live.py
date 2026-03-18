@@ -72,7 +72,7 @@ async def test_rightmove_listing_detail_live() -> None:
 
     # First find a leasehold listing from search results
     url = await service.build_search_url(postcode="SW1A 1AA", property_type="sale")
-    listings = await service.listings(search_url=url, max_pages=1, include_raw=True)
+    listings = await service.listings(search_url=url, max_pages=1)
     assert len(listings) > 0, "Expected at least one listing"
 
     # Pick first listing with a leasehold tenure if possible
@@ -86,7 +86,7 @@ async def test_rightmove_listing_detail_live() -> None:
         target_id = listings[0].id
 
     start = time.perf_counter()
-    detail = await service.listing_detail(property_url_or_id=str(target_id), include_raw=False)
+    detail = await service.listing_detail(property_url_or_id=str(target_id))
     elapsed = time.perf_counter() - start
 
     print(f"Listing detail fetch took {elapsed:.2f}s")

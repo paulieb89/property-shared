@@ -1,88 +1,18 @@
 """EPC Register client (pure Python).
 
-Fetches domestic EPC certificates for UK postcodes and returns normalized fields.
+Fetches domestic EPC certificates for UK postcodes and returns typed EPCData models.
 """
 
 from __future__ import annotations
 
 import base64
 import os
-import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional
 
 import httpx
 
-
-def _normalize_address(address: str) -> str:
-    """Normalize address for comparison."""
-    addr = address.lower()
-    addr = re.sub(r"[,.'\"()-]", " ", addr)
-    addr = re.sub(r"\s+", " ", addr).strip()
-    return addr
-
-
-def _extract_number(address: str) -> str | None:
-    """Extract house number from address."""
-    match = re.match(r"^(\d+[a-zA-Z]?)\b", address.strip())
-    return match.group(1).lower() if match else None
-
-
-def _extract_street(address: str) -> str | None:
-    """Extract street name from address."""
-    addr = re.sub(r"^\d+[a-zA-Z]?\s*", "", address.strip())
-    addr = _normalize_address(addr)
-    parts = addr.split()
-    if len(parts) >= 2:
-        return " ".join(parts[:2])
-    return parts[0] if parts else None
-
-
-def _match_score(cert_address: str, target_address: str) -> int:
-    """Score how well a certificate address matches the target."""
-    cert_norm = _normalize_address(cert_address)
-    target_norm = _normalize_address(target_address)
-
-    if cert_norm == target_norm:
-        return 100
-
-    score = 0
-    cert_num = _extract_number(cert_address)
-    target_num = _extract_number(target_address)
-    if cert_num and target_num and cert_num == target_num:
-        score += 50
-
-    cert_street = _extract_street(cert_address)
-    target_street = _extract_street(target_address)
-    if cert_street and target_street:
-        if cert_street == target_street:
-            score += 30
-        elif cert_street in target_street or target_street in cert_street:
-            score += 15
-
-    cert_words = set(cert_norm.split())
-    target_words = set(target_norm.split())
-    overlap = len(cert_words & target_words)
-    score += min(overlap * 3, 15)
-
-    return score
-
-
-def _safe_int(val: Any) -> Optional[int]:
-    if val is None or val == "":
-        return None
-    try:
-        return int(float(val))
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_float(val: Any) -> Optional[float]:
-    if val is None or val == "":
-        return None
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return None
+from property_core.address_matching import match_epc_address
+from property_core.models.epc import EPCData
 
 
 class EPCClient:
@@ -109,45 +39,13 @@ class EPCClient:
         creds = base64.b64encode(f"{self.email}:{self.api_key}".encode()).decode()
         return {"Authorization": f"Basic {creds}"}
 
-    def _parse_certificate(self, cert: dict) -> Dict[str, Any]:
-        """Normalize EPC certificate fields into a flat dict."""
-        return {
-            "rating": cert.get("current-energy-rating", "?"),
-            "score": _safe_int(cert.get("current-energy-efficiency")) or 0,
-            "potential_rating": cert.get("potential-energy-rating"),
-            "potential_score": _safe_int(cert.get("potential-energy-efficiency")),
-            "address": cert.get("address"),
-            "floor_area": _safe_float(cert.get("total-floor-area")),
-            "built_form": cert.get("built-form"),
-            "property_type": cert.get("property-type"),
-            "construction_age": cert.get("construction-age-band"),
-            "heating_cost_current": _safe_int(cert.get("heating-cost-current")),
-            "heating_cost_potential": _safe_int(cert.get("heating-cost-potential")),
-            "hot_water_cost_current": _safe_int(cert.get("hot-water-cost-current")),
-            "hot_water_cost_potential": _safe_int(cert.get("hot-water-cost-potential")),
-            "lighting_cost_current": _safe_int(cert.get("lighting-cost-current")),
-            "lighting_cost_potential": _safe_int(cert.get("lighting-cost-potential")),
-            "main_fuel": cert.get("main-fuel"),
-            "main_heating": cert.get("mainheat-description"),
-            "hot_water": cert.get("hotwater-description"),
-            "walls_efficiency": cert.get("walls-energy-eff"),
-            "roof_efficiency": cert.get("roof-energy-eff"),
-            "floor_efficiency": cert.get("floor-energy-eff"),
-            "windows_efficiency": cert.get("windows-energy-eff"),
-            "windows_description": cert.get("windows-description"),
-            "co2_emissions_current": _safe_float(cert.get("co2-emissions-current")),
-            "co2_emissions_potential": _safe_float(cert.get("co2-emissions-potential")),
-            "inspection_date": cert.get("inspection-date"),
-            "certificate_hash": cert.get("lmk-key"),
-        }
-
     async def get_certificate(
         self, certificate_hash: str
-    ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    ) -> Optional[EPCData]:
         """Get EPC certificate by lmk-key (certificate hash).
 
         Returns:
-            Tuple of (normalized_record, raw_response_json) or None.
+            EPCData model or None.
         """
         if not self.is_configured():
             return None
@@ -165,21 +63,21 @@ class EPCClient:
                 if not rows:
                     return None
 
-                return (self._parse_certificate(rows[0]), data)
+                return EPCData.from_api_row(rows[0])
 
             except (httpx.HTTPError, KeyError, ValueError):
                 return None
 
     async def search_all_by_postcode(
         self, postcode: str
-    ) -> list[Dict[str, Any]]:
+    ) -> list[EPCData]:
         """Return all parsed EPC certificates for a postcode.
 
         Useful for batch-matching multiple addresses against a single postcode's
         certificates (e.g. enriching PPD comparables with floor area).
 
         Returns:
-            List of normalized certificate dicts (may be empty).
+            List of EPCData models (may be empty).
         """
         if not self.is_configured():
             return []
@@ -194,42 +92,34 @@ class EPCClient:
                 resp.raise_for_status()
                 data = resp.json()
                 rows = data.get("rows", [])
-                return [self._parse_certificate(row) for row in rows]
+                return [EPCData.from_api_row(row) for row in rows]
             except (httpx.HTTPError, KeyError, ValueError):
                 return []
 
     def match_address(
-        self, certificates: list[Dict[str, Any]], address: str, min_score: int = 30
-    ) -> Optional[tuple[Dict[str, Any], int]]:
+        self, certificates: list[EPCData], address: str, min_score: int = 30
+    ) -> Optional[tuple[EPCData, int]]:
         """Find the best-matching certificate for an address from a pre-fetched list.
 
+        Delegates to address_matching.match_epc_address().
+
         Args:
-            certificates: List of normalized certs (from search_all_by_postcode).
+            certificates: List of EPCData models (from search_all_by_postcode).
             address: Address to match against.
             min_score: Minimum match score (0-100) to accept.
 
         Returns:
-            Tuple of (certificate_dict, match_score) or None if no match meets threshold.
+            Tuple of (EPCData, match_score) or None if no match meets threshold.
         """
-        best_cert = None
-        best_score = -1
-        for cert in certificates:
-            cert_addr = cert.get("address", "")
-            score = _match_score(cert_addr, address)
-            if score > best_score:
-                best_score = score
-                best_cert = cert
-        if best_cert and best_score >= min_score:
-            return (best_cert, best_score)
-        return None
+        return match_epc_address(certificates, address, min_score=min_score)
 
     async def search_by_postcode(
         self, postcode: str, address: str | None = None
-    ) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    ) -> Optional[EPCData]:
         """Search for EPC by postcode, optionally matching address.
 
         Returns:
-            Tuple of (normalized_record, raw_response_json) or None.
+            EPCData model or None.
         """
         if not self.is_configured():
             return None
@@ -249,18 +139,13 @@ class EPCClient:
                     return None
 
                 if address:
-                    best_cert = None
-                    best_score = -1
-                    for cert in rows:
-                        cert_addr = cert.get("address", "")
-                        score = _match_score(cert_addr, address)
-                        if score > best_score:
-                            best_score = score
-                            best_cert = cert
-                    if best_cert and best_score >= 30:
-                        return (self._parse_certificate(best_cert), data)
+                    certs = [EPCData.from_api_row(row) for row in rows]
+                    result = match_epc_address(certs, address, min_score=30)
+                    if result:
+                        return result[0]  # return the EPCData
+                    return None  # BUG FIX: was falling through to rows[0]
 
-                return (self._parse_certificate(rows[0]), data)
+                return EPCData.from_api_row(rows[0])
 
             except (httpx.HTTPError, KeyError, ValueError):
                 return None

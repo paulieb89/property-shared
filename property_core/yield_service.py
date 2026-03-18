@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+from statistics import median as stat_median
 from typing import Optional
 
 from property_core.models.report import YieldAnalysis
 from property_core.ppd_service import PPDService
+from property_core.rental_service import to_monthly
 from property_core.rightmove_location import RightmoveLocationAPI
 from property_core.rightmove_scraper import fetch_listings
 
@@ -98,9 +100,9 @@ async def calculate_yield(
             data_quality="insufficient",
         )
 
-    # Calculate median rent
-    prices = sorted([l.price for l in active])
-    median_rent = prices[len(prices) // 2]
+    # Calculate median rent (normalize weekly → monthly)
+    prices = sorted([to_monthly(l) for l in active])
+    median_rent = int(stat_median(prices))
 
     # Calculate yield
     annual_rent = median_rent * 12

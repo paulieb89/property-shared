@@ -9,37 +9,35 @@ from __future__ import annotations
 
 import asyncio
 from statistics import median
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from property_core.epc_client import EPCClient
-from property_core.models.ppd import PPDCompsResponse
+from property_core.models.epc import EPCData
+from property_core.models.ppd import PPDCompsResponse, PPDTransaction
 
 # Conversion factor
 _SQM_TO_SQFT = 10.7639
 
 
-def _build_address(comp: Dict[str, Any]) -> str:
+def _build_address(comp: PPDTransaction) -> str:
     """Build a matchable address string from PPD transaction fields."""
     parts: list[str] = []
-    saon = comp.get("saon")
-    paon = comp.get("paon")
-    street = comp.get("street")
-    if saon:
-        parts.append(str(saon))
-    if paon:
-        parts.append(str(paon))
-    if street:
-        parts.append(str(street))
+    if comp.saon:
+        parts.append(str(comp.saon))
+    if comp.paon:
+        parts.append(str(comp.paon))
+    if comp.street:
+        parts.append(str(comp.street))
     return " ".join(parts)
 
 
 async def enrich_comps_with_epc(
-    comps: List[Dict[str, Any]],
+    comps: List[PPDTransaction],
     epc_client: Optional[EPCClient] = None,
     *,
     min_score: int = 30,
     max_concurrent: int = 5,
-) -> List[Dict[str, Any]]:
+) -> List[PPDTransaction]:
     """Enrich PPD comparables with EPC data (floor area, rating, age).
 
     Groups comps by postcode, fetches all EPC certs per unique postcode
@@ -51,13 +49,13 @@ async def enrich_comps_with_epc(
       - epc_match_score (fuzzy confidence 0-100)
 
     Args:
-        comps: List of PPD transaction dicts (must have postcode, paon, street, price).
+        comps: List of PPDTransaction objects.
         epc_client: Configured EPCClient instance. If None, creates one internally.
         min_score: Minimum fuzzy-match score to accept an EPC match.
         max_concurrent: Max concurrent EPC API calls (rate limiting).
 
     Returns:
-        Same list of dicts with EPC fields added (None if no match found).
+        Same list of PPDTransaction objects with EPC fields populated (None if no match found).
     """
     if epc_client is None:
         epc_client = EPCClient()
@@ -67,13 +65,13 @@ async def enrich_comps_with_epc(
     # Group comps by postcode
     postcode_groups: Dict[str, List[int]] = {}
     for idx, comp in enumerate(comps):
-        pc = comp.get("postcode", "")
+        pc = comp.postcode or ""
         if pc:
             postcode_groups.setdefault(pc, []).append(idx)
 
     # Fetch EPC certs per postcode with concurrency limit
     semaphore = asyncio.Semaphore(max_concurrent)
-    postcode_certs: Dict[str, List[Dict[str, Any]]] = {}
+    postcode_certs: Dict[str, List[EPCData]] = {}
 
     async def _fetch_postcode(postcode: str) -> None:
         async with semaphore:
@@ -99,28 +97,28 @@ async def enrich_comps_with_epc(
             result = epc_client.match_address(certs, address, min_score=min_score)
             if result:
                 match, match_score = result
-                floor_sqm = match.get("floor_area")
-                price = comp.get("price")
+                floor_sqm = match.floor_area
+                price = comp.price
 
-                comp["epc_match"] = match
-                comp["epc_match_score"] = match_score
-                comp["epc_floor_area_sqm"] = floor_sqm
-                comp["epc_floor_area_sqft"] = (
+                comp.epc_match = match.model_dump()
+                comp.epc_match_score = match_score
+                comp.epc_floor_area_sqm = floor_sqm
+                comp.epc_floor_area_sqft = (
                     round(floor_sqm * _SQM_TO_SQFT) if floor_sqm else None
                 )
-                comp["epc_rating"] = match.get("rating")
-                comp["epc_score"] = match.get("score")
-                comp["epc_construction_age"] = match.get("construction_age")
-                comp["epc_built_form"] = match.get("built_form")
+                comp.epc_rating = match.rating
+                comp.epc_score = match.score
+                comp.epc_construction_age = match.construction_age
+                comp.epc_built_form = match.built_form
 
                 if floor_sqm and price:
-                    comp["price_per_sqm"] = round(price / floor_sqm)
-                    comp["price_per_sqft"] = round(
+                    comp.price_per_sqm = round(price / floor_sqm)
+                    comp.price_per_sqft = round(
                         price / (floor_sqm * _SQM_TO_SQFT)
                     )
                 else:
-                    comp["price_per_sqm"] = None
-                    comp["price_per_sqft"] = None
+                    comp.price_per_sqm = None
+                    comp.price_per_sqft = None
 
     return comps
 
