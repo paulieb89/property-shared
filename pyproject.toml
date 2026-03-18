@@ -3,6 +3,7 @@ name = "property-shared"
 version = "1.0.0"
 description = "Pure-Python core library + FastAPI service for UK property data (PPD, EPC, Rightmove, Planning)."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
   "pydantic>=2.11.9",
