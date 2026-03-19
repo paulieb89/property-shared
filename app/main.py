@@ -22,7 +22,7 @@ def _setup_mcp() -> None:
     try:
         from mcp_server.server import mcp as mcp_server
 
-        _mcp_app = mcp_server.http_app(path="/")
+        _mcp_app = mcp_server.http_app(path="/mcp")
     except ImportError:
         pass
 
@@ -60,7 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(demo_router)
 
     if _mcp_app is not None:
-        app.mount("/mcp", _mcp_app)
+        app.mount("", _mcp_app)
 
     return app
 
