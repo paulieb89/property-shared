@@ -214,23 +214,17 @@ class PPDService:
             prefix = pc.split()[0] if " " in pc else pc
             exact_postcode = None
 
-        # 2. Fetch transactions via SPARQL
+        # 2. Fetch transactions via SPARQL (client handles post-fetch filtering)
         from_date = (date.today() - timedelta(days=months * 30)).isoformat()
-        fetch_limit = limit * 3 if property_type else limit
 
-        all_transactions = self.client.sparql_search(
+        transactions = self.client.sparql_search(
             postcode=exact_postcode,
             postcode_prefix=prefix,
             from_date=from_date,
-            limit=fetch_limit,
+            property_type=property_type,
+            limit=limit,
             order_desc=True,
         )
-
-        # 3. Client-side property_type filter (SPARQL filter causes 503)
-        if property_type:
-            pt = property_type.upper()
-            all_transactions = [t for t in all_transactions if t.property_type == pt]
-        transactions = all_transactions[:limit]
 
         # 4. Subject property matching
         subject_property = None

@@ -6,29 +6,31 @@ Run:  uv run property-mcp
 from __future__ import annotations
 
 from functools import partial
+from statistics import median as stat_median
 from typing import Optional
 
 import anyio
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
+from fastmcp.tools.tool import ToolResult
 
 mcp = FastMCP(
     "property-server",
     instructions=(
-        "UK property data tools. Use property_report for full deal analysis "
-        "(one call: comps + EPC + yield + market). Use property_comps for "
-        "granular comparable sales, property_yield for yield breakdown, "
-        "property_epc for energy certificates, stamp_duty for SDLT, "
-        "property_blocks for block-buy opportunities, company_search for "
-        "Companies House lookups."
+        "UK property data tools. Start with property_report for full deal analysis "
+        "(comps + EPC + yield + market in one call). Use property_comps for area "
+        "comparable sales with stats, ppd_transactions for specific property history "
+        "or filtered searches, rightmove_search to browse current listings for sale "
+        "or rent, rightmove_listing for full details on a specific property. "
+        "property_epc for energy certificates, property_yield or rental_analysis "
+        "for rental market and yield calculations, stamp_duty for SDLT, "
+        "property_blocks for block-buy opportunities, planning_search for council "
+        "planning portals, company_search for Companies House lookups."
     ),
-    host="0.0.0.0",
-    port=8080,
-    stateless_http=True,
 )
 
 
 # ---------------------------------------------------------------------------
-# Tools — each one calls property_core and returns model_dump()
+# Tools — each one calls property_core and returns ToolResult
 # ---------------------------------------------------------------------------
 
 
@@ -39,7 +41,7 @@ async def property_report(
     include_sales_market: bool = True,
     ppd_months: int = 24,
     search_radius: float = 0.5,
-) -> dict:
+) -> ToolResult:
     """Full deal analysis for a UK property in one call.
 
     Returns sale history, area comps, EPC rating with refurb potential,
@@ -61,7 +63,17 @@ async def property_report(
         ppd_months=ppd_months,
         search_radius=search_radius,
     )
-    return report.model_dump(mode="json", exclude_none=True)
+    data = report.model_dump(mode="json", exclude_none=True)
+
+    insights = report.key_insights or []
+    sources = [s.name for s in (report.sources or []) if s.available]
+    summary = f"Property report for {report.query_postcode}"
+    if insights:
+        summary += "\n" + "\n".join(insights[:5])
+    if sources:
+        summary += f"\nSources: {', '.join(sources)}"
+
+    return ToolResult(content=summary, structured_content=data)
 
 
 @mcp.tool()
@@ -73,7 +85,7 @@ async def property_comps(
     address: Optional[str] = None,
     property_type: Optional[str] = None,
     enrich_epc: bool = False,
-) -> dict:
+) -> ToolResult:
     """Comparable property sales from Land Registry Price Paid Data.
 
     Auto-escalates to wider search area if fewer than 5 results found.
@@ -112,7 +124,91 @@ async def property_comps(
             )
             result = compute_enriched_stats(result)
 
-    return result.model_dump(mode="json")
+    data = result.model_dump(mode="json")
+
+    summary = f"Found {result.count} comps for {postcode}"
+    if result.median:
+        summary += f", median \u00a3{result.median:,}"
+    if result.escalated_from:
+        summary += f" (expanded from {result.escalated_from} to {result.escalated_to})"
+    if enrich_epc and result.epc_match_rate is not None:
+        summary += f" (EPC matched {result.epc_match_rate}%)"
+
+    return ToolResult(content=summary, structured_content=data)
+
+
+@mcp.tool()
+async def ppd_transactions(
+    postcode: Optional[str] = None,
+    street: Optional[str] = None,
+    town: Optional[str] = None,
+    paon: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    min_price: Optional[int] = None,
+    max_price: Optional[int] = None,
+    property_type: Optional[str] = None,
+    limit: int = 25,
+) -> ToolResult:
+    """Search Land Registry transactions by postcode, address, date range, or price.
+
+    Use for specific property history ("what has 10 Downing Street sold for?")
+    or filtered market queries ("all sales over 500k in SW1 last year").
+
+    Args:
+        postcode: UK postcode (e.g. "SW1A 1AA") - required for postcode search
+        street: Street name for address-based search
+        town: Town name for address-based search
+        paon: Primary address (house name/number) for address-based search
+        from_date: Start date filter (ISO format, e.g. "2023-01-01")
+        to_date: End date filter (ISO format)
+        min_price: Minimum price filter in £
+        max_price: Maximum price filter in £
+        property_type: Filter by type: F=flat, D=detached, S=semi, T=terraced
+        limit: Max results to return (default 25)
+    """
+    from property_core import PPDService
+
+    svc = PPDService()
+
+    if street or paon:
+        result = await anyio.to_thread.run_sync(
+            partial(
+                svc.address_search,
+                paon=paon,
+                street=street,
+                town=town,
+                postcode=postcode,
+                limit=limit,
+            )
+        )
+    else:
+        result = await anyio.to_thread.run_sync(
+            partial(
+                svc.search_transactions,
+                postcode=postcode,
+                postcode_prefix=None,
+                from_date=from_date,
+                to_date=to_date,
+                min_price=min_price,
+                max_price=max_price,
+                property_type=property_type,
+                limit=limit,
+            )
+        )
+
+    # Serialize Pydantic models in results list
+    result["results"] = [t.model_dump(mode="json") for t in result["results"]]
+    if result.get("raw"):
+        del result["raw"]
+
+    count = result["count"]
+    location = postcode or street or "search"
+    summary = f"Found {count} transactions for {location}"
+    if result.get("warnings"):
+        summary += f" (warnings: {', '.join(result['warnings'])})"
+
+    return ToolResult(content=summary, structured_content=result)
 
 
 @mcp.tool()
@@ -121,10 +217,11 @@ async def property_yield(
     months: int = 24,
     search_level: str = "sector",
     radius: float = 0.5,
-) -> dict:
+) -> ToolResult:
     """Calculate rental yield for a UK postcode.
 
-    Combines Land Registry sales data with Rightmove rental listings.
+    Combines Land Registry sales data with Rightmove rental listings
+    to produce a gross yield figure with market assessment.
 
     Args:
         postcode: UK postcode (e.g. "NG11", "SW1A 1AA")
@@ -140,15 +237,58 @@ async def property_yield(
         search_level=search_level,
         radius=radius,
     )
-    return result.model_dump(mode="json")
+    data = result.model_dump(mode="json")
+
+    summary = f"Yield analysis for {postcode}"
+    if result.gross_yield_pct is not None:
+        summary += f": {result.gross_yield_pct:.1f}% gross yield"
+    if result.yield_assessment:
+        summary += f" ({result.yield_assessment})"
+    summary += f", data quality: {result.data_quality}"
+
+    return ToolResult(content=summary, structured_content=data)
+
+
+@mcp.tool()
+async def rental_analysis(
+    postcode: str,
+    radius: float = 0.5,
+    purchase_price: Optional[int] = None,
+) -> ToolResult:
+    """Rental market analysis for a UK postcode.
+
+    Returns median/average rent, listing count, and rent range.
+    Optionally calculates gross yield from a given purchase price.
+
+    Args:
+        postcode: UK postcode (e.g. "NG1 1AA")
+        radius: Search radius in miles (default 0.5)
+        purchase_price: Optional purchase price to calculate gross yield
+    """
+    from property_core.rental_service import analyze_rentals
+
+    result = await analyze_rentals(
+        postcode,
+        radius=radius,
+        purchase_price=purchase_price,
+    )
+    data = result.model_dump(mode="json")
+
+    summary = f"Rental analysis for {postcode}: {result.rental_listings_count} listings"
+    if result.median_rent_monthly:
+        summary += f", median \u00a3{result.median_rent_monthly:,.0f}/month"
+    if result.gross_yield_pct is not None:
+        summary += f", {result.gross_yield_pct:.1f}% gross yield"
+
+    return ToolResult(content=summary, structured_content=data)
 
 
 @mcp.tool()
 async def property_epc(
     postcode: str,
     address: Optional[str] = None,
-) -> dict:
-    """EPC certificate for a UK property — rating, score, floor area,
+) -> ToolResult:
+    """EPC certificate for a UK property — energy rating, score, floor area,
     construction age, heating costs, and improvement potential.
 
     Args:
@@ -159,13 +299,117 @@ async def property_epc(
 
     epc = EPCClient()
     if not epc.is_configured():
-        return {"error": "EPC service not configured (set EPC_API_EMAIL and EPC_API_KEY)"}
+        return ToolResult(content="EPC service not configured (set EPC_API_EMAIL and EPC_API_KEY)")
 
     result = await epc.search_by_postcode(postcode, address=address)
     if not result:
-        return {"error": f"No EPC found for {address or ''} {postcode}".strip()}
+        return ToolResult(content=f"No EPC found for {address or ''} {postcode}".strip())
 
-    return result.model_dump(mode="json", exclude_none=True)
+    data = result.model_dump(mode="json", exclude_none=True)
+
+    parts = [f"EPC for {address or postcode}"]
+    if result.rating:
+        parts.append(f"Rating: {result.rating} (score {result.score})")
+    if result.floor_area:
+        parts.append(f"Floor area: {result.floor_area} sqm")
+    if result.property_type:
+        parts.append(f"Type: {result.property_type}")
+    if result.construction_age:
+        parts.append(f"Built: {result.construction_age}")
+
+    return ToolResult(content=", ".join(parts), structured_content=data)
+
+
+@mcp.tool()
+async def rightmove_search(
+    postcode: str,
+    property_type: str = "sale",
+    min_price: Optional[int] = None,
+    max_price: Optional[int] = None,
+    min_bedrooms: Optional[int] = None,
+    max_bedrooms: Optional[int] = None,
+    radius: Optional[float] = None,
+    max_pages: int = 1,
+) -> ToolResult:
+    """Search Rightmove property listings for sale or rent near a postcode.
+
+    Returns prices, addresses, bedrooms, agent details, and listing URLs.
+
+    Args:
+        postcode: UK postcode (e.g. "NG1 1AA", "SW1A 2AA")
+        property_type: "sale" or "rent" (default "sale")
+        min_price: Minimum price/rent filter in £
+        max_price: Maximum price/rent filter in £
+        min_bedrooms: Minimum bedrooms filter
+        max_bedrooms: Maximum bedrooms filter
+        radius: Search radius in miles (default varies by area)
+        max_pages: Max pages to fetch (default 1, ~25 listings per page)
+    """
+    from property_core.rightmove_location import RightmoveLocationAPI
+    from property_core.rightmove_scraper import fetch_listings
+
+    url = await anyio.to_thread.run_sync(
+        partial(
+            RightmoveLocationAPI().build_search_url,
+            postcode,
+            property_type=property_type,
+            min_price=min_price,
+            max_price=max_price,
+            min_bedrooms=min_bedrooms,
+            max_bedrooms=max_bedrooms,
+            radius=radius,
+        )
+    )
+
+    listings = await anyio.to_thread.run_sync(
+        partial(fetch_listings, url, max_pages=max_pages)
+    )
+
+    data = {
+        "search_url": url,
+        "count": len(listings),
+        "listings": [listing.model_dump(mode="json") for listing in listings],
+    }
+
+    prices = [listing.price for listing in listings if listing.price and listing.price > 0]
+    summary = f"Found {len(listings)} {property_type} listings near {postcode}"
+    if prices:
+        median = int(stat_median(prices))
+        summary += f", median \u00a3{median:,}, range \u00a3{min(prices):,}-\u00a3{max(prices):,}"
+
+    return ToolResult(content=summary, structured_content=data)
+
+
+@mcp.tool()
+async def rightmove_listing(
+    property_id: str,
+) -> ToolResult:
+    """Full details for a Rightmove property listing.
+
+    Returns price, tenure, lease years remaining, service charge, ground rent,
+    council tax band, floor area, key features, nearest stations, and floorplan URLs.
+
+    Args:
+        property_id: Rightmove property URL or numeric ID (e.g. "12345678")
+    """
+    from property_core.rightmove_scraper import fetch_listing
+
+    result = await anyio.to_thread.run_sync(
+        partial(fetch_listing, property_id)
+    )
+    data = result.model_dump(mode="json")
+
+    summary = f"{result.address or 'Property'}"
+    if result.price:
+        summary += f" — \u00a3{result.price:,}"
+    if result.tenure:
+        summary += f" ({result.tenure})"
+    if result.bedrooms:
+        summary += f", {result.bedrooms} bed"
+    if result.floor_area_sqft:
+        summary += f", {result.floor_area_sqft} sqft"
+
+    return ToolResult(content=summary, structured_content=data)
 
 
 @mcp.tool()
@@ -173,7 +417,7 @@ async def property_blocks(
     postcode: str,
     months: int = 24,
     min_transactions: int = 2,
-) -> dict:
+) -> ToolResult:
     """Find buildings with multiple flat sales — block buying opportunities.
 
     Groups Land Registry transactions by building to identify blocks being
@@ -194,7 +438,14 @@ async def property_blocks(
             min_transactions=min_transactions,
         )
     )
-    return result.model_dump(mode="json")
+    data = result.model_dump(mode="json")
+
+    summary = f"Found {result.blocks_found} flat blocks for {postcode}"
+    if result.blocks:
+        top = result.blocks[0]
+        summary += f" (top: {top.building_name}, {top.transaction_count} sales)"
+
+    return ToolResult(content=summary, structured_content=data)
 
 
 @mcp.tool()
@@ -203,7 +454,7 @@ async def stamp_duty(
     additional_property: bool = True,
     first_time_buyer: bool = False,
     non_resident: bool = False,
-) -> dict:
+) -> ToolResult:
     """Calculate UK Stamp Duty Land Tax (SDLT) for a residential property.
 
     Args:
@@ -220,17 +471,53 @@ async def stamp_duty(
         first_time_buyer=first_time_buyer,
         non_resident=non_resident,
     )
-    return result.model_dump(mode="json")
+    data = result.model_dump(mode="json")
+
+    summary = f"SDLT for \u00a3{price:,}: \u00a3{result.total_sdlt:,.0f} ({result.effective_rate}% effective rate)"
+
+    return ToolResult(content=summary, structured_content=data)
+
+
+@mcp.tool()
+async def planning_search(
+    postcode: str,
+) -> ToolResult:
+    """Find the planning portal for a UK postcode.
+
+    Returns the local council, planning system type, and direct search URLs.
+    For Idox councils (most common), provides a clickable URL pre-filled with the postcode.
+
+    Args:
+        postcode: UK postcode (e.g. "S1 1AA", "SW1A 2AA")
+    """
+    from property_core.planning_service import PlanningService
+
+    result = await anyio.to_thread.run_sync(
+        partial(PlanningService().search, postcode)
+    )
+
+    if result.get("council_found"):
+        council = result.get("council", {})
+        name = council.get("name", "Unknown")
+        system = council.get("system", "unknown")
+        summary = f"{name} ({system} system)"
+        urls = result.get("search_urls", {})
+        if urls.get("direct_search"):
+            summary += f", direct search: {urls['direct_search']}"
+    else:
+        summary = f"No planning portal found for {postcode}"
+
+    return ToolResult(content=summary, structured_content=result)
 
 
 @mcp.tool()
 async def company_search(
     query: str,
-) -> dict:
+) -> ToolResult:
     """Search Companies House for a UK company by name or number.
 
-    If query looks like a company number (digits only), fetches directly.
-    Otherwise searches by name.
+    If query looks like a company number (e.g. "00445790", "SC123456"),
+    fetches directly. Otherwise searches by name.
 
     Args:
         query: Company name (e.g. "Tesco") or number (e.g. "00445790")
@@ -239,10 +526,18 @@ async def company_search(
 
     client = CompaniesHouseClient()
     if not client.is_configured():
-        return {"error": "Companies House not configured (set COMPANIES_HOUSE_API_KEY)"}
+        return ToolResult(content="Companies House not configured (set COMPANIES_HOUSE_API_KEY)")
 
     result = await anyio.to_thread.run_sync(partial(client.lookup, query))
-    return result.model_dump(mode="json")
+    data = result.model_dump(mode="json")
+
+    # CompanyRecord has company_name; CompanySearchResult has total_results
+    if hasattr(result, "company_name"):
+        summary = f"{result.company_name} ({result.company_status})"
+    else:
+        summary = f"Found {result.total_results} companies for '{query}'"
+
+    return ToolResult(content=summary, structured_content=data)
 
 
 # ---------------------------------------------------------------------------
@@ -254,9 +549,15 @@ def main():
     import os
 
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
-    if transport not in ("stdio", "sse", "streamable-http"):
+    if transport not in ("stdio", "sse", "http"):
         transport = "stdio"
-    mcp.run(transport=transport)
+
+    kwargs = {}
+    if transport in ("sse", "http"):
+        kwargs["host"] = os.environ.get("FASTMCP_HOST", "0.0.0.0")
+        kwargs["port"] = int(os.environ.get("FASTMCP_PORT", "8080"))
+
+    mcp.run(transport=transport, **kwargs)
 
 
 if __name__ == "__main__":

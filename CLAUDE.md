@@ -179,7 +179,7 @@ fly deploy
 
 **Data flow**: AI Host → MCP Server → property_core → Land Registry/Rightmove
 
-The server is a thin wrapper — each tool calls a property_core service and returns `model_dump()`. FastMCP auto-serializes dict returns as JSON `content` (for the model) and `structuredContent` (for programmatic access). No manual `CallToolResult` construction needed.
+The server is a thin wrapper using `fastmcp>=3.0.0` (standalone package from gofastmcp.com). Each tool calls a property_core service and returns `ToolResult(content=summary, structured_content=data)` — `content` is a concise text summary the LLM reads (saves tokens), `structured_content` is the full data dict for programmatic/UI consumers. 12 tools cover the full property_shared data surface.
 
 ### Tools
 
@@ -187,8 +187,13 @@ The server is a thin wrapper — each tool calls a property_core service and ret
 |------|-------------|
 | `property_report` | Full deal analysis in one call (comps + EPC + yield + market) |
 | `property_comps` | Comparable sales with auto-escalation, optional EPC enrichment |
+| `ppd_transactions` | Search Land Registry transactions by postcode, address, date, or price |
+| `rightmove_search` | Search Rightmove listings for sale or rent near a postcode |
+| `rightmove_listing` | Full details for a single Rightmove property |
 | `property_yield` | Calculate rental yield (sales + rentals) |
+| `rental_analysis` | Rental market stats with optional yield from a given purchase price |
 | `property_epc` | Direct EPC certificate lookup (rating, floor area, costs) |
+| `planning_search` | Find the planning portal and search URLs for a UK postcode |
 | `property_blocks` | Find flat blocks with multiple unit sales |
 | `stamp_duty` | Calculate SDLT for a purchase price |
 | `company_search` | Companies House lookup by name or number |

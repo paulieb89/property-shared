@@ -15,7 +15,8 @@ This module provides access to UK property transaction data via three methods:
 3. **SPARQL Search** - Filtered queries against the RDF dataset
    - Uses official Land Registry query patterns (VALUES, OPTIONAL blocks)
    - Returns full address details (paon, saon, street, town, county)
-   - Note: Property type filtering done client-side to avoid 503 errors
+   - URI-based filters (property_type, estate_type, etc.) applied client-side
+     to avoid 503 timeouts; only postcode/date/price sent to SPARQL
 
 Key endpoints:
 - S3: prod2.publicdata.landregistry.gov.uk
@@ -178,9 +179,16 @@ class PricePaidDataClient:
 
         Uses official Land Registry query patterns with VALUES clause for exact matches
         and OPTIONAL blocks for address fields.
+
+        URI-based filters (property_type, estate_type, transaction_category,
+        record_status, new_build) are applied client-side after fetch to avoid
+        503 timeouts from the Land Registry SPARQL endpoint. The query overfetches
+        by 3x when any of these filters are active to compensate.
         """
         values_clauses = []
         filters = []
+
+        # --- SPARQL-safe filters (postcode, date, price) ---
 
         # Use VALUES for exact postcode (more efficient than FILTER)
         if postcode:
@@ -206,28 +214,12 @@ class PricePaidDataClient:
             _validate_positive_int(max_price)
             filters.append(f"FILTER(?pricePaid <= {max_price})")
 
-        if property_type:
-            uri = self._resolve_uri(property_type, PROPERTY_TYPE_URIS)
-            if uri:
-                filters.append(f"FILTER(?propertyType = <{uri}>)")
-
-        if estate_type:
-            uri = self._resolve_uri(estate_type, ESTATE_TYPE_URIS)
-            if uri:
-                filters.append(f"FILTER(?estateType = <{uri}>)")
-
-        if transaction_category:
-            uri = self._resolve_uri(transaction_category, TRANSACTION_CATEGORY_URIS)
-            if uri:
-                filters.append(f"FILTER(?transactionCategory = <{uri}>)")
-
-        if record_status:
-            uri = self._resolve_uri(record_status, RECORD_STATUS_URIS)
-            if uri:
-                filters.append(f"FILTER(?recordStatus = <{uri}>)")
-
-        if new_build is not None:
-            filters.append(f"FILTER(?newBuild = {'true' if new_build else 'false'})")
+        # --- Client-side filters (URI-based — cause 503 in SPARQL) ---
+        has_client_filters = any([
+            property_type, estate_type, transaction_category,
+            record_status, new_build is not None,
+        ])
+        fetch_limit = limit * 3 if has_client_filters else limit
 
         order_clause = "ORDER BY DESC(?transactionDate)" if order_desc else "ORDER BY ?transactionDate"
 
@@ -265,11 +257,11 @@ class PricePaidDataClient:
                 "  OPTIONAL { ?addr lrcommon:locality ?locality }",
                 "  OPTIONAL { ?addr lrcommon:district ?district }",
                 "",
-                # Filters
+                # Only SPARQL-safe filters (postcode, date, price)
                 *filters,
                 "}",
                 order_clause,
-                f"LIMIT {limit}",
+                f"LIMIT {fetch_limit}",
                 f"OFFSET {offset}",
             ]
         )
@@ -277,7 +269,25 @@ class PricePaidDataClient:
         encoded = urllib.parse.urlencode({"query": query}).encode()
         raw = self._fetch_sparql(encoded)
         bindings = raw.get("results", {}).get("bindings", [])
-        return [PPDTransaction.from_sparql_binding(b) for b in bindings]
+        results = [PPDTransaction.from_sparql_binding(b) for b in bindings]
+
+        # Apply client-side filters (URI-based fields that cause 503 in SPARQL)
+        if property_type:
+            pt = property_type.upper()
+            results = [t for t in results if t.property_type == pt]
+        if estate_type:
+            et = estate_type.upper()
+            results = [t for t in results if t.estate_type == et]
+        if transaction_category:
+            tc = transaction_category.upper()
+            results = [t for t in results if t.transaction_category == tc]
+        if record_status:
+            rs = record_status.upper()
+            results = [t for t in results if t.record_status == rs]
+        if new_build is not None:
+            results = [t for t in results if t.new_build == new_build]
+
+        return results[:limit]
 
     # --------
     # Address-form search (web-form style)
