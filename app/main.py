@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
+from starlette.types import ASGIApp, Receive, Scope, Send
 import uvicorn
 
 from app.api.routes import api_router
@@ -12,6 +13,10 @@ from app.web.routes import router as demo_router
 
 # ---------------------------------------------------------------------------
 # MCP integration (optional — requires mcp extra, uses FastMCP v3)
+#
+# Can't use app.mount("/mcp") — Starlette always 307-redirects /mcp → /mcp/
+# and neither Claude.ai nor ChatGPT follow 307 for POST requests.
+# Middleware routes /mcp directly without redirect.
 # ---------------------------------------------------------------------------
 _mcp_app: Any = None
 
@@ -22,9 +27,24 @@ def _setup_mcp() -> None:
     try:
         from mcp_server.server import mcp as mcp_server
 
-        _mcp_app = mcp_server.http_app(path="/")
+        _mcp_app = mcp_server.http_app(path="/mcp")
     except ImportError:
         pass
+
+
+class MCPMiddleware:
+    """Route /mcp requests to the MCP app without Starlette mount redirect."""
+
+    def __init__(self, app: ASGIApp, mcp_handler: Any) -> None:
+        self.app = app
+        self.mcp_handler = mcp_handler
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        path = scope.get("path", "")
+        if scope["type"] == "http" and (path == "/mcp" or path.startswith("/mcp/")):
+            await self.mcp_handler(scope, receive, send)
+        else:
+            await self.app(scope, receive, send)
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +80,7 @@ def create_app() -> FastAPI:
     app.include_router(demo_router)
 
     if _mcp_app is not None:
-        app.mount("/mcp", _mcp_app)
+        app.add_middleware(MCPMiddleware, mcp_handler=_mcp_app)
 
     return app
 
