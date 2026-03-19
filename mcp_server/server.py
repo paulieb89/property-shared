@@ -5,13 +5,29 @@ Run:  uv run property-mcp
 
 from __future__ import annotations
 
+import json
 from functools import partial
 from statistics import median as stat_median
-from typing import Optional
+from typing import Any, Optional
 
 import anyio
 from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
+
+
+def _slim(obj: Any) -> Any:
+    """Strip raw/images/floorplans for LLM-friendly content."""
+    if isinstance(obj, dict):
+        return {k: _slim(v) for k, v in obj.items()
+                if k not in ("raw", "images", "floorplans")}
+    if isinstance(obj, list):
+        return [_slim(item) for item in obj]
+    return obj
+
+
+def _content(summary: str, data: dict) -> str:
+    """Build content string: summary + slimmed JSON data for LLM hosts."""
+    return summary + "\n\n" + json.dumps(_slim(data), indent=2, default=str)
 
 mcp = FastMCP(
     "property-server",
@@ -73,7 +89,7 @@ async def property_report(
     if sources:
         summary += f"\nSources: {', '.join(sources)}"
 
-    return ToolResult(content=summary, structured_content=data)
+    return ToolResult(content=_content(summary, data), structured_content=data)
 
 
 @mcp.tool()
@@ -134,7 +150,7 @@ async def property_comps(
     if enrich_epc and result.epc_match_rate is not None:
         summary += f" (EPC matched {result.epc_match_rate}%)"
 
-    return ToolResult(content=summary, structured_content=data)
+    return ToolResult(content=_content(summary, data), structured_content=data)
 
 
 @mcp.tool()
@@ -208,7 +224,7 @@ async def ppd_transactions(
     if result.get("warnings"):
         summary += f" (warnings: {', '.join(result['warnings'])})"
 
-    return ToolResult(content=summary, structured_content=result)
+    return ToolResult(content=_content(summary, result), structured_content=result)
 
 
 @mcp.tool()
@@ -246,7 +262,7 @@ async def property_yield(
         summary += f" ({result.yield_assessment})"
     summary += f", data quality: {result.data_quality}"
 
-    return ToolResult(content=summary, structured_content=data)
+    return ToolResult(content=_content(summary, data), structured_content=data)
 
 
 @mcp.tool()
@@ -280,7 +296,7 @@ async def rental_analysis(
     if result.gross_yield_pct is not None:
         summary += f", {result.gross_yield_pct:.1f}% gross yield"
 
-    return ToolResult(content=summary, structured_content=data)
+    return ToolResult(content=_content(summary, data), structured_content=data)
 
 
 @mcp.tool()
@@ -317,7 +333,7 @@ async def property_epc(
     if result.construction_age:
         parts.append(f"Built: {result.construction_age}")
 
-    return ToolResult(content=", ".join(parts), structured_content=data)
+    return ToolResult(content=_content(", ".join(parts), data), structured_content=data)
 
 
 @mcp.tool()
@@ -377,7 +393,7 @@ async def rightmove_search(
         median = int(stat_median(prices))
         summary += f", median \u00a3{median:,}, range \u00a3{min(prices):,}-\u00a3{max(prices):,}"
 
-    return ToolResult(content=summary, structured_content=data)
+    return ToolResult(content=_content(summary, data), structured_content=data)
 
 
 @mcp.tool()
@@ -409,7 +425,7 @@ async def rightmove_listing(
     if result.display_size:
         summary += f", {result.display_size}"
 
-    return ToolResult(content=summary, structured_content=data)
+    return ToolResult(content=_content(summary, data), structured_content=data)
 
 
 @mcp.tool()
@@ -445,7 +461,7 @@ async def property_blocks(
         top = result.blocks[0]
         summary += f" (top: {top.building_name}, {top.transaction_count} sales)"
 
-    return ToolResult(content=summary, structured_content=data)
+    return ToolResult(content=_content(summary, data), structured_content=data)
 
 
 @mcp.tool()
@@ -475,7 +491,7 @@ async def stamp_duty(
 
     summary = f"SDLT for \u00a3{price:,}: \u00a3{result.total_sdlt:,.0f} ({result.effective_rate}% effective rate)"
 
-    return ToolResult(content=summary, structured_content=data)
+    return ToolResult(content=_content(summary, data), structured_content=data)
 
 
 @mcp.tool()
@@ -507,7 +523,7 @@ async def planning_search(
     else:
         summary = f"No planning portal found for {postcode}"
 
-    return ToolResult(content=summary, structured_content=result)
+    return ToolResult(content=_content(summary, result), structured_content=result)
 
 
 @mcp.tool()
@@ -537,7 +553,7 @@ async def company_search(
     else:
         summary = f"Found {result.total_results} companies for '{query}'"
 
-    return ToolResult(content=summary, structured_content=data)
+    return ToolResult(content=_content(summary, data), structured_content=data)
 
 
 # ---------------------------------------------------------------------------
