@@ -402,8 +402,8 @@ async def rightmove_listing(
     summary = f"{result.address or 'Property'}"
     if result.price:
         summary += f" — \u00a3{result.price:,}"
-    if result.tenure:
-        summary += f" ({result.tenure})"
+    if result.tenure_type:
+        summary += f" ({result.tenure_type})"
     if result.bedrooms:
         summary += f", {result.bedrooms} bed"
     if result.floor_area_sqft:
