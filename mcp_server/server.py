@@ -406,8 +406,8 @@ async def rightmove_listing(
         summary += f" ({result.tenure_type})"
     if result.bedrooms:
         summary += f", {result.bedrooms} bed"
-    if result.floor_area_sqft:
-        summary += f", {result.floor_area_sqft} sqft"
+    if result.display_size:
+        summary += f", {result.display_size}"
 
     return ToolResult(content=summary, structured_content=data)
 
