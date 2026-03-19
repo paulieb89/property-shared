@@ -12,20 +12,18 @@ from app.web.routes import router as demo_router
 
 
 # ---------------------------------------------------------------------------
-# MCP integration (optional — requires mcp extra)
+# MCP integration (optional — requires mcp extra, uses FastMCP v3)
 # ---------------------------------------------------------------------------
-_mcp_session_manager = None
 _mcp_asgi_handler: Any = None
 
 
 def _setup_mcp() -> None:
-    """Prepare MCP Streamable HTTP ASGI handler (optional)."""
-    global _mcp_session_manager, _mcp_asgi_handler
+    """Prepare MCP HTTP ASGI handler (optional)."""
+    global _mcp_asgi_handler
     try:
         from mcp_server.server import mcp as mcp_server
 
-        _mcp_asgi_handler = mcp_server.streamable_http_app()
-        _mcp_session_manager = mcp_server._session_manager
+        _mcp_asgi_handler = mcp_server.http_app()
     except ImportError:
         pass
 
@@ -39,7 +37,6 @@ class MCPMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http" and scope.get("path") == "/mcp":
-            # Rewrite path so the MCP Starlette app sees "/" on its root route
             scope = dict(scope, path="/mcp", root_path="")
             await self.mcp_handler(scope, receive, send)
         else:
@@ -54,12 +51,7 @@ class MCPMiddleware:
 async def lifespan(app: FastAPI):
     _ = get_settings()
     configure_logging()
-
-    if _mcp_session_manager is not None:
-        async with _mcp_session_manager.run():
-            yield
-    else:
-        yield
+    yield
 
 
 def create_app() -> FastAPI:
