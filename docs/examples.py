@@ -8,6 +8,9 @@ Run any section:
     uv run python docs/examples.py yield               # just yield analysis
     uv run python docs/examples.py postcode            # just postcode lookup
     uv run python docs/examples.py planning            # just planning council
+    uv run python docs/examples.py stamp-duty          # just stamp duty
+    uv run python docs/examples.py blocks              # just block analyzer
+    uv run python docs/examples.py companies           # just companies house
     uv run python docs/examples.py api                 # HTTP API (curl examples)
 
 Real output from NG1 1GF (Nottingham city centre), captured 2026-03-18.
@@ -443,7 +446,119 @@ def example_address_parsing():
 
 
 # ---------------------------------------------------------------------------
-# 12. HTTP API Examples (curl)
+# 12. Stamp Duty Calculator
+# ---------------------------------------------------------------------------
+def example_stamp_duty():
+    """
+    Calculate UK Stamp Duty Land Tax (April 2025 bands).
+
+    >>> from property_core import calculate_stamp_duty
+    >>> r = calculate_stamp_duty(price=300000, additional_property=True)
+    >>> r.total_sdlt
+    19500.0
+    >>> r.effective_rate
+    6.5
+
+    Real output:
+        Price: £300,000
+        Total SDLT: £19,500
+        Effective rate: 6.50%
+        Surcharges: 5.0%
+        Breakdown:
+          £0 - £125,000 @ 5.0% = £6,250
+          £125,000 - £250,000 @ 7.0% = £8,750
+          £250,000 - £300,000 @ 10.0% = £4,500 (remaining)
+    """
+    from property_core import calculate_stamp_duty
+
+    r = calculate_stamp_duty(price=300000, additional_property=True)
+    print("=== Stamp Duty Calculator ===")
+    print(f"Price: £{r.price:,}")
+    print(f"Total SDLT: £{r.total_sdlt:,.0f}")
+    print(f"Effective rate: {r.effective_rate:.2f}%")
+    print(f"Surcharges: {r.surcharges_applied}%")
+    print(f"Additional property: {r.additional_property}")
+    print(f"First-time buyer: {r.first_time_buyer}")
+    print("Breakdown:")
+    for b in r.breakdown:
+        print(f"  {b.rate}% on £{b.amount:,.0f} = £{b.tax:,.0f}")
+
+
+# ---------------------------------------------------------------------------
+# 13. Block Analyzer
+# ---------------------------------------------------------------------------
+def example_block_analyzer():
+    """
+    Find flat buildings with multiple sales (investor exits, bulk-buy opportunities).
+
+    >>> from property_core import analyze_blocks
+    >>> result = analyze_blocks(postcode="B1 1AA", months=24, min_transactions=2)
+    >>> result.blocks_found
+    5
+
+    Real output (varies):
+        Postcode: B1 1AA (sector, 24 months)
+        Blocks found: 5
+        ESSEX STREET, B5 4TR: 3 sales, £100,000-£155,000
+        GRANVILLE STREET, B1 2LJ: 2 sales, £90,000-£120,000
+    """
+    from property_core import analyze_blocks
+
+    result = analyze_blocks(postcode="B1 1AA", months=24, min_transactions=2)
+    print("=== Block Analyzer ===")
+    print(f"Postcode: {result.postcode} ({result.search_level}, {result.months} months)")
+    print(f"Blocks found: {result.blocks_found}")
+    for b in result.blocks[:5]:
+        name = b.building_name or ""
+        street = b.street or ""
+        label = f"{name} {street}".strip()
+        prices = ""
+        if b.min_price and b.max_price:
+            prices = f", £{b.min_price:,}-£{b.max_price:,}"
+        print(f"  {label}: {b.transaction_count} sales{prices}")
+
+
+# ---------------------------------------------------------------------------
+# 14. Companies House
+# ---------------------------------------------------------------------------
+def example_companies_house():
+    """
+    Search Companies House (requires COMPANIES_HOUSE_API_KEY).
+
+    >>> from property_core import CompaniesHouseClient
+    >>> ch = CompaniesHouseClient()
+    >>> result = ch.search("Tesco", items_per_page=3)
+    >>> len(result.companies) > 0
+    True
+    >>> result.companies[0].company_name
+    'TESCO PLC'
+
+    Real output:
+        3 results for "Tesco"
+        00445790: TESCO PLC (active) — TESCO HOUSE SHIRE PARK KESTREL WAY, WELWYN GARDEN CITY
+        SC634498: TESCO UNDERWRITING LIMITED (active)
+        07720508: BOOKER TESCO HOLDINGS LIMITED (active)
+    """
+    from property_core import CompaniesHouseClient
+
+    ch = CompaniesHouseClient()
+    if not ch.is_configured():
+        print("=== Companies House ===")
+        print("  SKIPPED: COMPANIES_HOUSE_API_KEY not set")
+        return
+
+    result = ch.search("Tesco", items_per_page=3)
+    print(f'=== Companies House ({len(result.companies)} results for "Tesco") ===')
+    for c in result.companies:
+        status = c.company_status or "unknown"
+        addr = c.registered_office_address or ""
+        print(f"  {c.company_number}: {c.company_name} ({status})")
+        if addr:
+            print(f"    {addr}")
+
+
+# ---------------------------------------------------------------------------
+# 15. HTTP API Examples (curl)
 # ---------------------------------------------------------------------------
 def example_api():
     """
@@ -533,6 +648,9 @@ EXAMPLES = {
     "postcode": [example_postcode],
     "planning": [example_planning],
     "address": [example_address_parsing],
+    "stamp-duty": [example_stamp_duty],
+    "blocks": [example_block_analyzer],
+    "companies": [example_companies_house],
     "api": [example_api],
 }
 
@@ -548,6 +666,9 @@ ALL_EXAMPLES = [
     example_rental_analysis,
     example_yield_analysis,
     example_planning,
+    example_stamp_duty,
+    example_block_analyzer,
+    example_companies_house,
     example_api,
 ]
 

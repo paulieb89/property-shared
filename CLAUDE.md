@@ -15,12 +15,6 @@ Property Shared is a FastAPI service + pure-Python core library for UK property 
 
 ## Commands
 
-# Start .venv
-
-``bash
-act 
-```
-
 ```bash
 # Install dependencies (with dev extras)
 uv sync --extra dev
@@ -124,7 +118,7 @@ Copy `.env.example` to `.env`. Key variables:
 
 ## Using as a Library
 
-Install in another project: `pip install /path/to/property_shared` or add to dependencies.
+Install from PyPI: `pip install property-shared`
 
 ```python
 # Domain services (typed models, no FastAPI needed)
@@ -179,7 +173,7 @@ fly deploy
 
 **Data flow**: AI Host → MCP Server → property_core → Land Registry/Rightmove
 
-The server is a thin wrapper using `fastmcp>=3.0.0` (standalone package from gofastmcp.com). Each tool calls a property_core service and returns `ToolResult(content=summary, structured_content=data)` — `content` is a concise text summary the LLM reads (saves tokens), `structured_content` is the full data dict for programmatic/UI consumers. 12 tools cover the full property_shared data surface.
+The server is a thin wrapper using `fastmcp>=3.0.0` (standalone package from gofastmcp.com). Each tool calls a property_core service and returns `ToolResult(content=..., structured_content=data)`. `content` includes a summary line plus slimmed JSON data (raw/images stripped) so all LLM hosts (including Claude.ai, which only reads `content[]`) get the full data. `structured_content` carries the complete data dict for programmatic/UI consumers (Claude Code, MCP Apps). 12 tools cover the full property_shared data surface.
 
 ### Tools
 
@@ -244,8 +238,9 @@ if (!caps?.updateModelContext) return;
 
 ### Tool Result Contract
 
-- **UI renders from `structuredContent` only** — never parse `content[]`
-- **`content[]` is fallback** — model summary for non-UI hosts
+- **`content[]` carries summary + JSON data** — all LLM hosts see the full data (Claude.ai only reads `content[]`, not `structuredContent`)
+- **`structuredContent` carries full data dict** — for MCP Apps, Claude Code, and programmatic consumers
+- **`_slim()` strips `raw`, `images`, `floorplans`** from content JSON to keep it manageable
 - **Include `data_quality` field** where meaningful (good/low/insufficient)
 - **Include source counts** (`sale_count`, `rental_count`) for transparency
 

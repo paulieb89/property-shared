@@ -82,6 +82,37 @@ property-cli rightmove listing "https://www.rightmove.co.uk/properties/161151632
 
 **Listing detail** (individual property page) includes: `tenure_type`, `years_remaining_on_lease`, `annual_service_charge`, `annual_ground_rent`, `ground_rent_review_period_years`, `council_tax_band`, `postcode`, `latitude`/`longitude`, `floorplans`, `key_features`, `description`, `price_per_sqft`, `nearest_stations`.
 
+### Stamp Duty (SDLT Calculator)
+
+```bash
+# Calculate stamp duty (defaults: additional property surcharge ON)
+property-cli calc stamp-duty 300000
+property-cli calc stamp-duty 500000 --no-additional              # primary residence
+property-cli calc stamp-duty 250000 --ftb                        # first-time buyer relief
+property-cli calc stamp-duty 400000 --non-resident               # non-UK resident surcharge (+2%)
+property-cli calc stamp-duty 300000 --ftb --no-additional        # FTB, primary residence
+```
+
+### Block Analyzer (Flat Buildings)
+
+```bash
+# Find buildings with multiple flat sales (investor exits, bulk-buy opportunities)
+property-cli ppd blocks "B1 1AA"
+property-cli ppd blocks "B1 1AA" --months 36 --min 3 --search-level district
+```
+
+### Companies House
+
+Requires `COMPANIES_HOUSE_API_KEY` in `.env` (free from https://developer.company-information.service.gov.uk/).
+
+```bash
+# Search by company name
+property-cli companies search "Tesco"
+
+# Search also works with company numbers
+property-cli companies search "00445790"
+```
+
 ### Planning (UK Council Portals)
 
 **Note:** Planning scraper only works from UK residential IPs. Councils block datacenter IPs.
@@ -192,6 +223,16 @@ Listing detail results include `raw` with the full `PAGE_MODEL.propertyData` dic
 - `POST /v1/planning/probe` — Connectivity diagnostics
 - `POST /v1/planning/scrape` — Scrape planning application detail page
 
+### Stamp Duty
+- `GET /v1/calculators/stamp-duty?price=300000&additional_property=true&first_time_buyer=false&non_resident=false`
+
+### Block Analyzer
+- `GET /v1/ppd/blocks?postcode=B1%201AA&months=24&min_transactions=2&search_level=sector`
+
+### Companies House
+- `GET /v1/companies/search?q=Tesco&limit=5` — Search by company name
+- `GET /v1/companies/{company_number}` — Fetch company by number (includes officers)
+
 ### Property Report
 - `POST /v1/property/report` — Generate comprehensive property report (PPD + EPC + Rightmove)
   - Returns JSON by default, or HTML with `?format=html`
@@ -222,8 +263,9 @@ pip install -e /path/to/property_shared
 ### Core Imports (no HTTP)
 ```python
 from property_core import (
-    PricePaidDataClient, EPCClient, RightmoveLocationAPI, fetch_listings, PostcodeClient,
-    analyze_rentals, compute_enriched_stats, enrich_comps_with_epc
+    PricePaidDataClient, PPDService, EPCClient, RightmoveLocationAPI, fetch_listings, PostcodeClient,
+    analyze_rentals, compute_enriched_stats, enrich_comps_with_epc, calculate_stamp_duty,
+    analyze_blocks, CompaniesHouseClient
 )
 from property_core.rightmove_scraper import fetch_listing
 
@@ -310,8 +352,6 @@ results = search_planning_by_postcode(
 ### Domain Services (typed models, guardrails)
 ```python
 from property_core import PPDService, PlanningService, PropertyReportService
-from app.services.epc_service import EPCService
-from app.services.rightmove_service import RightmoveService
 
 # PPD with subject property context and area stats
 service = PPDService()
@@ -321,15 +361,18 @@ print(result.percentile_25, result.percentile_75)  # Area price quartiles
 print(result.subject_vs_median_pct)      # e.g., +10.8 means 10.8% above median
 
 # PPD transactions (returns dict with typed transaction list)
-result = service.search_transactions(postcode="SW1A 1AA", limit=5, include_raw=True)
-print(result["results"][0]["locality"])   # "LONDON"
-print(result["results"][0]["district"])   # "CITY OF WESTMINSTER"
-print(result["raw"])                      # Full SPARQL bindings list
+result = service.search_transactions(postcode="SW1A 1AA", postcode_prefix=None, limit=5, include_raw=True)
+print(result["results"][0].locality)     # "LONDON"
+print(result["results"][0].district)     # "CITY OF WESTMINSTER"
 
 # PPD comps with EPC enrichment (floor area, price/sqft)
-from property_core import enrich_comps_with_epc
+import asyncio
+from property_core import enrich_comps_with_epc, EPCClient, compute_enriched_stats
 result = service.comps(postcode="B1 1BB", months=24, search_level="sector")
-enriched = enrich_comps_with_epc(result)  # adds epc_floor_area_sqm, price_per_sqft, etc.
+epc_client = EPCClient()  # requires EPC_API_EMAIL/EPC_API_KEY in env
+enriched = asyncio.run(enrich_comps_with_epc(result.transactions, epc_client))
+# enriched transactions now have epc_floor_area_sqm, price_per_sqft, epc_rating, etc.
+stats = compute_enriched_stats(enriched)  # median_price_per_sqft, epc_match_rate
 
 # Planning - find council for postcode
 planning = PlanningService()
@@ -337,12 +380,80 @@ info = planning.council_for_postcode("SW1A 2AA")
 print(info["council"]["name"], info["council"]["system"])
 
 # Property report (async)
-import asyncio
-from property_core import PropertyReportService
 report_service = PropertyReportService()
-report = asyncio.run(report_service.generate("10 Downing Street, SW1A 2AA"))
+report = asyncio.run(report_service.generate_report("10 Downing Street, SW1A 2AA"))
 print(report.estimated_value_low, report.estimated_value_high)
+
+# Stamp Duty (SDLT calculator — April 2025 bands)
+from property_core import calculate_stamp_duty
+result = calculate_stamp_duty(price=300000, additional_property=True, first_time_buyer=False)
+print(f"Tax: £{result.tax:,}, Effective rate: {result.effective_rate}%")
+print(f"Bands: {result.bands}")
+
+# Block Analyzer (find investor exits / bulk-buy opportunities)
+from property_core import analyze_blocks
+blocks = analyze_blocks(postcode="B1 1AA", months=24, min_transactions=3)
+for b in blocks.blocks:
+    print(f"{b.building} {b.street}: {b.transaction_count} sales, £{b.min_price:,}-£{b.max_price:,}")
+
+# Companies House (requires COMPANIES_HOUSE_API_KEY in env)
+from property_core import CompaniesHouseClient
+ch = CompaniesHouseClient()
+search_result = ch.search("Tesco", items_per_page=5)
+for c in search_result.companies:
+    print(f"{c.company_number}: {c.company_name}")
+company = ch.get_company("00445790")  # fetch by number, includes officers
 ```
+
+## MCP Server (AI Host Integration)
+
+The MCP server exposes all property_core tools to AI hosts like Claude, ChatGPT, and Claude Code.
+
+### Running locally
+```bash
+cd mcp_server && uv run property-mcp
+```
+
+### Connecting from Claude Code
+Add to your `.mcp.json`:
+```json
+{
+  "mcpServers": {
+    "property": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/property_shared/mcp_server", "property-mcp"]
+    }
+  }
+}
+```
+
+### Connecting via SSE (remote / Fly.io)
+```json
+{
+  "mcpServers": {
+    "property": {
+      "type": "sse",
+      "url": "https://your-app.fly.dev/sse"
+    }
+  }
+}
+```
+
+### Available MCP Tools
+| Tool | Description |
+|------|-------------|
+| `property_report` | Full deal analysis (comps + EPC + yield + market) |
+| `property_comps` | Comparable sales with stats, optional EPC enrichment |
+| `ppd_transactions` | Search Land Registry by postcode, address, date, price |
+| `rightmove_search` | Search Rightmove listings (sale or rent) |
+| `rightmove_listing` | Full details for a single property |
+| `property_yield` | Rental yield calculation (sales + rentals) |
+| `rental_analysis` | Rental market stats with optional yield |
+| `property_epc` | EPC certificate lookup |
+| `planning_search` | Find planning portal URLs for a postcode |
+| `property_blocks` | Find flat blocks with multiple unit sales |
+| `stamp_duty` | SDLT calculator |
+| `company_search` | Companies House lookup |
 
 ## Notes
 
@@ -350,5 +461,4 @@ print(report.estimated_value_low, report.estimated_value_high)
 - **Planning scraper** requires UK residential IP — councils block all datacenter IPs. Set `PLAYWRIGHT_PROXY_URL` for proxy support.
 - **Planning search-results** endpoint takes 30-60 seconds (browser automation + vision extraction).
 - **Rightmove scraping** is polite by default (0.6s delay); respect rate limits.
-- **UKHPI endpoints** are not implemented yet.
-- **Location slice** was removed; projects can supply their own location intelligence.
+- **API reference**: Full interactive API docs available at `http://localhost:8000/docs` (Swagger) and `http://localhost:8000/redoc` (ReDoc) when the server is running.
