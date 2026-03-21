@@ -13,7 +13,6 @@ from app.schemas.ppd import (
     PPDTransactionRecordResponse,
 )
 from property_core.block_service import analyze_blocks
-from property_core.enrichment import compute_enriched_stats, enrich_comps_with_epc
 from property_core.models.block import BlockAnalysisResponse
 from property_core.ppd_service import PPDService
 
@@ -157,9 +156,14 @@ async def comps(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"PPD comps failed: {exc}") from exc
 
-    if enrich_epc:
-        await enrich_comps_with_epc(result.transactions)
-        compute_enriched_stats(result)
+    if enrich_epc and result.transactions:
+        from property_core.epc_client import EPCClient
+        from property_core.enrichment import compute_enriched_stats, enrich_comps_with_epc
+
+        epc = EPCClient()
+        if epc.is_configured():
+            await enrich_comps_with_epc(result.transactions, epc)
+            compute_enriched_stats(result)
 
     return result
 

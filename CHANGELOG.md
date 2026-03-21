@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.1.2 (2026-03-20)
+
+### Documentation
+- Updated USER_GUIDE.md with accurate code examples — fixed broken method names, signatures, and imports
+- Added Stamp Duty, Block Analyzer, Companies House, and MCP Server documentation sections
+- Added runnable examples in docs/examples.py for all new features
+- Removed stale UKHPI/location slice notes
+
+## v1.1.1 (2026-03-19)
+
+### MCP Server
+- Rewrote MCP server with FastMCP v3 (`fastmcp>=3.0.0`) — expanded from 7 investor-focused tools to 12 covering full property_shared data surface
+- New tools: `ppd_transactions`, `rightmove_search`, `rightmove_listing`, `planning_search`, `rental_analysis`
+- Fixed ToolResult content for Claude.ai compatibility — `_slim()` + `_content()` helpers put full JSON data in `content[]` so all LLM hosts see the data, not just summary lines
+
+### Bug Fixes
+- Fixed Rightmove listing field mapping: `floor_area_sqft` → `display_size`, `tenure` → `tenure_type`
+- Moved URI-based SPARQL filters (property_type, estate_type, etc.) to client-side post-fetch in ppd_client.py — fixes 503 timeouts from Land Registry endpoint
+
 ## v1.1.0 (2026-03-18)
 
 ### New Features
