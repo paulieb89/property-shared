@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+@GUIDELINES.md
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
@@ -145,119 +147,5 @@ from property_core.planning_scraper import scrape_planning_application, search_p
 
 ## MCP Server
 
-The MCP server (`mcp_server/`) exposes property_core tools to AI hosts like ChatGPT and Claude. It's a thin wrapper—all business logic lives in property_core.
-
-```
-mcp_server/
-├── server.py               # FastMCP server (wraps property_core services)
-├── mcp-app/                # Svelte UI for interactive tool results
-│   └── src/App.svelte      # Main component with BOUCH design system
-├── ui/                     # Built HTML served as MCP resources
-│   └── property_dashboard.html
-├── MCP_APPS_REFERENCE.md   # SDK patterns documentation
-└── GOLD.md                 # Production readiness checklist
-```
-
-### Commands
-
-```bash
-# Run MCP server locally
-cd mcp_server && uv run property-mcp
-
-# Build the MCP App UI
-cd mcp_server/mcp-app && npm run build
-# Output goes to mcp_server/ui/property_dashboard.html
-
-# Deploy to Fly.io
-fly deploy
-```
-
-### Architecture
-
-**Data flow**: AI Host → MCP Server → property_core → Land Registry/Rightmove
-
-The server is a thin wrapper using `fastmcp>=3.0.0` (standalone package from gofastmcp.com). Each tool calls a property_core service and returns `ToolResult(content=..., structured_content=data)`. `content` includes a summary line plus slimmed JSON data (raw/images stripped) so all LLM hosts (including Claude.ai, which only reads `content[]`) get the full data. `structured_content` carries the complete data dict for programmatic/UI consumers (Claude Code, MCP Apps). 12 tools cover the full property_shared data surface.
-
-### Tools
-
-| Tool | Description |
-|------|-------------|
-| `property_report` | Full deal analysis in one call (comps + EPC + yield + market) |
-| `property_comps` | Comparable sales with auto-escalation, optional EPC enrichment |
-| `ppd_transactions` | Search Land Registry transactions by postcode, address, date, or price |
-| `rightmove_search` | Search Rightmove listings for sale or rent near a postcode |
-| `rightmove_listing` | Full details for a single Rightmove property |
-| `property_yield` | Calculate rental yield (sales + rentals) |
-| `rental_analysis` | Rental market stats with optional yield from a given purchase price |
-| `property_epc` | Direct EPC certificate lookup (rating, floor area, costs) |
-| `planning_search` | Find the planning portal and search URLs for a UK postcode |
-| `property_blocks` | Find flat blocks with multiple unit sales |
-| `stamp_duty` | Calculate SDLT for a purchase price |
-| `company_search` | Companies House lookup by name or number |
-
-### Host Quirks (ChatGPT)
-
-Testing revealed ChatGPT's MCP host has specific behaviors:
-
-- **Skips `ontoolinput`**: Goes straight to `ontoolresult`. The UI infers params from result data.
-- **No serverTools proxy**: `callServerTool()` fails with "MCP proxy not enabled". UI-triggered re-queries require `sendMessage()` fallback.
-- **Model Context Sync works**: `updateModelContext()` is supported with capability guard.
-
-### MCP App Contract
-
-Non-negotiable patterns for all MCP Apps in this repo:
-
-**Invariant**: Local state changes that affect model interpretation → commit-level `updateModelContext`
-
-**Commit triggers** (fire on these, not continuously):
-- Slider/control mouseup or Apply button
-- Selection changes (scenario, property, tab)
-- Assumption toggles
-- Navigation changes
-
-**Payload format** (YAML frontmatter + markdown):
-```yaml
----
-tool: property_yield
-scenario: what-if
-postcode: NG1 1AA
-view: yield
----
-
-## Changes
-- radius: 0.5mi → 2mi
-- gross_yield: 6.5% → 5.4%
-
-## Current View
-- gross_yield: 5.4%
-- assessment: average
-```
-
-**Capability guard** (required):
-```typescript
-const caps = app.getHostCapabilities();
-if (!caps?.updateModelContext) return;
-```
-
-### Tool Result Contract
-
-- **`content[]` carries summary + JSON data** — all LLM hosts see the full data (Claude.ai only reads `content[]`, not `structuredContent`)
-- **`structuredContent` carries full data dict** — for MCP Apps, Claude Code, and programmatic consumers
-- **`_slim()` strips `raw`, `images`, `floorplans`** from content JSON to keep it manageable
-- **Include `data_quality` field** where meaningful (good/low/insufficient)
-- **Include source counts** (`sale_count`, `rental_count`) for transparency
-
-### Debugging Host Behavior
-
-When UI doesn't render or context sync fails:
-
-1. **Check browser console** — look for `[MCP App]` prefixed logs
-2. **Use `app.sendLog()`** — logs visible to host, not just iframe console
-3. **Add debug panel** — render last tool args, structuredContent keys, host capabilities
-4. **Test both hosts** — ChatGPT skips `ontoolinput`, Claude sends both
-
-**Debug panel should show**:
-- `getHostCapabilities()` snapshot
-- Last `ontoolinput` args (or "skipped")
-- Last `structuredContent` keys
-- Last `updateModelContext` payload
+The MCP server (`mcp_server/`) wraps property_core for AI hosts (ChatGPT, Claude). See `mcp_server/README.md` for details.
+Path-specific rules load automatically when editing MCP server files.

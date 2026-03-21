@@ -40,7 +40,7 @@ output/
 
 # Local/temp files
 AGENTS.md
-skills/
+/skills/
 verification_*.csv
 temp_analysis/
 reddit/
