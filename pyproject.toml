@@ -28,6 +28,7 @@ dev = [
 api = [
   "fastapi>=0.128.0",
   "uvicorn>=0.40.0",
+  "prometheus-fastapi-instrumentator>=7.0.0",
 ]
 cli = [
   "typer>=0.9.0",

@@ -73,11 +73,14 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
         title=settings.app_name,
-        version="0.1.0",
+        version="1.3.1",
         lifespan=app_lifespan,
     )
     app.include_router(api_router)
     app.include_router(demo_router)
+
+    from app.core.metrics import setup_metrics
+    setup_metrics(app)
 
     if _mcp_app is not None:
         app.add_middleware(MCPMiddleware, mcp_handler=_mcp_app)
@@ -90,4 +93,5 @@ app = create_app()
 
 def run() -> None:
     """Entry point for property-api/property-demo scripts."""
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=False)
+    settings = get_settings()
+    uvicorn.run("app.main:app", host=settings.host, port=settings.port, reload=False)
