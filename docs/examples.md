@@ -183,9 +183,12 @@ print(y.sale_count)          # 50
 print(y.median_monthly_rent) # 1000
 print(y.rental_count)        # 25
 print(y.gross_yield_pct)     # 8.07
-print(y.yield_assessment)    # strong
-print(y.data_quality)        # good
 print(y.thin_market)         # False
+
+# Interpret helpers (opt-in labels — core returns raw numbers only)
+from property_core import classify_yield, classify_data_quality
+print(classify_yield(y.gross_yield_pct))                      # strong
+print(classify_data_quality(y.sale_count, y.rental_count))    # good
 ```
 
 ---

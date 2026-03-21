@@ -302,9 +302,12 @@ def example_yield_analysis():
     >>> y = asyncio.run(calculate_yield("NG1 1GF", months=24, radius=0.5))
     >>> y.gross_yield_pct
     8.07
-    >>> y.yield_assessment
+
+    Use interpret helpers for labels (core returns raw numbers only):
+    >>> from property_core import classify_yield, classify_data_quality
+    >>> classify_yield(y.gross_yield_pct)
     'strong'
-    >>> y.data_quality
+    >>> classify_data_quality(y.sale_count, y.rental_count)
     'good'
 
     Real output:
@@ -314,10 +317,10 @@ def example_yield_analysis():
         Median monthly rent: £1,000
         Rental count: 25
         Gross yield: 8.07%
-        Assessment: strong
-        Data quality: good
+        Assessment: strong (via classify_yield)
+        Data quality: good (via classify_data_quality)
     """
-    from property_core import calculate_yield
+    from property_core import calculate_yield, classify_yield, classify_data_quality
 
     async def _run():
         y = await calculate_yield("NG1 1GF", months=24, radius=0.5)
@@ -331,9 +334,8 @@ def example_yield_analysis():
         print(f"Rental count: {y.rental_count}")
         if y.gross_yield_pct:
             print(f"Gross yield: {y.gross_yield_pct}%")
-        if y.yield_assessment:
-            print(f"Assessment: {y.yield_assessment}")
-        print(f"Data quality: {y.data_quality}")
+            print(f"Assessment: {classify_yield(y.gross_yield_pct)}")
+        print(f"Data quality: {classify_data_quality(y.sale_count, y.rental_count)}")
         print(f"Thin market: {y.thin_market}")
 
     asyncio.run(_run())
