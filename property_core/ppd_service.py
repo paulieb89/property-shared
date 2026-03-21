@@ -138,7 +138,7 @@ class PPDService:
             limit = FORM_MAX_LIMIT
 
         def _run_search(search_town: Optional[str]) -> list[PPDTransaction]:
-            return self.client.form_search(
+            return self.client.sparql_search(
                 paon=paon,
                 saon=saon,
                 street=street,
@@ -149,6 +149,7 @@ class PPDService:
                 postcode=postcode,
                 postcode_prefix=postcode_prefix,
                 limit=limit,
+                order_desc=True,
             )
 
         results: list[PPDTransaction] = []
@@ -334,19 +335,21 @@ class PPDService:
 
         try:
             # Search for this specific property
-            transactions = self.client.form_search(
+            transactions = self.client.sparql_search(
                 postcode=postcode,
                 paon=paon,
                 street=street,
-                limit=50,  # Get full history
+                limit=50,
+                order_desc=True,
             )
 
             if not transactions:
                 # Try with just postcode and full address as street
-                transactions = self.client.form_search(
+                transactions = self.client.sparql_search(
                     postcode=postcode,
                     street=address_clean,
                     limit=50,
+                    order_desc=True,
                 )
 
             if transactions:

@@ -7,7 +7,7 @@ from property_core.ppd_service import PPDService
 
 
 @pytest.mark.skipif(os.getenv("RUN_LIVE_TESTS") != "1", reason="Set RUN_LIVE_TESTS=1 to run live tests")
-def test_ppd_form_search_live() -> None:
+def test_ppd_address_search_live() -> None:
     service = PPDService()
     limit = 5
     # Birmingham city centre Broad Street has frequent transactions.

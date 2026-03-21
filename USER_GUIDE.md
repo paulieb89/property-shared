@@ -272,7 +272,7 @@ from property_core.rightmove_scraper import fetch_listing
 # PPD (transport client — returns typed models)
 client = PricePaidDataClient()
 transactions = client.sparql_search(postcode_prefix="SW1A", limit=10)  # list[PPDTransaction]
-transactions = client.form_search(postcode="SW1A", street="Downing", limit=5)  # list[PPDTransaction]
+transactions = client.sparql_search(postcode="SW1A 2AA", street="Downing", limit=5)  # address text matching
 record = client.get_transaction_record("<transaction_id>")  # PPDTransactionRecord
 
 # PPD comps (domain service — adds stats, guardrails)
@@ -331,8 +331,9 @@ print(f"Median: £{rental.median_rent_monthly}/mo, Yield: {rental.gross_yield_pc
 from property_core import calculate_yield
 result = asyncio.run(calculate_yield("SW1A 1AA"))
 print(f"Sale: £{result.median_sale_price}, Rent: £{result.median_monthly_rent}/mo")
-print(f"Gross yield: {result.gross_yield_pct}% ({result.yield_assessment})")
-print(f"Data quality: {result.data_quality}")
+from property_core import classify_yield, classify_data_quality
+print(f"Gross yield: {result.gross_yield_pct}% ({classify_yield(result.gross_yield_pct)})")
+print(f"Data quality: {classify_data_quality(result.sale_count, result.rental_count)}")
 
 # Planning (residential IP only, requires playwright + openai)
 from property_core.planning_scraper import scrape_planning_application, search_planning_by_postcode
@@ -382,7 +383,11 @@ print(info["council"]["name"], info["council"]["system"])
 # Property report (async)
 report_service = PropertyReportService()
 report = asyncio.run(report_service.generate_report("10 Downing Street, SW1A 2AA"))
-print(report.estimated_value_low, report.estimated_value_high)
+from property_core import estimate_value_range, generate_insights
+if report.market_analysis and report.market_analysis.median_price:
+    low, high = estimate_value_range(report.market_analysis.median_price)
+    print(f"Estimated value: £{low:,} - £{high:,}")
+print(generate_insights(report))
 
 # Stamp Duty (SDLT calculator — April 2025 bands)
 from property_core import calculate_stamp_duty
