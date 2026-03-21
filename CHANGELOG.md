@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.3.1 (2026-03-21)
+
+### Fixed
+- Merged `form_search()` into `sparql_search()` — fixes SPARQL 503 errors on address-based searches by using a single unified query path
+- Fixed `docs/examples.md` and `docs/examples.py` to use `classify_yield()` / `classify_data_quality()` from interpret module instead of removed model attributes
+
+### Developer Experience
+- Wired `GUIDELINES.md` into `CLAUDE.md` via `@` import — architecture docs now load automatically every session
+- Added 5 path-specific `.claude/rules/` files — context-appropriate guidance loads when touching `property_core/`, `mcp_server/`, `app/api/`, `property_cli/`, or `tests/`
+- Added 3 workflow skills: `/add-data-source`, `/add-mcp-tool`, `/add-endpoint`
+- Added `openaiDeveloperDocs` and `property-shared` HTTP MCP server entries to `.mcp.json`
+
 ## v1.3.0 (2026-03-21)
 
 ### Breaking Changes
