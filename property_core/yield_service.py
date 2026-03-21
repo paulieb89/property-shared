@@ -25,14 +25,14 @@ async def calculate_yield(
     search_level: str = "sector",
     radius: float = 0.5,
     rightmove_delay: Optional[float] = None,
-    strong_yield_pct: float = 6.0,
-    average_yield_pct: float = 4.0,
-    min_comps_good: int = 5,
 ) -> YieldAnalysis:
     """Calculate gross rental yield for a postcode.
 
     Combines PPD comparable sales (median sale price) with Rightmove rental
     listings (median monthly rent) to produce a gross yield figure.
+
+    Returns raw numbers only. Use property_core.interpret.classify_yield()
+    and classify_data_quality() for human-readable labels.
 
     Args:
         postcode: UK postcode to analyse.
@@ -40,9 +40,6 @@ async def calculate_yield(
         search_level: PPD search granularity ("postcode", "sector", "district").
         radius: Rightmove rental search radius in miles.
         rightmove_delay: Per-request delay in seconds (default from env or 0.6).
-        strong_yield_pct: Yield >= this is "strong" (default 6.0).
-        average_yield_pct: Yield >= this is "average" (default 4.0).
-        min_comps_good: Min comps/rentals for "good" data quality (default 5).
 
     Returns:
         YieldAnalysis with combined sale/rental data and yield calculation.
@@ -66,7 +63,6 @@ async def calculate_yield(
             median_sale_price=comps.median,
             sale_count=comps.count,
             thin_market=comps.thin_market,
-            data_quality="insufficient",
         )
 
     # Fetch rental listings (sync → thread)
@@ -90,7 +86,6 @@ async def calculate_yield(
             median_sale_price=comps.median,
             sale_count=comps.count,
             thin_market=comps.thin_market,
-            data_quality="insufficient",
         )
 
     # Keep all listings with valid prices - LET_AGREED are confirmed
@@ -103,7 +98,6 @@ async def calculate_yield(
             median_sale_price=comps.median,
             sale_count=comps.count,
             thin_market=comps.thin_market,
-            data_quality="insufficient",
         )
 
     # Calculate median rent (normalize weekly → monthly)
@@ -114,21 +108,6 @@ async def calculate_yield(
     annual_rent = median_rent * 12
     gross_yield = round((annual_rent / comps.median) * 100, 2)
 
-    if gross_yield >= strong_yield_pct:
-        assessment = "strong"
-    elif gross_yield >= average_yield_pct:
-        assessment = "average"
-    else:
-        assessment = "weak"
-
-    # Data quality
-    if comps.count >= min_comps_good and len(active) >= min_comps_good:
-        quality = "good"
-    elif comps.count >= 2 and len(active) >= 2:
-        quality = "low"
-    else:
-        quality = "insufficient"
-
     return YieldAnalysis(
         postcode=postcode,
         median_sale_price=comps.median,
@@ -136,7 +115,5 @@ async def calculate_yield(
         median_monthly_rent=median_rent,
         rental_count=len(active),
         gross_yield_pct=gross_yield,
-        yield_assessment=assessment,
-        data_quality=quality,
         thin_market=comps.thin_market,
     )

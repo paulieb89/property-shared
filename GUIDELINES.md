@@ -32,6 +32,7 @@ Three-layer pattern:
 | `block_service.py` | Groups PPD transactions by building |
 | `companies_house_client.py` | Transport: Companies House API |
 | `enrichment.py` | EPC enrichment pipeline |
+| `interpret.py` | Opt-in interpretation helpers (yield/quality labels, insights, value ranges) |
 | `epc_client.py` | Transport: EPC API (async) |
 | `planning_councils.json` | Council database (98 councils, 6 system types) |
 | `planning_scraper.py` | Vision-guided planning scraper |

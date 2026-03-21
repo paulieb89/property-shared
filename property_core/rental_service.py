@@ -41,23 +41,17 @@ def to_monthly(listing) -> int:
 def _calculate_yield(
     rental: RentalAnalysis,
     purchase_price: int,
-    *,
-    strong_yield_pct: float = 6.0,
-    average_yield_pct: float = 4.0,
 ) -> None:
-    """Calculate gross yield based on rental and purchase price."""
+    """Calculate gross yield numbers from rental data and purchase price.
+
+    Populates estimated_annual_rent and gross_yield_pct on the rental object.
+    Does not assign assessment labels — use property_core.interpret.classify_yield().
+    """
     if rental.median_rent_monthly and purchase_price > 0:
         annual_rent = rental.median_rent_monthly * 12
         rental.estimated_annual_rent = annual_rent
         gross_yield = (annual_rent / purchase_price) * 100
         rental.gross_yield_pct = round(gross_yield, 2)
-
-        if gross_yield >= strong_yield_pct:
-            rental.yield_assessment = "strong"
-        elif gross_yield >= average_yield_pct:
-            rental.yield_assessment = "average"
-        else:
-            rental.yield_assessment = "weak"
 
 
 async def analyze_rentals(
@@ -68,10 +62,11 @@ async def analyze_rentals(
     rightmove_delay: Optional[float] = None,
     rightmove_location: Optional[RightmoveLocationAPI] = None,
     filter_outliers: bool = True,
-    strong_yield_pct: float = 6.0,
-    average_yield_pct: float = 4.0,
 ) -> RentalAnalysis:
     """Analyze rental listings for a postcode with optional yield calculation.
+
+    Returns raw numbers only. Use property_core.interpret.classify_yield()
+    for human-readable yield labels.
 
     Args:
         postcode: UK postcode (or outcode).
@@ -82,8 +77,6 @@ async def analyze_rentals(
         rightmove_location: Optional injected RightmoveLocationAPI.
         filter_outliers: Apply IQR filtering to rent range display (default True).
             Median and average are always computed on the full dataset.
-        strong_yield_pct: Yield >= this is "strong" (default 6.0).
-        average_yield_pct: Yield >= this is "average" (default 4.0).
 
     Returns:
         RentalAnalysis with median/average rent and optional yield fields.
@@ -128,12 +121,7 @@ async def analyze_rentals(
     )
 
     if purchase_price is not None:
-        _calculate_yield(
-            rental,
-            purchase_price,
-            strong_yield_pct=strong_yield_pct,
-            average_yield_pct=average_yield_pct,
-        )
+        _calculate_yield(rental, purchase_price)
 
     return rental
 

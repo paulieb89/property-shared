@@ -46,6 +46,7 @@ Generate a typed client from the running service OpenAPI:
   - `report_service.py` – orchestrator: multi-source aggregation (async)
   - `rental_service.py` – rental analysis with optional yield calculation (async)
   - `yield_service.py` – yield analysis: PPD sales + Rightmove rentals
+  - `interpret.py` – opt-in interpretation helpers (yield labels, data quality, insights)
   - `enrichment.py` – EPC enrichment pipeline for PPD comps
   - `address_matching.py` – fuzzy address matching for EPC enrichment
   - `stamp_duty.py` – SDLT calculator (April 2025 bands)
@@ -75,6 +76,12 @@ from property_core import (
     fetch_listings, fetch_listing,
 )
 
+# Opt-in interpretation helpers (core returns raw numbers; consumers classify)
+from property_core import (
+    classify_yield, classify_data_quality, classify_price_position,
+    estimate_value_range, generate_insights,
+)
+
 # Models available at top level
 from property_core import (
     PPDTransaction, PPDCompsResponse, EPCData,
@@ -94,7 +101,7 @@ from property_core import (
 - Rightmove search URLs default to a small radius (0.25 miles); override `radius` to widen/narrow.
 - Station distances in listing details are rounded to 1 decimal place (e.g., "1.9 miles").
 - Rental analysis (`analyze_rentals`) uses IQR-based outlier filtering by default (`filter_outliers=True`).
-- Opinionated defaults are configurable: yield thresholds, outlier filtering, auto-escalation, value ranges, property type filters all accept parameters.
+- Core services return raw numbers only. Use `property_core.interpret` helpers (`classify_yield`, `classify_data_quality`, `generate_insights`, etc.) for human-readable labels and assessments.
 - See `docs/examples.md` for copy-paste usage examples with real output.
 
 ## API endpoints (summary)

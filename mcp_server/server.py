@@ -81,7 +81,9 @@ async def property_report(
     )
     data = report.model_dump(mode="json", exclude_none=True)
 
-    insights = report.key_insights or []
+    from property_core.interpret import generate_insights
+
+    insights = generate_insights(report)
     sources = [s.name for s in (report.sources or []) if s.available]
     summary = f"Property report for {report.query_postcode}"
     if insights:
@@ -255,12 +257,13 @@ async def property_yield(
     )
     data = result.model_dump(mode="json")
 
+    from property_core.interpret import classify_data_quality, classify_yield
+
     summary = f"Yield analysis for {postcode}"
     if result.gross_yield_pct is not None:
         summary += f": {result.gross_yield_pct:.1f}% gross yield"
-    if result.yield_assessment:
-        summary += f" ({result.yield_assessment})"
-    summary += f", data quality: {result.data_quality}"
+        summary += f" ({classify_yield(result.gross_yield_pct)})"
+    summary += f", data quality: {classify_data_quality(result.sale_count, result.rental_count)}"
 
     return ToolResult(content=_content(summary, data), structured_content=data)
 

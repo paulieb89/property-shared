@@ -84,7 +84,7 @@ class YieldAnalysis(BaseModel):
     rental_count: int = 0
     gross_yield_pct: Optional[float] = None
     yield_assessment: Optional[str] = None  # "strong", "average", "weak"
-    data_quality: str = "insufficient"  # "good", "low", "insufficient"
+    data_quality: Optional[str] = None
     thin_market: bool = True
 
 

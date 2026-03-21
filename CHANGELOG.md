@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.3.0 (2026-03-21)
+
+### Breaking Changes
+- `yield_assessment` and `data_quality` fields on `YieldAnalysis` are no longer populated by `calculate_yield()` — they default to `None`. Use `property_core.interpret.classify_yield()` and `classify_data_quality()` instead.
+- `yield_assessment` field on `RentalAnalysis` is no longer populated by `analyze_rentals()` — use `classify_yield()` on `gross_yield_pct`.
+- `key_insights`, `estimated_value_low`, `estimated_value_high` fields on `PropertyReport` are no longer populated by `generate_report()` — use `generate_insights()` and `estimate_value_range()`.
+- `price_vs_median` field on `MarketAnalysis` is no longer populated — `price_difference_pct` (raw number) is still computed. Use `classify_price_position()` for the label.
+- `YieldAnalysis.data_quality` type changed from `str` (default `"insufficient"`) to `Optional[str]` (default `None`).
+- `PropertyReportService.generate_report()` no longer accepts `value_range_pct` or `price_vs_median_pct` parameters.
+
+### New Features
+- **`property_core.interpret` module** — opt-in interpretation helpers: `classify_yield()`, `classify_data_quality()`, `classify_price_position()`, `estimate_value_range()`, `generate_insights()`. All exported from `property_core`.
+- `PPDService.comps()` now accepts `thin_market_threshold` parameter (default 5) — previously hard-coded.
+
+### Design
+- **property_core returns numbers, consumers interpret them.** Services no longer generate assessment labels, quality judgments, insight text, or estimated value ranges. All raw data (yield %, counts, price difference %) is still returned. Consumers (MCP server, CLI) call interpret helpers for presentation.
+
 ## v1.2.0 (2026-03-21)
 
 ### Breaking Changes

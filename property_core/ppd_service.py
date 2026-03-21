@@ -184,6 +184,7 @@ class PPDService:
         search_level: str = "sector",
         address: Optional[str] = None,
         auto_escalate: bool = False,
+        thin_market_threshold: int = 5,
     ) -> PPDCompsResponse:
         """Return comparable sales and summary stats for a postcode.
 
@@ -281,7 +282,7 @@ class PPDService:
             percentile_75=p75,
             min=min(prices) if prices else None,
             max=max(prices) if prices else None,
-            thin_market=count < 5,
+            thin_market=count < thin_market_threshold,
             transactions=transactions,
             subject_property=subject_property,
             subject_price_percentile=subject_price_percentile,
@@ -289,7 +290,7 @@ class PPDService:
         )
 
         # Auto-escalate to wider search area if thin market
-        if auto_escalate and response.thin_market and response.count < 5:
+        if auto_escalate and response.thin_market:
             next_level = {"postcode": "sector", "sector": "district"}.get(search_level)
             if next_level:
                 wider = self.comps(

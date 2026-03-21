@@ -6,6 +6,13 @@ no database/redis). The API service in `app/` wraps this package.
 
 from property_core.address_matching import match_epc_address
 from property_core.block_service import analyze_blocks
+from property_core.interpret import (
+    classify_data_quality,
+    classify_price_position,
+    classify_yield,
+    estimate_value_range,
+    generate_insights,
+)
 from property_core.companies_house_client import CompaniesHouseClient
 from property_core.epc_client import EPCClient
 from property_core.enrichment import compute_enriched_stats, enrich_comps_with_epc
@@ -42,10 +49,15 @@ __all__ = [
     "analyze_rentals",
     "calculate_stamp_duty",
     "calculate_yield",
+    "classify_data_quality",
+    "classify_price_position",
+    "classify_yield",
     "compute_enriched_stats",
     "enrich_comps_with_epc",
+    "estimate_value_range",
     "fetch_listing",
     "fetch_listings",
+    "generate_insights",
     "match_epc_address",
     # Models
     "BlockAnalysisResponse",
