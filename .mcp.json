@@ -4,6 +4,14 @@
       "command": "uv",
       "args": ["run", "--extra", "mcp", "property-mcp"],
       "env": {}
+    },
+    "openaiDeveloperDocs": {
+      "type": "http",
+      "url": "https://developers.openai.com/mcp"
+    },
+    "property-shared": {
+      "type": "http",
+      "url": "https://property-shared.fly.dev/mcp"
     }
   }
 }
