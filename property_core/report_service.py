@@ -75,8 +75,13 @@ class PropertyReportService:
         include_sales_market: bool = True,
         ppd_months: int = 24,
         search_radius: float = 0.5,
+        value_range_pct: float = 15.0,
+        price_vs_median_pct: float = 5.0,
     ) -> PropertyReport:
         """Generate a comprehensive property report.
+
+        Convenience orchestrator combining PPD, EPC, Rightmove, and rental data
+        with configurable interpretation thresholds.
 
         Args:
             address_query: Combined address, e.g., "10 Downing Street, SW1A 2AA"
@@ -84,6 +89,8 @@ class PropertyReportService:
             include_sales_market: Include current sales market
             ppd_months: Lookback period for PPD comparables
             search_radius: Radius in miles for Rightmove searches
+            value_range_pct: Estimated value = median +/- this % (default 15.0)
+            price_vs_median_pct: Threshold % for "above"/"below" market (default 5.0)
 
         Returns:
             PropertyReport with all available data
@@ -102,7 +109,7 @@ class PropertyReportService:
 
         # Fetch data in parallel where possible
         ppd_task = asyncio.create_task(
-            self._fetch_ppd_data(postcode, street_address, ppd_months)
+            self._fetch_ppd_data(postcode, street_address, ppd_months, price_vs_median_pct)
         )
         epc_task = asyncio.create_task(
             self._fetch_epc_data(postcode, street_address)
@@ -213,8 +220,10 @@ class PropertyReportService:
         estimated_value_low = None
         estimated_value_high = None
         if market_analysis and market_analysis.median_price:
-            estimated_value_low = int(market_analysis.median_price * 0.85)
-            estimated_value_high = int(market_analysis.median_price * 1.15)
+            low_factor = 1 - (value_range_pct / 100)
+            high_factor = 1 + (value_range_pct / 100)
+            estimated_value_low = int(market_analysis.median_price * low_factor)
+            estimated_value_high = int(market_analysis.median_price * high_factor)
             key_insights.append(
                 f"Area median: \u00a3{market_analysis.median_price:,} "
                 f"(range \u00a3{market_analysis.min_price:,} - \u00a3{market_analysis.max_price:,})"
@@ -237,7 +246,8 @@ class PropertyReportService:
         )
 
     async def _fetch_ppd_data(
-        self, postcode: str, address: Optional[str], months: int
+        self, postcode: str, address: Optional[str], months: int,
+        price_vs_median_pct: float = 5.0,
     ) -> Dict[str, Any]:
         """Fetch PPD data (runs sync code in thread)."""
         try:
@@ -296,9 +306,9 @@ class PropertyReportService:
                 median = market_analysis.median_price
                 diff_pct = ((last_price - median) / median) * 100
                 market_analysis.price_difference_pct = round(diff_pct, 1)
-                if diff_pct > 5:
+                if diff_pct > price_vs_median_pct:
                     market_analysis.price_vs_median = "above"
-                elif diff_pct < -5:
+                elif diff_pct < -price_vs_median_pct:
                     market_analysis.price_vs_median = "below"
                 else:
                     market_analysis.price_vs_median = "at"

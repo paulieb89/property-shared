@@ -138,11 +138,13 @@ async def comps(
     search_level: Literal["postcode", "sector", "district"] = "sector",
     address: Optional[str] = Query(None, description="Subject property address for context"),
     enrich_epc: bool = Query(False, description="Enrich comps with EPC floor area and price/sqft"),
+    auto_escalate: bool = Query(False, description="Auto-widen search area if fewer than 5 results"),
 ) -> PPDCompsResponse:
     """Get comparable sales summary for a postcode (sector/district supported).
 
     If address is provided, returns subject_property with its transaction history.
     If enrich_epc is True, attaches EPC floor area and price-per-sqft to each comp.
+    If auto_escalate is True, widens search from postcode→sector→district on thin markets.
     """
     try:
         result = service.comps(
@@ -152,6 +154,7 @@ async def comps(
             limit=limit,
             search_level=search_level,
             address=address,
+            auto_escalate=auto_escalate,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"PPD comps failed: {exc}") from exc

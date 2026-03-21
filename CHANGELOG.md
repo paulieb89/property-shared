@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.2.0 (2026-03-21)
+
+### Breaking Changes
+- `calculate_stamp_duty()` default `additional_property` changed from `True` to `False` — callers that relied on the investor default must now pass `additional_property=True` explicitly
+- `PPDService.comps()` default `auto_escalate` changed from `True` to `False` — callers that relied on auto-escalation must pass `auto_escalate=True` explicitly
+
+### Configurable Defaults
+- `calculate_yield()`: new `strong_yield_pct`, `average_yield_pct`, `min_comps_good` parameters for customizing yield assessment thresholds
+- `analyze_rentals()`: new `filter_outliers` parameter (default True) to control IQR filtering on rent range, plus `strong_yield_pct` and `average_yield_pct` for yield thresholds
+- `analyze_blocks()`: new `property_type` parameter (default "F") — pass `None` to search all property types
+- `PropertyReportService.generate_report()`: new `value_range_pct` (default 15.0) and `price_vs_median_pct` (default 5.0) parameters for configurable interpretation thresholds
+
+### New Features
+- API: `GET /v1/analysis/yield` and `GET /v1/analysis/rental` endpoints
+- API: `auto_escalate` query parameter on `GET /v1/ppd/comps`
+- CLI: `property-cli analysis yield` and `property-cli analysis rental` commands
+- CLI: PPD commands now use `PPDService` instead of raw `PricePaidDataClient` for consistent guardrails
+
+### Fixed
+- Model exports: `YieldAnalysis` now exported from `property_core.models`
+- Top-level model imports: `PPDTransaction`, `EPCData`, `RightmoveListing`, `PropertyReport`, `BlockAnalysisResponse`, `CompanyRecord`, and more available directly from `property_core`
+- API stamp duty default now matches core library default (`additional_property=False`)
+- CLI stamp duty default now matches core library default (`--no-additional` by default)
+
+### Removed
+- `app/services/` wrapper layer — API routers now import directly from `property_core` (same pattern as MCP server and CLI). Removed `epc_service.py`, `rightmove_service.py`, and `app/utils/polite.py`
+
+### Documentation
+- Rewrote GUIDELINES.md to match actual code conventions (file naming, architecture, design principles)
+- Updated CLAUDE.md: removed `app/services/` from architecture, fixed `raw` field description (transport models only), added new CLI commands and API endpoints, updated library import examples
+
 ## v1.1.2 (2026-03-20)
 
 ### Documentation

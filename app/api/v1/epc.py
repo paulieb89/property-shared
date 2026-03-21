@@ -7,11 +7,11 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas.epc import EPCRecordResponse
-from app.services.epc_service import EPCService
 from property_core.address_matching import parse_address
+from property_core.epc_client import EPCClient
 
 router = APIRouter(prefix="/epc", tags=["epc"])
-service = EPCService()
+_client = EPCClient()
 
 
 @router.get("/certificate/{certificate_hash}", response_model=EPCRecordResponse)
@@ -20,15 +20,13 @@ async def get_certificate(
     include_raw: bool = Query(False, description="Include raw EPC API JSON"),
 ) -> EPCRecordResponse:
     """Get EPC certificate by lmk-key (certificate hash)."""
-    if not service.is_configured():
+    if not _client.is_configured():
         raise HTTPException(status_code=501, detail="EPC client not configured")
 
-    result = await service.get_certificate(
-        certificate_hash=certificate_hash, include_raw=include_raw
-    )
+    result = await _client.get_certificate(certificate_hash)
     if result is None:
         raise HTTPException(status_code=404, detail="No EPC certificate found")
-    return result
+    return EPCRecordResponse(record=result, raw=result.raw if include_raw else None)
 
 
 @router.get("/search", response_model=EPCRecordResponse)
@@ -44,7 +42,7 @@ async def search(
     1. Explicit: postcode=SW1A+2AA&address=10+Downing+Street
     2. Combined: q=10+Downing+Street,+SW1A+2AA (postcode parsed from end)
     """
-    if not service.is_configured():
+    if not _client.is_configured():
         raise HTTPException(status_code=501, detail="EPC client not configured")
 
     # Parse combined query if provided
@@ -61,7 +59,7 @@ async def search(
     if not postcode:
         raise HTTPException(status_code=422, detail="postcode or q parameter required")
 
-    result = await service.search(postcode=postcode, address=address, include_raw=include_raw)
+    result = await _client.search_by_postcode(postcode, address=address)
     if result is None:
         raise HTTPException(status_code=404, detail="No EPC certificate found")
-    return result
+    return EPCRecordResponse(record=result, raw=result.raw if include_raw else None)

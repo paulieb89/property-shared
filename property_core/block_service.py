@@ -19,8 +19,9 @@ def analyze_blocks(
     limit: int = 50,
     min_transactions: int = 2,
     search_level: str = "sector",
+    property_type: str | None = "F",
 ) -> BlockAnalysisResponse:
-    """Find buildings with multiple flat sales in a postcode area.
+    """Find buildings with multiple sales in a postcode area.
 
     Args:
         postcode: UK postcode (e.g. "B1 1AA").
@@ -28,6 +29,7 @@ def analyze_blocks(
         limit: Target number of blocks to find (fetches 3x transactions).
         min_transactions: Minimum sales to qualify as an active block.
         search_level: Search granularity — "postcode", "sector", or "district".
+        property_type: PPD property type filter (default "F" for flats, None for all).
 
     Returns:
         BlockAnalysisResponse with buildings sorted by transaction count.
@@ -41,7 +43,7 @@ def analyze_blocks(
         months=months,
         limit=fetch_limit,
         search_level=search_level,
-        property_type="F",  # Flats only
+        property_type=property_type,
     )
 
     # Group transactions by building: (paon, street, postcode)

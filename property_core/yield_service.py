@@ -25,6 +25,9 @@ async def calculate_yield(
     search_level: str = "sector",
     radius: float = 0.5,
     rightmove_delay: Optional[float] = None,
+    strong_yield_pct: float = 6.0,
+    average_yield_pct: float = 4.0,
+    min_comps_good: int = 5,
 ) -> YieldAnalysis:
     """Calculate gross rental yield for a postcode.
 
@@ -37,6 +40,9 @@ async def calculate_yield(
         search_level: PPD search granularity ("postcode", "sector", "district").
         radius: Rightmove rental search radius in miles.
         rightmove_delay: Per-request delay in seconds (default from env or 0.6).
+        strong_yield_pct: Yield >= this is "strong" (default 6.0).
+        average_yield_pct: Yield >= this is "average" (default 4.0).
+        min_comps_good: Min comps/rentals for "good" data quality (default 5).
 
     Returns:
         YieldAnalysis with combined sale/rental data and yield calculation.
@@ -108,15 +114,15 @@ async def calculate_yield(
     annual_rent = median_rent * 12
     gross_yield = round((annual_rent / comps.median) * 100, 2)
 
-    if gross_yield >= 6:
+    if gross_yield >= strong_yield_pct:
         assessment = "strong"
-    elif gross_yield >= 4:
+    elif gross_yield >= average_yield_pct:
         assessment = "average"
     else:
         assessment = "weak"
 
     # Data quality
-    if comps.count >= 5 and len(active) >= 5:
+    if comps.count >= min_comps_good and len(active) >= min_comps_good:
         quality = "good"
     elif comps.count >= 2 and len(active) >= 2:
         quality = "low"

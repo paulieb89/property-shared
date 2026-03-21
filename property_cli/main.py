@@ -20,7 +20,7 @@ from rich import print as rprint
 from rich.table import Table
 
 from property_core.epc_client import EPCClient
-from property_core.ppd_client import PricePaidDataClient
+
 from property_core.rightmove_location import RightmoveLocationAPI
 from property_core.rightmove_scraper import fetch_listing, fetch_listings
 
@@ -136,9 +136,9 @@ def ppd_transaction(
         )
         _echo_json(data)
     else:
-        client = PricePaidDataClient()
-        record = client.get_transaction_record(transaction_id)
-        output = {"record": record.model_dump(), "raw": record.raw if include_raw else None}
+        from property_core.ppd_service import PPDService
+        result = PPDService().transaction_record(transaction_id, include_raw=include_raw)
+        output = {"record": result["record"].model_dump(), "raw": result["raw"]}
         _echo_json(output)
 
 
@@ -164,13 +164,13 @@ def ppd_search(
         )
         _echo_json(data)
     else:
-        client = PricePaidDataClient()
-        results = client.sparql_search(
+        from property_core.ppd_service import PPDService
+        result = PPDService().search_transactions(
             postcode=postcode,
             postcode_prefix=postcode_prefix,
             limit=limit,
         )
-        _echo_json([t.model_dump() for t in results])
+        _echo_json([t.model_dump() for t in result["results"]])
 
 
 @ppd.command("address-search")
@@ -212,8 +212,8 @@ def ppd_address_search(
         data = http.get("/v1/ppd/address-search", params=params)
         _echo_json(data)
     else:
-        client = PricePaidDataClient()
-        results = client.form_search(
+        from property_core.ppd_service import PPDService
+        result = PPDService().address_search(
             paon=paon,
             saon=saon,
             street=street,
@@ -223,7 +223,7 @@ def ppd_address_search(
             postcode_prefix=postcode_prefix,
             limit=limit,
         )
-        _echo_json([t.model_dump() for t in results])
+        _echo_json([t.model_dump() for t in result["results"]])
 
 
 @ppd.command("download-url")
@@ -245,19 +245,12 @@ def ppd_download_url(
         data = http.get("/v1/ppd/download-url", params=params)
         typer.echo(data.get("url"))
     else:
-        client = PricePaidDataClient()
-        if kind == "complete":
-            url = client.complete_url(fmt=fmt)
-        elif kind == "monthly":
-            url = client.monthly_change_url(fmt=fmt)
-        elif kind == "year":
-            if not year:
-                typer.echo("--year is required for 'year' kind")
-                raise typer.Exit(code=1)
-            url = client.year_url(year=year, part=part, fmt=fmt)
-        else:
-            typer.echo(f"Unknown kind: {kind}. Use: complete, year, or monthly")
-            raise typer.Exit(code=1)
+        from property_core.ppd_service import PPDService
+        try:
+            url = PPDService().download_url(kind=kind, year=year, part=part, fmt=fmt)
+        except ValueError as exc:
+            typer.echo(str(exc))
+            raise typer.Exit(code=1) from exc
         typer.echo(url)
 
 
@@ -871,7 +864,7 @@ app.add_typer(calc, name="calc")
 @calc.command("stamp-duty")
 def calc_stamp_duty(
     price: int = typer.Argument(..., help="Purchase price in £"),
-    additional: bool = typer.Option(True, "--additional/--no-additional", help="Additional property surcharge (+5%)"),
+    additional: bool = typer.Option(False, "--additional/--no-additional", help="Additional property surcharge (+5%)"),
     ftb: bool = typer.Option(False, "--ftb", help="First-time buyer relief"),
     non_resident: bool = typer.Option(False, "--non-resident", help="Non-UK resident surcharge (+2%)"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
@@ -908,6 +901,102 @@ def calc_stamp_duty(
             table.add_row(b.band, f"£{b.amount:,}", f"{b.rate}%", f"£{b.tax:,.2f}")
         table.add_section()
         table.add_row("Total SDLT", "", f"{result.effective_rate}%", f"£{result.total_sdlt:,.2f}")
+        rprint(table)
+
+
+# =============================================================================
+# Analysis Commands
+# =============================================================================
+
+analysis = typer.Typer(help="Yield and rental analysis")
+app.add_typer(analysis, name="analysis")
+
+
+@analysis.command("yield")
+def analysis_yield(
+    postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
+    months: int = typer.Option(24, help="PPD lookback months"),
+    search_level: str = typer.Option("sector", help="postcode|sector|district"),
+    radius: float = typer.Option(0.5, help="Rental search radius (miles)"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """Calculate gross rental yield for a postcode."""
+    import asyncio
+
+    postcode_value = _join_tokens(postcode)
+    http = _maybe_http_client(api_url)
+    if http:
+        data = http.get(
+            "/v1/analysis/yield",
+            params={
+                "postcode": postcode_value,
+                "months": months,
+                "search_level": search_level,
+                "radius": radius,
+            },
+        )
+        _echo_json(data)
+    else:
+        from property_core import calculate_yield
+
+        result = asyncio.run(calculate_yield(
+            postcode=postcode_value,
+            months=months,
+            search_level=search_level,
+            radius=radius,
+        ))
+
+        table = Table(title=f"Yield Analysis — {postcode_value}")
+        table.add_column("Metric", style="bold")
+        table.add_column("Value", justify="right")
+        table.add_row("Median Sale Price", f"£{result.median_sale_price:,}" if result.median_sale_price else "—")
+        table.add_row("Sale Count", str(result.sale_count))
+        table.add_row("Median Monthly Rent", f"£{result.median_monthly_rent:,}" if result.median_monthly_rent else "—")
+        table.add_row("Rental Count", str(result.rental_count) if result.rental_count else "—")
+        table.add_row("Gross Yield", f"{result.gross_yield_pct}%" if result.gross_yield_pct is not None else "—")
+        table.add_row("Assessment", result.yield_assessment or "—")
+        table.add_row("Data Quality", result.data_quality or "—")
+        rprint(table)
+
+
+@analysis.command("rental")
+def analysis_rental(
+    postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
+    radius: float = typer.Option(0.5, help="Search radius (miles)"),
+    purchase_price: Optional[int] = typer.Option(None, "--price", help="Purchase price for yield calc"),
+    api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
+) -> None:
+    """Rental market analysis for a postcode."""
+    import asyncio
+
+    postcode_value = _join_tokens(postcode)
+    http = _maybe_http_client(api_url)
+    if http:
+        params: dict = {"postcode": postcode_value, "radius": radius}
+        if purchase_price is not None:
+            params["purchase_price"] = purchase_price
+        data = http.get("/v1/analysis/rental", params=params)
+        _echo_json(data)
+    else:
+        from property_core.rental_service import analyze_rentals
+
+        result = asyncio.run(analyze_rentals(
+            postcode_value,
+            radius=radius,
+            purchase_price=purchase_price,
+        ))
+
+        table = Table(title=f"Rental Analysis — {postcode_value}")
+        table.add_column("Metric", style="bold")
+        table.add_column("Value", justify="right")
+        table.add_row("Listings Found", str(result.rental_listings_count))
+        table.add_row("Median Rent", f"£{result.median_rent_monthly:,}/mo" if result.median_rent_monthly else "—")
+        table.add_row("Average Rent", f"£{result.average_rent_monthly:,}/mo" if result.average_rent_monthly else "—")
+        table.add_row("Range Low", f"£{result.rent_range_low:,}/mo" if result.rent_range_low else "—")
+        table.add_row("Range High", f"£{result.rent_range_high:,}/mo" if result.rent_range_high else "—")
+        if result.gross_yield_pct is not None:
+            table.add_row("Gross Yield", f"{result.gross_yield_pct}%")
+            table.add_row("Assessment", result.yield_assessment or "—")
         rprint(table)
 
 

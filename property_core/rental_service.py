@@ -38,7 +38,13 @@ def to_monthly(listing) -> int:
     return listing.price
 
 
-def _calculate_yield(rental: RentalAnalysis, purchase_price: int) -> None:
+def _calculate_yield(
+    rental: RentalAnalysis,
+    purchase_price: int,
+    *,
+    strong_yield_pct: float = 6.0,
+    average_yield_pct: float = 4.0,
+) -> None:
     """Calculate gross yield based on rental and purchase price."""
     if rental.median_rent_monthly and purchase_price > 0:
         annual_rent = rental.median_rent_monthly * 12
@@ -46,9 +52,9 @@ def _calculate_yield(rental: RentalAnalysis, purchase_price: int) -> None:
         gross_yield = (annual_rent / purchase_price) * 100
         rental.gross_yield_pct = round(gross_yield, 2)
 
-        if gross_yield >= 6:
+        if gross_yield >= strong_yield_pct:
             rental.yield_assessment = "strong"
-        elif gross_yield >= 4:
+        elif gross_yield >= average_yield_pct:
             rental.yield_assessment = "average"
         else:
             rental.yield_assessment = "weak"
@@ -61,6 +67,9 @@ async def analyze_rentals(
     purchase_price: Optional[int] = None,
     rightmove_delay: Optional[float] = None,
     rightmove_location: Optional[RightmoveLocationAPI] = None,
+    filter_outliers: bool = True,
+    strong_yield_pct: float = 6.0,
+    average_yield_pct: float = 4.0,
 ) -> RentalAnalysis:
     """Analyze rental listings for a postcode with optional yield calculation.
 
@@ -71,6 +80,10 @@ async def analyze_rentals(
         rightmove_delay: Per-request politeness delay in seconds. Defaults to
             `RIGHTMOVE_DELAY_SECONDS` env var (or 0.6).
         rightmove_location: Optional injected RightmoveLocationAPI.
+        filter_outliers: Apply IQR filtering to rent range display (default True).
+            Median and average are always computed on the full dataset.
+        strong_yield_pct: Yield >= this is "strong" (default 6.0).
+        average_yield_pct: Yield >= this is "average" (default 4.0).
 
     Returns:
         RentalAnalysis with median/average rent and optional yield fields.
@@ -102,8 +115,8 @@ async def analyze_rentals(
     median_rent = int(median(prices)) if prices else None
     avg_rent = int(sum(prices) / len(prices)) if prices else None
 
-    # Filter outliers for range display (keeps median/avg on full dataset)
-    filtered_prices = _filter_outliers(prices)
+    # Optionally filter outliers for range display (keeps median/avg on full dataset)
+    filtered_prices = _filter_outliers(prices) if filter_outliers else prices
 
     rental = RentalAnalysis(
         search_radius_miles=radius,
@@ -115,7 +128,12 @@ async def analyze_rentals(
     )
 
     if purchase_price is not None:
-        _calculate_yield(rental, purchase_price)
+        _calculate_yield(
+            rental,
+            purchase_price,
+            strong_yield_pct=strong_yield_pct,
+            average_yield_pct=average_yield_pct,
+        )
 
     return rental
 

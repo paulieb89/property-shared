@@ -1,9 +1,26 @@
 import os
 import time
+from functools import partial
 
+import anyio
 import pytest
 
-from app.services.rightmove_service import RightmoveService
+from property_core.rightmove_location import RightmoveLocationAPI
+from property_core.rightmove_scraper import fetch_listing, fetch_listings
+
+
+async def _build_url(postcode: str, property_type: str = "sale", **kwargs) -> str:
+    return await anyio.to_thread.run_sync(
+        partial(RightmoveLocationAPI().build_search_url, postcode, property_type=property_type, **kwargs)
+    )
+
+
+async def _fetch_listings(url: str, max_pages: int = 1) -> list:
+    return await anyio.to_thread.run_sync(partial(fetch_listings, url, max_pages=max_pages))
+
+
+async def _fetch_detail(property_id: str):
+    return await anyio.to_thread.run_sync(partial(fetch_listing, property_id))
 
 
 @pytest.mark.anyio
@@ -11,14 +28,13 @@ async def test_rightmove_service_live() -> None:
     if os.getenv("RUN_LIVE_TESTS") != "1":
         pytest.skip("Set RUN_LIVE_TESTS=1 to run live network tests")
 
-    service = RightmoveService()
     postcode = os.getenv("RIGHTMOVE_TEST_POSTCODE", "SW1A 1AA")
     property_type = os.getenv("RIGHTMOVE_TEST_TYPE", "sale")
     max_pages = int(os.getenv("RIGHTMOVE_TEST_MAX_PAGES", "1"))
 
     start = time.perf_counter()
-    url = await service.build_search_url(postcode=postcode, property_type=property_type)
-    listings = await service.listings(search_url=url, max_pages=max_pages)
+    url = await _build_url(postcode, property_type)
+    listings = await _fetch_listings(url, max_pages)
     elapsed = time.perf_counter() - start
 
     print(f"Rightmove live fetch took {elapsed:.2f}s")
@@ -36,12 +52,11 @@ async def test_rightmove_rental_listings_live() -> None:
     if os.getenv("RUN_LIVE_TESTS") != "1":
         pytest.skip("Set RUN_LIVE_TESTS=1 to run live network tests")
 
-    service = RightmoveService()
     postcode = os.getenv("RIGHTMOVE_TEST_POSTCODE", "SW1A 1AA")
 
     start = time.perf_counter()
-    url = await service.build_search_url(postcode=postcode, property_type="rent")
-    listings = await service.listings(search_url=url, max_pages=1)
+    url = await _build_url(postcode, "rent")
+    listings = await _fetch_listings(url)
     elapsed = time.perf_counter() - start
 
     print(f"Rightmove rental fetch took {elapsed:.2f}s")
@@ -68,11 +83,9 @@ async def test_rightmove_listing_detail_live() -> None:
     if os.getenv("RUN_LIVE_TESTS") != "1":
         pytest.skip("Set RUN_LIVE_TESTS=1 to run live network tests")
 
-    service = RightmoveService()
-
     # First find a leasehold listing from search results
-    url = await service.build_search_url(postcode="SW1A 1AA", property_type="sale")
-    listings = await service.listings(search_url=url, max_pages=1)
+    url = await _build_url("SW1A 1AA")
+    listings = await _fetch_listings(url)
     assert len(listings) > 0, "Expected at least one listing"
 
     # Pick first listing with a leasehold tenure if possible
@@ -86,7 +99,7 @@ async def test_rightmove_listing_detail_live() -> None:
         target_id = listings[0].id
 
     start = time.perf_counter()
-    detail = await service.listing_detail(property_url_or_id=str(target_id))
+    detail = await _fetch_detail(str(target_id))
     elapsed = time.perf_counter() - start
 
     print(f"Listing detail fetch took {elapsed:.2f}s")

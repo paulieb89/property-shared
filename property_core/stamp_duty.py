@@ -47,7 +47,7 @@ _FTB_BANDS: list[tuple[float, float]] = [
 
 def calculate_stamp_duty(
     price: int,
-    additional_property: bool = True,
+    additional_property: bool = False,
     first_time_buyer: bool = False,
     non_resident: bool = False,
 ) -> StampDutyResult:
@@ -56,7 +56,6 @@ def calculate_stamp_duty(
     Args:
         price: Purchase price in £.
         additional_property: True if buying additional property (+5% surcharge).
-            Defaults to True (investor-focused).
         first_time_buyer: True for first-time buyer relief (up to £300k nil rate).
         non_resident: True if buyer not UK resident (+2% surcharge).
 

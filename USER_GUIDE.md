@@ -7,7 +7,7 @@
 4) Open the demo UI: http://localhost:8000/demo.
 
 ## CLI Commands
-
+  
 All commands support `--api-url http://localhost:8000` to hit the API instead of calling core directly.
 
 ### Meta

@@ -1,9 +1,11 @@
-"""Rightmove API endpoints (Phase 1): search URL + listings."""
+"""Rightmove API endpoints: search URL, listings, and listing detail."""
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Literal, Optional
 
+import anyio
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas.rightmove import (
@@ -11,10 +13,10 @@ from app.schemas.rightmove import (
     RightmoveListingsResponse,
     RightmoveSearchURLResponse,
 )
-from app.services.rightmove_service import RightmoveService
+from property_core.rightmove_location import RightmoveLocationAPI
+from property_core.rightmove_scraper import fetch_listing, fetch_listings
 
 router = APIRouter(prefix="/rightmove", tags=["rightmove"])
-service = RightmoveService()
 
 
 @router.get("/search-url", response_model=RightmoveSearchURLResponse)
@@ -29,14 +31,17 @@ async def search_url(
 ) -> RightmoveSearchURLResponse:
     """Build a Rightmove search URL from a postcode/outcode."""
     try:
-        url = await service.build_search_url(
-            postcode=postcode,
-            property_type=property_type,
-            min_price=min_price,
-            max_price=max_price,
-            min_bedrooms=min_bedrooms,
-            max_bedrooms=max_bedrooms,
-            radius=radius,
+        url = await anyio.to_thread.run_sync(
+            partial(
+                RightmoveLocationAPI().build_search_url,
+                postcode,
+                property_type=property_type,
+                min_price=min_price,
+                max_price=max_price,
+                min_bedrooms=min_bedrooms,
+                max_bedrooms=max_bedrooms,
+                radius=radius,
+            )
         )
         return RightmoveSearchURLResponse(url=url)
     except Exception as exc:  # noqa: BLE001
@@ -51,8 +56,8 @@ async def listings(
 ) -> RightmoveListingsResponse:
     """Fetch listing results from a Rightmove search URL."""
     try:
-        results = await service.listings(
-            search_url=search_url, max_pages=max_pages,
+        results = await anyio.to_thread.run_sync(
+            partial(fetch_listings, search_url, max_pages=max_pages)
         )
         return RightmoveListingsResponse(count=len(results), results=results)
     except Exception as exc:  # noqa: BLE001
@@ -66,10 +71,9 @@ async def listing_detail(
 ) -> RightmoveListingDetailResponse:
     """Fetch full details for an individual Rightmove property listing."""
     try:
-        result = await service.listing_detail(
-            property_url_or_id=property_id,
+        result = await anyio.to_thread.run_sync(
+            partial(fetch_listing, property_id)
         )
         return RightmoveListingDetailResponse(result=result)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Rightmove listing detail failed: {exc}") from exc
-

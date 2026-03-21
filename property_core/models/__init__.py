@@ -31,6 +31,7 @@ from property_core.models.report import (
     RentalAnalysis,
     SaleHistory,
     SaleRecord,
+    YieldAnalysis,
 )
 from property_core.models.rightmove import RightmoveListingDetail, RightmoveListing
 
@@ -63,4 +64,5 @@ __all__ = [
     "SaleRecord",
     "SearchUrls",
     "SubjectProperty",
+    "YieldAnalysis",
 ]

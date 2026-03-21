@@ -10,7 +10,7 @@ from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
 
-# Re-export domain models for backward compatibility within app/
+# Convenience re-exports for API layer imports
 from property_core.models.ppd import (  # noqa: F401
     PPDCompsQuery,
     PPDCompsResponse,

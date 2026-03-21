@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel
 
-# Re-export domain model for backward compatibility within app/
+# Convenience re-exports for API layer imports
 from property_core.models.epc import EPCData  # noqa: F401
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.core.config import get_settings
-from app.services.epc_service import EPCService
+from property_core.epc_client import EPCClient
 
 router = APIRouter(prefix="/meta", tags=["meta"])
 
@@ -17,7 +17,7 @@ async def integrations() -> dict[str, object]:
     Intended for AI agents / clients to self-check capabilities before calling.
     """
     settings = get_settings()
-    epc = EPCService()
+    epc = EPCClient()
 
     return {
         "environment": settings.environment,
