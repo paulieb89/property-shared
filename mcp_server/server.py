@@ -16,10 +16,10 @@ from fastmcp.tools.tool import ToolResult
 
 
 def _slim(obj: Any) -> Any:
-    """Strip raw/images/floorplans for LLM-friendly content."""
+    """Strip raw/images/floorplans/epc_match for LLM-friendly content."""
     if isinstance(obj, dict):
         return {k: _slim(v) for k, v in obj.items()
-                if k not in ("raw", "images", "floorplans")}
+                if k not in ("raw", "images", "floorplans", "epc_match")}
     if isinstance(obj, list):
         return [_slim(item) for item in obj]
     return obj
@@ -110,11 +110,13 @@ async def property_comps(
     search_level: str = "sector",
     address: Optional[str] = None,
     property_type: Optional[str] = None,
-    enrich_epc: bool = False,
+    enrich_epc: bool = True,
 ) -> ToolResult:
     """Comparable property sales from Land Registry Price Paid Data.
 
     Auto-escalates to wider search area if fewer than 5 results found.
+    EPC enrichment adds floor area, price/sqft, and EPC rating to each
+    comp, plus area-level median price/sqft and EPC match rate.
 
     Args:
         postcode: UK postcode (e.g. "SW1A 1AA", "NG11 9HD")
@@ -123,7 +125,7 @@ async def property_comps(
         search_level: Search area granularity - usually leave as default
         address: Optional street address to identify subject property and show percentile rank
         property_type: Filter by type: F=flat, D=detached, S=semi, T=terraced (default all)
-        enrich_epc: Set true to add floor area, price/sqft, and EPC rating to each comp
+        enrich_epc: Add floor area, price/sqft, and EPC rating to each comp (default true)
     """
     from property_core import PPDService
     from property_core.epc_client import EPCClient
