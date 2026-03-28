@@ -32,13 +32,13 @@ def _content(summary: str, data: dict) -> str:
 mcp = FastMCP(
     "property-server",
     instructions=(
-        "UK property data tools. Start with property_report for full deal analysis "
+        "UK property data tools. Start with property_report for full data pull "
         "(comps + EPC + yield + market in one call). Use property_comps for area "
         "comparable sales with stats, ppd_transactions for specific property history "
         "or filtered searches, rightmove_search to browse current listings for sale "
         "or rent, rightmove_listing for full details on a specific property. "
         "property_epc for energy certificates, property_yield or rental_analysis "
-        "for rental market and yield calculations, stamp_duty for SDLT, "
+        "for rental market and yield figures, stamp_duty for SDLT, "
         "property_blocks for block-buy opportunities, planning_search for council "
         "planning portals, company_search for Companies House lookups."
     ),
@@ -58,10 +58,11 @@ async def property_report(
     ppd_months: int = 24,
     search_radius: float = 0.5,
 ) -> ToolResult:
-    """Full deal analysis for a UK property in one call.
+    """Full data pull for a UK property in one call.
 
-    Returns sale history, area comps, EPC rating with refurb potential,
-    rental market, current sales market, yield estimate, and value range.
+    Returns sale history, area comps, EPC rating, rental market listings,
+    current sales market listings, rental yield calculation, and price range
+    from area median.
 
     Args:
         address: Address with postcode, e.g. "10 Downing Street, SW1A 2AA"
@@ -239,7 +240,7 @@ async def property_yield(
     """Calculate rental yield for a UK postcode.
 
     Combines Land Registry sales data with Rightmove rental listings
-    to produce a gross yield figure with market assessment.
+    to produce a gross yield figure.
 
     Args:
         postcode: UK postcode (e.g. "NG11", "SW1A 1AA")
