@@ -73,7 +73,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
         title=settings.app_name,
-        version="1.3.1",
+        version="1.4.0",
         lifespan=app_lifespan,
     )
     app.include_router(api_router)
