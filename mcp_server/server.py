@@ -321,9 +321,12 @@ async def property_epc(
     """EPC certificate for a UK property — energy rating, score, floor area,
     construction age, heating costs, and improvement potential.
 
+    Without an address, returns an arbitrary certificate from the postcode —
+    not a specific property. Always provide address for subject property lookup.
+
     Args:
         postcode: UK postcode (e.g. "SW1A 1AA")
-        address: Optional street address for exact match
+        address: Street address for exact match (strongly recommended)
     """
     from property_core.epc_client import EPCClient
 
