@@ -28,6 +28,7 @@ async def search_url(
     min_bedrooms: Optional[int] = Query(None, ge=0),
     max_bedrooms: Optional[int] = Query(None, ge=0),
     radius: Optional[float] = Query(None, ge=0),
+    sort_by: Optional[str] = Query(None, description="newest|oldest|price_low|price_high|most_reduced"),
 ) -> RightmoveSearchURLResponse:
     """Build a Rightmove search URL from a postcode/outcode."""
     try:
@@ -41,6 +42,7 @@ async def search_url(
                 min_bedrooms=min_bedrooms,
                 max_bedrooms=max_bedrooms,
                 radius=radius,
+                sort_by=sort_by,
             )
         )
         return RightmoveSearchURLResponse(url=url)

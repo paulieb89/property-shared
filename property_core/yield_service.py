@@ -23,6 +23,7 @@ async def calculate_yield(
     *,
     months: int = 24,
     search_level: str = "sector",
+    property_type: Optional[str] = None,
     radius: float = 0.5,
     rightmove_delay: Optional[float] = None,
 ) -> YieldAnalysis:
@@ -38,6 +39,7 @@ async def calculate_yield(
         postcode: UK postcode to analyse.
         months: Lookback period for PPD sales data.
         search_level: PPD search granularity ("postcode", "sector", "district").
+        property_type: Filter comps by type: F=flat, D=detached, S=semi, T=terraced (default all).
         radius: Rightmove rental search radius in miles.
         rightmove_delay: Per-request delay in seconds (default from env or 0.6).
 
@@ -55,6 +57,7 @@ async def calculate_yield(
         postcode=postcode,
         months=months,
         search_level=search_level,
+        property_type=property_type,
     )
 
     if not comps.median or comps.thin_market:

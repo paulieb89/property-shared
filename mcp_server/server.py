@@ -57,6 +57,7 @@ async def property_report(
     include_sales_market: bool = True,
     ppd_months: int = 24,
     search_radius: float = 0.5,
+    property_type: Optional[str] = None,
 ) -> ToolResult:
     """Full data pull for a UK property in one call.
 
@@ -70,6 +71,7 @@ async def property_report(
         include_sales_market: Include Rightmove sales market (default true)
         ppd_months: Lookback period for comparable sales (default 24)
         search_radius: Radius in miles for Rightmove searches (default 0.5)
+        property_type: Filter comparable sales by type: F=flat, D=detached, S=semi, T=terraced (default all)
     """
     from property_core import PropertyReportService
 
@@ -79,6 +81,7 @@ async def property_report(
         include_sales_market=include_sales_market,
         ppd_months=ppd_months,
         search_radius=search_radius,
+        property_type=property_type,
     )
     data = report.model_dump(mode="json", exclude_none=True)
 
@@ -235,6 +238,7 @@ async def property_yield(
     postcode: str,
     months: int = 24,
     search_level: str = "sector",
+    property_type: Optional[str] = None,
     radius: float = 0.5,
 ) -> ToolResult:
     """Calculate rental yield for a UK postcode.
@@ -246,6 +250,7 @@ async def property_yield(
         postcode: UK postcode (e.g. "NG11", "SW1A 1AA")
         months: Sales lookback period in months (default 24)
         search_level: "sector" (recommended), "district", or "postcode"
+        property_type: Filter comparable sales by type: F=flat, D=detached, S=semi, T=terraced (default all)
         radius: Rental search radius in miles (default 0.5)
     """
     from property_core import calculate_yield
@@ -254,6 +259,7 @@ async def property_yield(
         postcode=postcode,
         months=months,
         search_level=search_level,
+        property_type=property_type,
         radius=radius,
     )
     data = result.model_dump(mode="json")
@@ -350,6 +356,7 @@ async def rightmove_search(
     max_bedrooms: Optional[int] = None,
     radius: Optional[float] = None,
     max_pages: int = 1,
+    sort_by: Optional[str] = None,
 ) -> ToolResult:
     """Search Rightmove property listings for sale or rent near a postcode.
 
@@ -364,6 +371,7 @@ async def rightmove_search(
         max_bedrooms: Maximum bedrooms filter
         radius: Search radius in miles (default varies by area)
         max_pages: Max pages to fetch (default 1, ~25 listings per page)
+        sort_by: Sort order: "newest", "oldest", "price_low", "price_high", "most_reduced" (default: Rightmove default)
     """
     from property_core.rightmove_location import RightmoveLocationAPI
     from property_core.rightmove_scraper import fetch_listings
@@ -378,6 +386,7 @@ async def rightmove_search(
             min_bedrooms=min_bedrooms,
             max_bedrooms=max_bedrooms,
             radius=radius,
+            sort_by=sort_by,
         )
     )
 
@@ -410,7 +419,7 @@ async def rightmove_listing(
     council tax band, floor area, key features, nearest stations, and floorplan URLs.
 
     Args:
-        property_id: Rightmove property URL or numeric ID (e.g. "12345678")
+        property_id: Rightmove property URL (e.g. "https://www.rightmove.co.uk/properties/12345678") or numeric ID (e.g. "12345678")
     """
     from property_core.rightmove_scraper import fetch_listing
 

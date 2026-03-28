@@ -21,6 +21,7 @@ class ReportRequest(BaseModel):
     include_sales_market: bool = True
     ppd_months: int = 24
     search_radius: float = 0.5
+    property_type: Optional[str] = None
 
 
 @router.post("/report", response_model=PropertyReport)
@@ -46,6 +47,7 @@ async def generate_report(
             include_sales_market=request.include_sales_market,
             ppd_months=request.ppd_months,
             search_radius=request.search_radius,
+            property_type=request.property_type,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

@@ -18,6 +18,15 @@ class LocationLookupError(Exception):
     """Raised when Rightmove location lookup fails."""
 
 
+_SORT_TYPES = {
+    "newest": 6,
+    "oldest": 10,
+    "price_low": 2,
+    "price_high": 12,
+    "most_reduced": 4,
+}
+
+
 class RightmoveLocationAPI:
     """Client for Rightmove's location autocomplete API."""
 
@@ -91,6 +100,7 @@ class RightmoveLocationAPI:
         min_bedrooms: int | None = None,
         max_bedrooms: int | None = None,
         radius: float | None = None,
+        sort_by: str | None = None,
         **extra_params,
     ) -> str:
         """Build a Rightmove search URL from a postcode/outcode."""
@@ -119,6 +129,10 @@ class RightmoveLocationAPI:
             params["maxBedrooms"] = max_bedrooms
         if radius is not None:
             params["radius"] = radius
+        if sort_by:
+            code = _SORT_TYPES.get(sort_by)
+            if code is not None:
+                params["sortType"] = code
 
         params.update(extra_params)
         return f"{base_url}?{urlencode(params)}"

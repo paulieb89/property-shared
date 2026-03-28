@@ -75,6 +75,7 @@ class PropertyReportService:
         include_sales_market: bool = True,
         ppd_months: int = 24,
         search_radius: float = 0.5,
+        property_type: Optional[str] = None,
     ) -> PropertyReport:
         """Generate a comprehensive property report.
 
@@ -88,6 +89,7 @@ class PropertyReportService:
             include_sales_market: Include current sales market
             ppd_months: Lookback period for PPD comparables
             search_radius: Radius in miles for Rightmove searches
+            property_type: Filter PPD comps by type: F=flat, D=detached, S=semi, T=terraced (default all)
 
         Returns:
             PropertyReport with all available data
@@ -105,7 +107,7 @@ class PropertyReportService:
 
         # Fetch data in parallel where possible
         ppd_task = asyncio.create_task(
-            self._fetch_ppd_data(postcode, street_address, ppd_months)
+            self._fetch_ppd_data(postcode, street_address, ppd_months, property_type)
         )
         epc_task = asyncio.create_task(
             self._fetch_epc_data(postcode, street_address)
@@ -215,13 +217,14 @@ class PropertyReportService:
 
     async def _fetch_ppd_data(
         self, postcode: str, address: Optional[str], months: int,
+        property_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Fetch PPD data (runs sync code in thread)."""
         try:
             result = await asyncio.to_thread(
                 self.ppd.comps,
                 postcode=postcode,
-                property_type=None,
+                property_type=property_type,
                 months=months,
                 limit=50,
                 search_level="sector",

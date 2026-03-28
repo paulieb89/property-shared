@@ -16,6 +16,7 @@ async def yield_analysis(
     postcode: str = Query(..., min_length=2, description="UK postcode"),
     months: int = Query(24, ge=1, le=120, description="PPD lookback months"),
     search_level: str = Query("sector", description="postcode|sector|district"),
+    property_type: Optional[str] = Query(None, description="D/S/T/F/O"),
     radius: float = Query(0.5, ge=0.1, description="Rental search radius (miles)"),
 ) -> YieldAnalysis:
     """Calculate gross rental yield for a UK postcode.
@@ -29,6 +30,7 @@ async def yield_analysis(
             postcode=postcode,
             months=months,
             search_level=search_level,
+            property_type=property_type,
             radius=radius,
         )
     except Exception as exc:  # noqa: BLE001

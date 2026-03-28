@@ -417,19 +417,21 @@ def rightmove_search_url(
     postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
     property_type: str = typer.Option("sale"),
     radius: Optional[float] = typer.Option(None, help="Search radius in miles"),
+    sort_by: Optional[str] = typer.Option(None, help="newest|oldest|price_low|price_high|most_reduced"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
     postcode_value = _join_tokens(postcode)
     http = _maybe_http_client(api_url)
     if http:
-        data = http.get(
-            "/v1/rightmove/search-url",
-            params={
-                "postcode": postcode_value,
-                "property_type": property_type,
-                "radius": radius,
-            },
-        )
+        params: dict = {
+            "postcode": postcode_value,
+            "property_type": property_type,
+        }
+        if radius is not None:
+            params["radius"] = radius
+        if sort_by:
+            params["sort_by"] = sort_by
+        data = http.get("/v1/rightmove/search-url", params=params)
         typer.echo(data.get("url"))
     else:
         api = RightmoveLocationAPI()
@@ -437,6 +439,7 @@ def rightmove_search_url(
             postcode_value,
             property_type=property_type,
             radius=radius,
+            sort_by=sort_by,
         )
         typer.echo(url)
 
@@ -917,6 +920,7 @@ def analysis_yield(
     postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
     months: int = typer.Option(24, help="PPD lookback months"),
     search_level: str = typer.Option("sector", help="postcode|sector|district"),
+    property_type: Optional[str] = typer.Option(None, help="D/S/T/F/O"),
     radius: float = typer.Option(0.5, help="Rental search radius (miles)"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
@@ -926,14 +930,17 @@ def analysis_yield(
     postcode_value = _join_tokens(postcode)
     http = _maybe_http_client(api_url)
     if http:
+        params: dict = {
+            "postcode": postcode_value,
+            "months": months,
+            "search_level": search_level,
+            "radius": radius,
+        }
+        if property_type:
+            params["property_type"] = property_type
         data = http.get(
             "/v1/analysis/yield",
-            params={
-                "postcode": postcode_value,
-                "months": months,
-                "search_level": search_level,
-                "radius": radius,
-            },
+            params=params,
         )
         _echo_json(data)
     else:
@@ -943,6 +950,7 @@ def analysis_yield(
             postcode=postcode_value,
             months=months,
             search_level=search_level,
+            property_type=property_type,
             radius=radius,
         ))
 
@@ -1096,6 +1104,7 @@ def report_generate(
     no_sales: bool = typer.Option(False, "--no-sales", help="Skip current sales market"),
     months: int = typer.Option(24, "--months", help="PPD lookback period in months"),
     radius: float = typer.Option(0.5, "--radius", help="Search radius in miles for Rightmove"),
+    property_type: Optional[str] = typer.Option(None, "--property-type", help="D/S/T/F/O"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
     """Generate a comprehensive property intelligence report.
@@ -1118,13 +1127,16 @@ def report_generate(
         from property_core.models.report import PropertyReport
 
         try:
-            data = http.post("/v1/property/report", json={
+            body: dict = {
                 "address": address_query,
                 "include_rentals": not no_rentals,
                 "include_sales_market": not no_sales,
                 "ppd_months": months,
                 "search_radius": radius,
-            })
+            }
+            if property_type:
+                body["property_type"] = property_type
+            data = http.post("/v1/property/report", json=body)
         except Exception as e:
             rprint(f"[red]Error:[/red] {e}")
             raise typer.Exit(code=1)
@@ -1141,6 +1153,7 @@ def report_generate(
                     include_sales_market=not no_sales,
                     ppd_months=months,
                     search_radius=radius,
+                    property_type=property_type,
                 )
             )
         except ValueError as e:
