@@ -274,11 +274,15 @@ async def property_yield(
 
     from property_core.interpret import classify_data_quality, classify_yield
 
+    if result.gross_yield_pct is not None:
+        data["yield_assessment"] = classify_yield(result.gross_yield_pct)
+    data["data_quality"] = classify_data_quality(result.sale_count, result.rental_count)
+
     summary = f"Yield analysis for {postcode}"
     if result.gross_yield_pct is not None:
         summary += f": {result.gross_yield_pct:.1f}% gross yield"
-        summary += f" ({classify_yield(result.gross_yield_pct)})"
-    summary += f", data quality: {classify_data_quality(result.sale_count, result.rental_count)}"
+        summary += f" ({data['yield_assessment']})"
+    summary += f", data quality: {data['data_quality']}"
 
     return ToolResult(content=_content(summary, data), structured_content=data)
 
@@ -308,11 +312,15 @@ async def rental_analysis(
     )
     data = result.model_dump(mode="json")
 
+    if result.gross_yield_pct is not None:
+        from property_core.interpret import classify_yield
+        data["yield_assessment"] = classify_yield(result.gross_yield_pct)
+
     summary = f"Rental analysis for {postcode}: {result.rental_listings_count} listings"
     if result.median_rent_monthly:
         summary += f", median \u00a3{result.median_rent_monthly:,.0f}/month"
     if result.gross_yield_pct is not None:
-        summary += f", {result.gross_yield_pct:.1f}% gross yield"
+        summary += f", {result.gross_yield_pct:.1f}% gross yield ({data['yield_assessment']})"
 
     return ToolResult(content=_content(summary, data), structured_content=data)
 

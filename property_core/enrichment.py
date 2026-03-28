@@ -136,6 +136,6 @@ def compute_enriched_stats(comps: PPDCompsResponse) -> PPDCompsResponse:
 
     comps.median_price_per_sqft = int(median(prices_per_sqft)) if prices_per_sqft else None
     comps.epc_match_rate = (
-        matched / len(comps.transactions) if comps.transactions else None
+        round(matched / len(comps.transactions) * 100) if comps.transactions else None
     )
     return comps
