@@ -32,13 +32,15 @@ def _content(summary: str, data: dict) -> str:
 mcp = FastMCP(
     "property-server",
     instructions=(
-        "UK property data tools. Start with property_report for full data pull "
-        "(comps + EPC + yield + market in one call). Use property_comps for area "
-        "comparable sales with stats, ppd_transactions for specific property history "
-        "or filtered searches, rightmove_search to browse current listings for sale "
-        "or rent, rightmove_listing for full details on a specific property. "
-        "property_epc for energy certificates, property_yield or rental_analysis "
-        "for rental market and yield figures, stamp_duty for SDLT, "
+        "UK property data tools. Use property_report for a full data pull when "
+        "you have a street address + postcode (comps + EPC + yield + market in "
+        "one call). For postcode-only queries, use property_comps (comparable "
+        "sales with EPC-enriched price/sqft) and property_yield separately. "
+        "ppd_transactions for specific property history or filtered searches, "
+        "rightmove_search to browse current listings for sale or rent, "
+        "rightmove_listing for full details on a specific property. "
+        "property_epc for energy certificates (needs street address for exact "
+        "match). rental_analysis for rental market figures, stamp_duty for SDLT, "
         "property_blocks for block-buy opportunities, planning_search for council "
         "planning portals, company_search for Companies House lookups."
     ),
