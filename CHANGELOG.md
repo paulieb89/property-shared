@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.4.0 (2026-03-28)
+
+### New Features
+- **`property_type` filter on yield and report** — `calculate_yield()`, `generate_report()`, and all consumers (MCP `property_yield`/`property_report`, API `/v1/analysis/yield`/`/v1/property/report`, CLI `analysis yield`/`report generate`) now accept `property_type` (F/D/S/T) to filter comparable sales. Prevents skewed figures in mixed-stock areas.
+- **`sort_by` on Rightmove search** — `build_search_url()` and all consumers (MCP `rightmove_search`, API `/v1/rightmove/search-url`, CLI `rightmove search-url`) now accept `sort_by`: `newest`, `oldest`, `price_low`, `price_high`, `most_reduced`.
+
+### Fixed
+- MCP tool descriptions no longer imply analytical inference — "deal analysis" → "data pull", "yield estimate" → "yield calculation", dropped "market assessment" and "refurb potential"
+- `rightmove_listing` MCP tool docstring now shows both URL and numeric ID formats are accepted
+
 ## v1.3.1 (2026-03-21)
 
 ### Fixed
