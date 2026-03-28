@@ -65,8 +65,12 @@ async def property_report(
     current sales market listings, rental yield calculation, and price range
     from area median.
 
+    Requires a street address + postcode for subject property identification.
+    Postcode-only (e.g. "NG1 2NS") returns area-level data without a subject
+    property — use property_comps or property_yield for postcode-only queries.
+
     Args:
-        address: Address with postcode, e.g. "10 Downing Street, SW1A 2AA"
+        address: Street address with postcode, e.g. "10 Downing Street, SW1A 2AA"
         include_rentals: Include Rightmove rental market analysis (default true)
         include_sales_market: Include Rightmove sales market (default true)
         ppd_months: Lookback period for comparable sales (default 24)
