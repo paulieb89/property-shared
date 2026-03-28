@@ -10,6 +10,7 @@ primary_region = "lhr"  # London - best for UK council sites
 
 [env]
   PORT = "8080"
+  FASTMCP_STATELESS_HTTP = "true"
 
 # Planning scraper needs more memory for Playwright/Chromium
 [[vm]]
