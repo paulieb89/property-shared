@@ -25,9 +25,18 @@ Want structured property reports instead of raw data? Claude skills that chain t
 
 ```bash
 pip install property-shared
+
+# or with uv
+uv add property-shared
 ```
 
-Extras: `pip install property-shared[mcp]` for MCP server, `[cli]` for CLI, `[api]` for HTTP server, `[dev]` for tests.
+Extras: `[mcp]` for MCP server, `[cli]` for CLI, `[api]` for HTTP server, `[dev]` for tests.
+
+```bash
+pip install property-shared[mcp,cli]
+# or
+uv add property-shared --extra mcp --extra cli
+```
 
 ## Use as a Python Library
 
@@ -66,7 +75,7 @@ from property_core import classify_yield, classify_data_quality, generate_insigh
 ## Use as CLI
 
 ```bash
-pip install property-shared[cli]
+pip install property-shared[cli]  # or: uv add property-shared --extra cli
 
 # Comparable sales
 property-cli ppd comps "SW1A 1AA" --months 24 --property-type F
@@ -91,7 +100,7 @@ Add `--api-url http://localhost:8000` to any command to route through the HTTP A
 For Claude.ai, Claude Code, ChatGPT, or any MCP-compatible host.
 
 ```bash
-pip install property-shared[mcp]
+pip install property-shared[mcp]  # or: uv add property-shared --extra mcp
 property-mcp  # starts stdio transport
 ```
 
@@ -104,7 +113,7 @@ See [mcp_server/README.md](mcp_server/README.md) for connection setup and tool d
 ## Use as HTTP API
 
 ```bash
-pip install property-shared[api]
+pip install property-shared[api]  # or: uv add property-shared --extra api
 property-api  # starts on port 8000
 ```
 
