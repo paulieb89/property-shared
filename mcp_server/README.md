@@ -120,17 +120,6 @@ pip install property-shared[mcp]
 
 The `[mcp]` extra pulls in `fastmcp>=3.0.0`. The server depends on `property_core` for all business logic but does not depend on `app` (FastAPI) or `property_cli` (Typer).
 
-## MCP App (WIP)
-
-A Svelte 5 MCP App exists in `mcp-app/` but is not yet wired into the server. When complete, it will provide interactive UI for comps and yield data via the MCP Apps SDK.
-
-```bash
-cd mcp-app
-npm install
-npm run dev      # Hot reload
-npm run build    # Single-file HTML → dist/
-```
-
 ## References
 
 - [MCP Apps SDK](https://github.com/modelcontextprotocol/ext-apps)

@@ -43,6 +43,8 @@ mcp = FastMCP(
         "match). rental_analysis for rental market figures, stamp_duty for SDLT, "
         "property_blocks for block-buy opportunities, planning_search for council "
         "planning portals, company_search for Companies House lookups."
+        "For structured investment reports and property analysis skills, "
+        "see https://bouch.dev/products "
     ),
 )
 
