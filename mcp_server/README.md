@@ -1,186 +1,137 @@
 # Property MCP Server
 
-MCP server with interactive UI for UK property data tools. Deployed at https://property-shared.fly.dev/mcp
+MCP server wrapping `property_core` for AI hosts (Claude.ai, Claude Code, ChatGPT). Deployed at https://property-shared.fly.dev/mcp
+
+## Quick Start
+
+```bash
+# Local (stdio transport — Claude Code, Claude Desktop)
+uv run --extra mcp property-mcp
+
+# Or install from PyPI
+pip install property-shared[mcp]
+property-mcp
+```
+
+### Connect to Claude Code
+
+Add to `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "property": {
+      "command": "uv",
+      "args": ["run", "--extra", "mcp", "property-mcp"]
+    }
+  }
+}
+```
+
+### Connect to Claude.ai (remote)
+
+The server is deployed at `https://property-shared.fly.dev/mcp` using Streamable HTTP transport with `FASTMCP_STATELESS_HTTP=true` for Fly.io compatibility.
 
 ## Tools
 
-| Tool | Description | UI |
-|------|-------------|-----|
-| `property_comps` | Comparable property sales with price statistics | Stats grid + transaction table |
-| `property_yield` | Rental yield analysis (PPD + Rightmove) | Gauge + stats + quality badge |
+| Tool | Description |
+|------|-------------|
+| `property_report` | Full data pull for a property (comps + EPC + yield + market). Needs street address + postcode. |
+| `property_comps` | Comparable sales with EPC-enriched price/sqft. Accepts `property_type` filter. |
+| `ppd_transactions` | Land Registry transaction search by postcode, address, date range, or price. |
+| `property_yield` | Rental yield calculation (PPD sales + Rightmove rentals). Accepts `property_type` filter. |
+| `rental_analysis` | Rental market stats with optional yield from purchase price. |
+| `property_epc` | EPC certificate lookup. Needs street address for exact match. |
+| `rightmove_search` | Rightmove listings for sale or rent. Accepts `sort_by`. |
+| `rightmove_listing` | Full details for a specific Rightmove listing (URL or numeric ID). |
+| `property_blocks` | Find buildings with multiple flat sales — block-buy opportunities. |
+| `stamp_duty` | SDLT calculator with surcharges (additional property, FTB, non-resident). |
+| `planning_search` | Find local council planning portal for a postcode. |
+| `company_search` | Companies House lookup by name or company number. |
 
-The pattern is:
+## Skills
 
-
-property_core/           ← Business logic lives here
-├── *_client.py            Transport (HTTP/SPARQL → raw dicts)
-├── *_service.py           Domain (parsing → typed Pydantic models)
-└── models/*.py            Data models
-
-app/                     ← Thin FastAPI wrapper
-└── api/v1/*.py            Calls property_core, adds HTTP envelopes
-
-mcp_server/              ← Thin FastMCP wrapper  
-└── server.py              Calls property_core, adds MCP tool metadata
-To add a new feature:
-
-Core service in property_core/
-
-
-# property_core/stamp_duty_service.py
-from property_core.models.stamp_duty import StampDutyResult
-
-def calculate_stamp_duty(price: int, first_time: bool) -> StampDutyResult:
-    # Business logic here
-    return StampDutyResult(...)
-FastAPI route in app/api/v1/
-
-
-from property_core import calculate_stamp_duty
-
-@router.get("/stamp-duty")
-async def stamp_duty_endpoint(price: int, first_time: bool = False):
-    return calculate_stamp_duty(price, first_time)
-MCP tool in mcp_server/server.py
-
-
-from property_core import calculate_stamp_duty
-
-@mcp.tool(meta=TOOL_UI_META)
-def stamp_duty(price: int, first_time: bool = False) -> types.CallToolResult:
-    result = calculate_stamp_duty(price, first_time)
-    return types.CallToolResult(
-        content=[types.TextContent(type="text", text=f"Stamp duty: £{result.total}")],
-        structuredContent=result.model_dump(),
-    )
-Core stays framework-agnostic. Both APIs are just thin wrappers calling the same logic.
+Want structured reports instead of raw data? Claude skills that chain these tools into investment summaries and property reports are available at [bouch.dev/products](https://bouch.dev/products).
 
 ## Architecture
 
 ```
 mcp_server/
-├── server.py              # FastMCP server with tools + resources
-├── ui/
-│   └── property_dashboard.html  # Vite-bundled Svelte UI (single file)
-└── mcp-app/               # Svelte 5 source
-    ├── src/
-    │   ├── App.svelte     # MCP lifecycle + view routing
-    │   ├── lib/
-    │   │   ├── types.ts   # Shared interfaces + type guards
-    │   │   └── formatters.ts  # Display formatting utilities
-    │   ├── components/
-    │   │   ├── StatCard.svelte      # Reusable stat display
-    │   │   ├── DataBadge.svelte     # Quality/status badge
-    │   │   ├── YieldGauge.svelte    # Circular yield gauge
-    │   │   └── TransactionTable.svelte  # Property sales table
-    │   └── views/
-    │       ├── CompsView.svelte     # Comparable sales view
-    │       └── YieldView.svelte     # Yield analysis view
-    ├── mcp-app.html       # Entry HTML
-    ├── vite.config.ts     # Vite + vite-plugin-singlefile
-    └── package.json
+├── server.py              # FastMCP server — 12 tools, all async
+├── ui/                    # MCP App UI (Svelte, not yet wired)
+│   └── property_dashboard.html
+└── mcp-app/               # Svelte 5 source for MCP App (WIP)
+    └── src/
 ```
 
-## How It Works
-
-1. **Server** registers tools with `_meta.ui.resourceUri` linking to UI resource
-2. **Both tools** share the same unified UI (`property_dashboard.html`)
-3. **UI detects data type** from `structuredContent`:
-   - Has `gross_yield_pct` → Yield view
-   - Has `transactions` → Comps view
-4. **Host** (Claude.ai/ChatGPT) renders the UI in an iframe
-
-## Development
-
-```bash
-cd mcp-app
-
-# Install dependencies
-npm install
-
-# Dev mode (hot reload)
-npm run dev
-
-# Build single-file HTML
-npm run build
-
-# Copy to server
-cp dist/mcp-app.html ../ui/property_dashboard.html
-```
-
-## Server Setup
-
-The server uses FastMCP with stateless HTTP transport:
+The server is a thin consumer of `property_core`. Each tool:
+1. Lazy-imports from `property_core`
+2. Calls the service (wrapping sync calls with `anyio.to_thread.run_sync`)
+3. Returns `ToolResult` with summary text + full JSON data
 
 ```python
-mcp = FastMCP(
-    "property-server",
-    host="0.0.0.0",
-    port=8080,
-    stateless_http=True,
-)
-```
+@mcp.tool()
+async def property_comps(postcode: str, ...) -> ToolResult:
+    from property_core import PPDService
 
-### Tool Registration Pattern
-
-```python
-WIDGET_URI = "ui://property/comps-dashboard"
-WIDGET_MIME = "text/html;profile=mcp-app"
-
-TOOL_UI_META = {
-    "ui": {"resourceUri": WIDGET_URI},
-    "ui/resourceUri": WIDGET_URI,  # flat key for Claude.ai compat
-}
-
-@mcp.resource(WIDGET_URI, mime_type=WIDGET_MIME)
-def dashboard_resource() -> str:
-    return load_html()
-
-@mcp.tool(meta=TOOL_UI_META)
-async def property_comps(...) -> types.CallToolResult:
-    return types.CallToolResult(
-        content=[...],  # Text fallback for non-UI hosts
-        structuredContent=data,  # Structured data for UI
-        _meta=TOOL_UI_META,
+    result = await anyio.to_thread.run_sync(
+        partial(PPDService().comps, postcode=postcode, ...)
     )
+    data = result.model_dump(mode="json")
+    summary = f"Found {result.count} comps for {postcode}"
+    return ToolResult(content=_content(summary, data), structured_content=data)
 ```
 
-## UI Component Pattern
+### Response contract
 
-Components use Svelte 5 runes (`$props`, `$derived`, `$state`):
+- `content` — summary line + slimmed JSON (strips `raw`, `images`, `floorplans`, `epc_match`). All LLM hosts read this.
+- `structured_content` — full data dict for programmatic consumers and MCP Apps.
 
-```svelte
-<script lang="ts">
-import { formatPrice } from "../lib/formatters";
+### Interpretation
 
-interface Props {
-  label: string;
-  value: string;
-}
+The MCP server populates `yield_assessment` ("strong"/"average"/"weak") and `data_quality` ("good"/"low"/"insufficient") from `property_core.interpret` helpers — fixed server-side thresholds, not LLM inference. EPC enrichment is on by default for `property_comps`.
 
-let { label, value }: Props = $props();
-</script>
+## Environment Variables
 
-<div class="stat-card">
-  <span class="label">{label}</span>
-  <span class="value">{value}</span>
-</div>
-```
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `EPC_API_EMAIL` | For EPC tools | EPC Register API email |
+| `EPC_API_KEY` | For EPC tools | EPC Register API key |
+| `COMPANIES_HOUSE_API_KEY` | For company_search | Companies House API key |
+| `RIGHTMOVE_DELAY_SECONDS` | No | Rate limit delay (default 0.6s) |
+| `MCP_TRANSPORT` | No | `stdio` (default), `sse`, or `http` |
+| `FASTMCP_STATELESS_HTTP` | For Fly.io | Set `true` for stateless HTTP transport |
 
-## Deployment
+## Deployment (Fly.io)
 
 ```bash
-# From project root
 fly deploy
 ```
 
-## Testing
+The Fly deployment mounts the MCP endpoint at `/mcp` on the FastAPI app via middleware (avoids Starlette 307 redirect on `/mcp` → `/mcp/`). Configuration in `fly.toml` sets `min_machines_running = 1` to avoid cold-start timeouts.
 
-Test in Claude.ai or ChatGPT with MCP enabled:
-- "Get comps for SW1A 1AA"
-- "What's the rental yield for NG1?"
+## Packaging
+
+Currently bundled with `property-shared` on PyPI:
+
+```bash
+pip install property-shared[mcp]
+```
+
+The `[mcp]` extra pulls in `fastmcp>=3.0.0`. The server depends on `property_core` for all business logic but does not depend on `app` (FastAPI) or `property_cli` (Typer).
+
+## MCP App (WIP)
+
+A Svelte 5 MCP App exists in `mcp-app/` but is not yet wired into the server. When complete, it will provide interactive UI for comps and yield data via the MCP Apps SDK.
+
+```bash
+cd mcp-app
+npm install
+npm run dev      # Hot reload
+npm run build    # Single-file HTML → dist/
+```
 
 ## References
 
 - [MCP Apps SDK](https://github.com/modelcontextprotocol/ext-apps)
-- [MCP_APPS_REFERENCE.md](./MCP_APPS_REFERENCE.md) - SDK API reference
+- [MCP_APPS_REFERENCE.md](./MCP_APPS_REFERENCE.md) — SDK API patterns
