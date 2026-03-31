@@ -29,6 +29,19 @@ def _content(summary: str, data: dict) -> str:
     """Build content string: summary + slimmed JSON data for LLM hosts."""
     return summary + "\n\n" + json.dumps(_slim(data), indent=2, default=str)
 
+
+def _result(summary: str, data: dict) -> ToolResult:
+    """Build a ToolResult with slimmed data for both content and structured_content.
+
+    Strips raw, images, floorplans, epc_match from structured_content to avoid
+    flooding LLM context windows. API consumers who need raw data should use the
+    REST API directly.
+    """
+    return ToolResult(
+        content=_content(summary, data),
+        structured_content=_slim(data),
+    )
+
 mcp = FastMCP(
     "property-server",
     instructions=(
@@ -103,7 +116,7 @@ async def property_report(
     if sources:
         summary += f"\nSources: {', '.join(sources)}"
 
-    return ToolResult(content=_content(summary, data), structured_content=data)
+    return _result(summary, data)
 
 
 @mcp.tool()
@@ -168,7 +181,7 @@ async def property_comps(
     if enrich_epc and result.epc_match_rate is not None:
         summary += f" (EPC matched {result.epc_match_rate}%)"
 
-    return ToolResult(content=_content(summary, data), structured_content=data)
+    return _result(summary, data)
 
 
 @mcp.tool()
@@ -242,7 +255,7 @@ async def ppd_transactions(
     if result.get("warnings"):
         summary += f" (warnings: {', '.join(result['warnings'])})"
 
-    return ToolResult(content=_content(summary, result), structured_content=result)
+    return _result(summary, result)
 
 
 @mcp.tool()
@@ -288,7 +301,7 @@ async def property_yield(
         summary += f" ({data['yield_assessment']})"
     summary += f", data quality: {data['data_quality']}"
 
-    return ToolResult(content=_content(summary, data), structured_content=data)
+    return _result(summary, data)
 
 
 @mcp.tool()
@@ -326,7 +339,7 @@ async def rental_analysis(
     if result.gross_yield_pct is not None:
         summary += f", {result.gross_yield_pct:.1f}% gross yield ({data['yield_assessment']})"
 
-    return ToolResult(content=_content(summary, data), structured_content=data)
+    return _result(summary, data)
 
 
 @mcp.tool()
@@ -366,7 +379,7 @@ async def property_epc(
     if result.construction_age:
         parts.append(f"Built: {result.construction_age}")
 
-    return ToolResult(content=_content(", ".join(parts), data), structured_content=data)
+    return _result(", ".join(parts), data)
 
 
 @mcp.tool()
@@ -429,7 +442,7 @@ async def rightmove_search(
         median = int(stat_median(prices))
         summary += f", median \u00a3{median:,}, range \u00a3{min(prices):,}-\u00a3{max(prices):,}"
 
-    return ToolResult(content=_content(summary, data), structured_content=data)
+    return _result(summary, data)
 
 
 @mcp.tool()
@@ -461,7 +474,7 @@ async def rightmove_listing(
     if result.display_size:
         summary += f", {result.display_size}"
 
-    return ToolResult(content=_content(summary, data), structured_content=data)
+    return _result(summary, data)
 
 
 @mcp.tool()
@@ -497,7 +510,7 @@ async def property_blocks(
         top = result.blocks[0]
         summary += f" (top: {top.building_name}, {top.transaction_count} sales)"
 
-    return ToolResult(content=_content(summary, data), structured_content=data)
+    return _result(summary, data)
 
 
 @mcp.tool()
@@ -527,7 +540,7 @@ async def stamp_duty(
 
     summary = f"SDLT for \u00a3{price:,}: \u00a3{result.total_sdlt:,.0f} ({result.effective_rate}% effective rate)"
 
-    return ToolResult(content=_content(summary, data), structured_content=data)
+    return _result(summary, data)
 
 
 @mcp.tool()
@@ -559,7 +572,7 @@ async def planning_search(
     else:
         summary = f"No planning portal found for {postcode}"
 
-    return ToolResult(content=_content(summary, result), structured_content=result)
+    return _result(summary, result)
 
 
 @mcp.tool()
@@ -589,7 +602,7 @@ async def company_search(
     else:
         summary = f"Found {result.total_results} companies for '{query}'"
 
-    return ToolResult(content=_content(summary, data), structured_content=data)
+    return _result(summary, data)
 
 
 # ---------------------------------------------------------------------------
