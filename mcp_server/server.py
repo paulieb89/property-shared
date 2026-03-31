@@ -115,6 +115,7 @@ async def property_comps(
     address: Optional[str] = None,
     property_type: Optional[str] = None,
     enrich_epc: bool = True,
+    auto_escalate: bool = True,
 ) -> ToolResult:
     """Comparable property sales from Land Registry Price Paid Data.
 
@@ -130,6 +131,7 @@ async def property_comps(
         address: Optional street address to identify subject property and show percentile rank
         property_type: Filter by type: F=flat, D=detached, S=semi, T=terraced (default all)
         enrich_epc: Add floor area, price/sqft, and EPC rating to each comp (default true)
+        auto_escalate: Widen search area if fewer than 5 results (default true). Set false to keep results local — useful when district-level escalation would include irrelevant areas.
     """
     from property_core import PPDService
     from property_core.epc_client import EPCClient
@@ -144,7 +146,7 @@ async def property_comps(
             search_level=search_level,
             address=address,
             property_type=property_type,
-            auto_escalate=True,
+            auto_escalate=auto_escalate,
         )
     )
 
