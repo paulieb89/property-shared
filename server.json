@@ -1,0 +1,24 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.paulieb89/property-shared",
+  "title": "UK Property Data",
+  "description": "UK property data — Land Registry comps, EPC, Rightmove, rental yields, stamp duty, Companies House",
+  "version": "1.4.0",
+  "websiteUrl": "https://bouch.dev/products/property-report",
+  "repository": {
+    "url": "https://github.com/paulieb89/property-shared",
+    "source": "github"
+  },
+  "remotes": [
+    { "type": "streamable-http", "url": "https://property-shared.fly.dev/mcp" }
+  ],
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "property-shared",
+      "version": "1.4.0",
+      "runtimeHint": "uvx",
+      "transport": { "type": "stdio" }
+    }
+  ]
+}
