@@ -309,16 +309,19 @@ async def rental_analysis(
     postcode: str,
     radius: float = 0.5,
     purchase_price: Optional[int] = None,
+    auto_escalate: bool = True,
 ) -> ToolResult:
     """Rental market analysis for a UK postcode.
 
     Returns median/average rent, listing count, and rent range.
     Optionally calculates gross yield from a given purchase price.
+    Auto-escalates search radius if local listings are sparse (thin market).
 
     Args:
         postcode: UK postcode (e.g. "NG1 1AA")
         radius: Search radius in miles (default 0.5)
         purchase_price: Optional purchase price to calculate gross yield
+        auto_escalate: Widen radius if fewer than 3 listings found (default true)
     """
     from property_core.rental_service import analyze_rentals
 
@@ -326,6 +329,7 @@ async def rental_analysis(
         postcode,
         radius=radius,
         purchase_price=purchase_price,
+        auto_escalate=auto_escalate,
     )
     data = result.model_dump(mode="json")
 
@@ -338,6 +342,8 @@ async def rental_analysis(
         summary += f", median \u00a3{result.median_rent_monthly:,.0f}/month"
     if result.gross_yield_pct is not None:
         summary += f", {result.gross_yield_pct:.1f}% gross yield ({data['yield_assessment']})"
+    if result.escalated_from is not None:
+        summary += f" (radius widened from {result.escalated_from}mi to {result.escalated_to}mi)"
 
     return _result(summary, data)
 

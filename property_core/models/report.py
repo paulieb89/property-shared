@@ -73,6 +73,11 @@ class RentalAnalysis(BaseModel):
     estimated_annual_rent: Optional[int] = None
     gross_yield_pct: Optional[float] = None
     yield_assessment: Optional[str] = None  # "strong", "average", "weak"
+    # Auto-escalation metadata
+    thin_market: bool = False
+    escalated_from: Optional[float] = None  # radius that was too thin
+    escalated_to: Optional[float] = None    # final radius used
+    search_postcode: str = ""
 
 
 class YieldAnalysis(BaseModel):

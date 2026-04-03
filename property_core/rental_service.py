@@ -15,6 +15,9 @@ from property_core.models.report import RentalAnalysis
 from property_core.rightmove_location import RightmoveLocationAPI
 from property_core.rightmove_scraper import fetch_listings
 
+ESCALATION_RADII = [0.5, 1.0, 1.5]
+_DEFAULT_THIN_THRESHOLD = 3
+
 
 def _filter_outliers(prices: list[int]) -> list[int]:
     """Remove outliers using IQR method.
@@ -62,6 +65,8 @@ async def analyze_rentals(
     rightmove_delay: Optional[float] = None,
     rightmove_location: Optional[RightmoveLocationAPI] = None,
     filter_outliers: bool = True,
+    auto_escalate: bool = False,
+    thin_market_threshold: int = _DEFAULT_THIN_THRESHOLD,
 ) -> RentalAnalysis:
     """Analyze rental listings for a postcode with optional yield calculation.
 
@@ -77,9 +82,15 @@ async def analyze_rentals(
         rightmove_location: Optional injected RightmoveLocationAPI.
         filter_outliers: Apply IQR filtering to rent range display (default True).
             Median and average are always computed on the full dataset.
+        auto_escalate: Widen radius if listing count is below thin_market_threshold.
+            Escalates through ESCALATION_RADII (0.5 → 1.0 → 1.5 mi).
+        thin_market_threshold: Minimum listing count before a result is considered
+            thin market (default 3).
 
     Returns:
         RentalAnalysis with median/average rent and optional yield fields.
+        Sets thin_market, search_postcode, and escalated_from/escalated_to if
+        auto-escalation occurred.
     """
     delay = rightmove_delay
     if delay is None:
@@ -111,17 +122,40 @@ async def analyze_rentals(
     # Optionally filter outliers for range display (keeps median/avg on full dataset)
     filtered_prices = _filter_outliers(prices) if filter_outliers else prices
 
+    listing_count = len(listings)
+
     rental = RentalAnalysis(
         search_radius_miles=radius,
-        rental_listings_count=len(listings),
+        rental_listings_count=listing_count,
         average_rent_monthly=avg_rent,
         median_rent_monthly=median_rent,
         rent_range_low=min(filtered_prices) if filtered_prices else None,
         rent_range_high=max(filtered_prices) if filtered_prices else None,
+        thin_market=listing_count < thin_market_threshold,
+        search_postcode=postcode,
     )
 
     if purchase_price is not None:
         _calculate_yield(rental, purchase_price)
+
+    if auto_escalate and rental.thin_market:
+        next_radii = [r for r in ESCALATION_RADII if r > radius]
+        if next_radii:
+            wider = await analyze_rentals(
+                postcode,
+                radius=next_radii[0],
+                purchase_price=purchase_price,
+                rightmove_delay=rightmove_delay,
+                rightmove_location=rightmove_location,
+                filter_outliers=filter_outliers,
+                auto_escalate=True,
+                thin_market_threshold=thin_market_threshold,
+            )
+            wider = wider.model_copy(update={
+                "escalated_from": radius,
+                "escalated_to": next_radii[0],
+            })
+            return wider
 
     return rental
 
