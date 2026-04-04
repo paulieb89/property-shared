@@ -310,6 +310,7 @@ async def rental_analysis(
     radius: float = 0.5,
     purchase_price: Optional[int] = None,
     auto_escalate: bool = True,
+    building_type: Optional[str] = None,
 ) -> ToolResult:
     """Rental market analysis for a UK postcode.
 
@@ -322,6 +323,7 @@ async def rental_analysis(
         radius: Search radius in miles (default 0.5)
         purchase_price: Optional purchase price to calculate gross yield
         auto_escalate: Widen radius if fewer than 3 listings found (default true)
+        building_type: Filter by building type: F=flat, D=detached, S=semi, T=terraced (default all)
     """
     from property_core.rental_service import analyze_rentals
 
@@ -330,6 +332,7 @@ async def rental_analysis(
         radius=radius,
         purchase_price=purchase_price,
         auto_escalate=auto_escalate,
+        building_type=building_type,
     )
     data = result.model_dump(mode="json")
 
@@ -392,6 +395,7 @@ async def property_epc(
 async def rightmove_search(
     postcode: str,
     property_type: str = "sale",
+    building_type: Optional[str] = None,
     min_price: Optional[int] = None,
     max_price: Optional[int] = None,
     min_bedrooms: Optional[int] = None,
@@ -407,6 +411,7 @@ async def rightmove_search(
     Args:
         postcode: UK postcode (e.g. "NG1 1AA", "SW1A 2AA")
         property_type: "sale" or "rent" (default "sale")
+        building_type: Filter by building type: F=flat, D=detached, S=semi, T=terraced (default all)
         min_price: Minimum price/rent filter in £
         max_price: Maximum price/rent filter in £
         min_bedrooms: Minimum bedrooms filter
@@ -423,6 +428,7 @@ async def rightmove_search(
             RightmoveLocationAPI().build_search_url,
             postcode,
             property_type=property_type,
+            building_type=building_type,
             min_price=min_price,
             max_price=max_price,
             min_bedrooms=min_bedrooms,

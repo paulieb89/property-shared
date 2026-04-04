@@ -23,6 +23,7 @@ router = APIRouter(prefix="/rightmove", tags=["rightmove"])
 async def search_url(
     postcode: str = Query(..., min_length=2),
     property_type: Literal["sale", "rent"] = "sale",
+    building_type: Optional[str] = Query(None, description="F=flat, D=detached, S=semi, T=terraced"),
     min_price: Optional[int] = Query(None, ge=0),
     max_price: Optional[int] = Query(None, ge=0),
     min_bedrooms: Optional[int] = Query(None, ge=0),
@@ -37,6 +38,7 @@ async def search_url(
                 RightmoveLocationAPI().build_search_url,
                 postcode,
                 property_type=property_type,
+                building_type=building_type,
                 min_price=min_price,
                 max_price=max_price,
                 min_bedrooms=min_bedrooms,

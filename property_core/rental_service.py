@@ -67,6 +67,7 @@ async def analyze_rentals(
     filter_outliers: bool = True,
     auto_escalate: bool = False,
     thin_market_threshold: int = _DEFAULT_THIN_THRESHOLD,
+    building_type: Optional[str] = None,
 ) -> RentalAnalysis:
     """Analyze rental listings for a postcode with optional yield calculation.
 
@@ -86,6 +87,8 @@ async def analyze_rentals(
             Escalates through ESCALATION_RADII (0.5 → 1.0 → 1.5 mi).
         thin_market_threshold: Minimum listing count before a result is considered
             thin market (default 3).
+        building_type: Filter rental listings by building type using PPD codes:
+            F=flat, D=detached, S=semi-detached, T=terraced (default all types).
 
     Returns:
         RentalAnalysis with median/average rent and optional yield fields.
@@ -103,6 +106,7 @@ async def analyze_rentals(
             location_api.build_search_url,
             postcode,
             property_type="rent",
+            building_type=building_type,
             radius=radius,
         )
         listings = await asyncio.to_thread(
@@ -150,6 +154,7 @@ async def analyze_rentals(
                 filter_outliers=filter_outliers,
                 auto_escalate=True,
                 thin_market_threshold=thin_market_threshold,
+                building_type=building_type,
             )
             wider = wider.model_copy(update={
                 "escalated_from": radius,

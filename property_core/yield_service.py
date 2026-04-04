@@ -75,6 +75,7 @@ async def calculate_yield(
             location_api.build_search_url,
             postcode,
             property_type="rent",
+            building_type=property_type,
             radius=radius,
         )
         listings = await asyncio.to_thread(

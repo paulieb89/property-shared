@@ -26,6 +26,14 @@ _SORT_TYPES = {
     "most_reduced": 4,
 }
 
+# PPD property type codes → Rightmove propertyTypes param values
+_BUILDING_TYPES = {
+    "F": "flat",
+    "D": "detached",
+    "S": "semi-detached",
+    "T": "terraced",
+}
+
 
 class RightmoveLocationAPI:
     """Client for Rightmove's location autocomplete API."""
@@ -95,6 +103,7 @@ class RightmoveLocationAPI:
         postcode: str,
         *,
         property_type: str = "sale",
+        building_type: str | None = None,
         min_price: int | None = None,
         max_price: int | None = None,
         min_bedrooms: int | None = None,
@@ -133,6 +142,10 @@ class RightmoveLocationAPI:
             code = _SORT_TYPES.get(sort_by)
             if code is not None:
                 params["sortType"] = code
+        if building_type:
+            rm_type = _BUILDING_TYPES.get(building_type.upper())
+            if rm_type:
+                params["propertyTypes"] = rm_type
 
         params.update(extra_params)
         return f"{base_url}?{urlencode(params)}"

@@ -42,6 +42,7 @@ async def rental_analysis(
     postcode: str = Query(..., min_length=2, description="UK postcode"),
     radius: float = Query(0.5, ge=0.1, description="Search radius (miles)"),
     purchase_price: Optional[int] = Query(None, ge=0, description="Purchase price for yield calc"),
+    building_type: Optional[str] = Query(None, description="F=flat, D=detached, S=semi, T=terraced"),
 ) -> RentalAnalysis:
     """Rental market analysis for a UK postcode.
 
@@ -55,6 +56,7 @@ async def rental_analysis(
             postcode,
             radius=radius,
             purchase_price=purchase_price,
+            building_type=building_type,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Rental analysis failed: {exc}") from exc

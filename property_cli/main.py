@@ -416,6 +416,7 @@ app.add_typer(rightmove, name="rightmove")
 def rightmove_search_url(
     postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
     property_type: str = typer.Option("sale"),
+    building_type: Optional[str] = typer.Option(None, "--building-type", help="F=flat, D=detached, S=semi, T=terraced"),
     radius: Optional[float] = typer.Option(None, help="Search radius in miles"),
     sort_by: Optional[str] = typer.Option(None, help="newest|oldest|price_low|price_high|most_reduced"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
@@ -427,6 +428,8 @@ def rightmove_search_url(
             "postcode": postcode_value,
             "property_type": property_type,
         }
+        if building_type:
+            params["building_type"] = building_type
         if radius is not None:
             params["radius"] = radius
         if sort_by:
@@ -438,6 +441,7 @@ def rightmove_search_url(
         url = api.build_search_url(
             postcode_value,
             property_type=property_type,
+            building_type=building_type,
             radius=radius,
             sort_by=sort_by,
         )
@@ -974,6 +978,7 @@ def analysis_rental(
     postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
     radius: float = typer.Option(0.5, help="Search radius (miles)"),
     purchase_price: Optional[int] = typer.Option(None, "--price", help="Purchase price for yield calc"),
+    building_type: Optional[str] = typer.Option(None, "--building-type", help="F=flat, D=detached, S=semi, T=terraced"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
     """Rental market analysis for a postcode."""
@@ -985,6 +990,8 @@ def analysis_rental(
         params: dict = {"postcode": postcode_value, "radius": radius}
         if purchase_price is not None:
             params["purchase_price"] = purchase_price
+        if building_type:
+            params["building_type"] = building_type
         data = http.get("/v1/analysis/rental", params=params)
         _echo_json(data)
     else:
@@ -994,6 +1001,7 @@ def analysis_rental(
             postcode_value,
             radius=radius,
             purchase_price=purchase_price,
+            building_type=building_type,
         ))
 
         table = Table(title=f"Rental Analysis — {postcode_value}")
