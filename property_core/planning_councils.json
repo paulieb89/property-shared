@@ -1026,6 +1026,16 @@
       "status": "verified",
       "verified_date": "2026-01-23",
       "test_postcode": "WA7 1AA"
+    },
+    {
+      "name": "North West Leicestershire District Council",
+      "code": "north-west-leicestershire",
+      "system": "idox",
+      "base_url": "https://plans.nwleics.gov.uk/public-access/",
+      "search_url": "https://plans.nwleics.gov.uk/public-access/search.do?action=simple&searchType=Application",
+      "status": "verified",
+      "verified_date": "2026-04-04",
+      "notes": "Idox public-access portal. Search blocks datacenter IPs. No example_app yet — grab keyVal from portal manually."
     }
   ],
   "untested": [
@@ -1042,14 +1052,6 @@
       "base_url": "https://planning.derbyshire.gov.uk/",
       "status": "untested",
       "notes": "Unknown system - needs investigation"
-    },
-    {
-      "name": "North West Leicestershire District Council",
-      "code": "north-west-leicestershire",
-      "system": "unknown",
-      "base_url": "https://www.nwleics.gov.uk/pages/view_planning_applications",
-      "status": "untested",
-      "notes": "Unknown system - portal URL not found. May use embedded system."
     },
     {
       "name": "Allerdale",

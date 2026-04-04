@@ -214,7 +214,7 @@ print(result.rural_urban)     # Urban: Nearer to a major town or city
 
 ## Planning Council Lookup
 
-Find the planning portal for any UK postcode (98 verified councils).
+Find the planning portal for any UK postcode (99 verified councils).
 
 ```python
 from property_core import PlanningService

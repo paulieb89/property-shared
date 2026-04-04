@@ -14,7 +14,7 @@ Use it as a **Python library**, **CLI**, **HTTP API**, or **MCP server for AI ag
 | **Yield Analysis** | Gross yield from PPD sales + Rightmove rentals combined |
 | **Stamp Duty** | SDLT calculation with April 2025 bands, BTL surcharge, FTB relief |
 | **Block Analyzer** | Groups flat sales by building to spot investor exits |
-| **Planning** | Local council planning portal lookup (98 verified councils) |
+| **Planning** | Local council planning portal lookup (99 verified councils) |
 | **Companies House** | Company search and lookup by name or number |
 
 ## Skills

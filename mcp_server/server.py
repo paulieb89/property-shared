@@ -553,10 +553,11 @@ async def stamp_duty(
 async def planning_search(
     postcode: str,
 ) -> ToolResult:
-    """Find the planning portal for a UK postcode.
+    """Find the planning portal URL for a UK postcode.
 
-    Returns the local council, planning system type, and direct search URLs.
-    For Idox councils (most common), provides a clickable URL pre-filled with the postcode.
+    Returns the council name, planning system type, and a direct URL to open in a browser.
+    Does NOT return planning application data — scraping is blocked by council portals.
+    Use the returned search_urls.direct_search link to browse applications manually.
 
     Args:
         postcode: UK postcode (e.g. "S1 1AA", "SW1A 2AA")

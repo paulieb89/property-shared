@@ -10,7 +10,7 @@ Property Shared is a FastAPI service + pure-Python core library for UK property 
 - **PPD** (Price Paid Data) - Land Registry transactions via SPARQL/Linked Data API
 - **EPC** - Energy Performance Certificates (requires API credentials)
 - **Rightmove** - Property listings via scraping with built-in politeness
-- **Planning** - UK council planning applications via vision-guided browser automation (98 verified councils)
+- **Planning** - UK council planning applications via vision-guided browser automation (99 verified councils)
 - **Stamp Duty** - SDLT calculator with April 2025 bands, additional property/FTB/non-resident surcharges
 - **Block Analyzer** - Groups PPD transactions by building to find bulk-buy opportunities
 - **Companies House** - Company search and lookup via free API (requires API key)
@@ -74,7 +74,7 @@ property_core/              # Pure Python library (no FastAPI, no DB assumptions
 ├── stamp_duty.py           # SDLT calculator: April 2025 bands, surcharges, FTB relief
 ├── block_service.py        # Block analyzer: groups PPD transactions by building
 ├── planning_scraper.py     # Vision-guided planning portal scraper (Playwright + OpenAI)
-└── planning_councils.json  # Verified council database (98 councils, 6 system types)
+└── planning_councils.json  # Verified council database (99 councils, 6 system types)
 
 app/                        # FastAPI service (thin HTTP wrapper)
 ├── api/v1/                 # Versioned routers (import directly from property_core)

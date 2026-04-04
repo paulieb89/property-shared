@@ -59,7 +59,7 @@ def detect_system_from_url(url: str) -> str:
 
     if "northgate" in url_lower or "planningexplorer" in url_lower:
         return "northgate"
-    if "publicaccess" in url_lower or "online-applications" in url_lower or "idoxpa" in url_lower:
+    if "publicaccess" in url_lower or "public-access" in url_lower or "online-applications" in url_lower or "idoxpa" in url_lower:
         return "idox"
     if "arcus" in url_lower:
         return "arcus"

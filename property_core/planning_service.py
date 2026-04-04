@@ -246,9 +246,11 @@ class PlanningService:
         }
 
     def search(self, postcode: str) -> Dict[str, Any]:
-        """Search for planning applications by postcode.
+        """Find the planning portal URL for a postcode.
 
-        Returns the council info and search URLs.
+        Returns the council info and portal search URLs to visit in a browser.
+        Does not scrape or return planning application data — use the
+        returned URLs to search the portal directly.
         """
         council_result = self.council_for_postcode(postcode)
 
@@ -275,5 +277,6 @@ class PlanningService:
                 "status": council.get("status"),
             },
             "search_urls": search_urls,
-            "note": "Planning portal scraping requires UK residential IP. Councils block datacenter IPs.",
+            "scraping_available": False,
+            "note": "Returns portal URLs only. Open search_urls.direct_search in a browser to find applications. Automated scraping is blocked by councils.",
         }

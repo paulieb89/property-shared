@@ -34,7 +34,7 @@ Three-layer pattern:
 | `enrichment.py` | EPC enrichment pipeline |
 | `interpret.py` | Opt-in interpretation helpers (yield/quality labels, insights, value ranges) |
 | `epc_client.py` | Transport: EPC API (async) |
-| `planning_councils.json` | Council database (98 councils, 6 system types) |
+| `planning_councils.json` | Council database (99 councils, 6 system types) |
 | `planning_scraper.py` | Vision-guided planning scraper |
 | `planning_service.py` | Council matching + URL building |
 | `postcode_client.py` | Transport: postcodes.io |
