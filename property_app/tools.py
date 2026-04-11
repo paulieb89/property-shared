@@ -367,10 +367,10 @@ def component_test():
             # Section 1: Badge
             Heading("1. Badge", level=3),
             Row(children=[
-                Badge("Flat", variant="default"),
-                Badge("Strong", variant="success"),
-                Badge("Weak", variant="destructive"),
-                Badge("Pending", variant="outline"),
+                Badge(label="Flat", variant="default"),
+                Badge(label="Strong", variant="success"),
+                Badge(label="Weak", variant="destructive"),
+                Badge(label="Pending", variant="outline"),
             ], gap=2),
             Separator(),
 
@@ -379,9 +379,9 @@ def component_test():
             Progress(value=65),
             Row(children=[
                 Ring(value=75, size="lg"),
-                Dot(color="green"),
-                Dot(color="red"),
-                Dot(color="amber"),
+                Dot(variant="success"),
+                Dot(variant="destructive"),
+                Dot(variant="warning"),
             ], gap=4),
             Separator(),
 
@@ -389,8 +389,8 @@ def component_test():
             Heading("3. BarChart", level=3),
             BarChart(
                 data=sample_chart_data,
-                series=[ChartSeries(data_key="value", label="Revenue")],
-                x_axis="label",
+                series=[ChartSeries(dataKey="value", label="Revenue")],
+                xAxis="label",
             ),
             Separator(),
 
@@ -409,15 +409,11 @@ def component_test():
             # Section 5: ForEach
             Heading("5. ForEach", level=3),
             ForEach(
-                items=[
-                    {"name": "Item A", "price": 100},
-                    {"name": "Item B", "price": 200},
-                    {"name": "Item C", "price": 300},
-                ],
+                key="test_items",
                 children=[
                     Row(children=[
                         Text("{{ $item.name }}"),
-                        Badge("£{{ $item.price }}"),
+                        Badge(label="{{ $item.price }}"),
                     ], gap=2),
                 ],
             ),
@@ -450,7 +446,20 @@ def component_test():
         gap=4,
     )
 
+    from prefab_ui.app import PrefabApp
+
+    app_view = PrefabApp(
+        state={
+            "test_items": [
+                {"name": "Item A", "price": 100},
+                {"name": "Item B", "price": 200},
+                {"name": "Item C", "price": 300},
+            ],
+        },
+        view=view,
+    )
+
     return ToolResult(
         content="Component test: Badge, Progress, Ring, Dot, BarChart, Tabs, ForEach, Metric, Card",
-        structured_content=view,
+        structured_content=app_view,
     )
