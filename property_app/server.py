@@ -5,21 +5,18 @@ Tools are real MCP tools (LLM-callable). Dashboards layer Prefab UI on top.
 """
 from __future__ import annotations
 
-from fastmcp import FastMCP, FastMCPApp
+from fastmcp import FastMCP
 
-# App provider for interactive dashboards (tools + UI entry points)
-app = FastMCPApp("PropertyDashboards")
-
-# Main server
+# Main server — all tools registered directly via @mcp.tool()
 mcp = FastMCP(
     "property-app",
     instructions=(
         "UK property tools with interactive dashboards. "
-        "Tools return data directly -- dashboards add visual UI. "
-        "Use comps_dashboard, yield_dashboard, rental_dashboard for interactive exploration. "
-        "Use stamp_duty, planning_search, company_search for quick lookups."
+        "Tools return data directly -- dashboards add visual Prefab UI. "
+        "Use comps_dashboard, yield_dashboard, rental_dashboard for rich visual views. "
+        "Use search_comps, get_yield, get_rental for raw data. "
+        "Use stamp_duty, planning_search, company_search, epc_lookup, rightmove_search for quick lookups."
     ),
-    providers=[app],
 )
 
 

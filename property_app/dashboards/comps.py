@@ -1,6 +1,6 @@
 """Comps dashboard — pre-populated comparable sales view.
 
-search_comps: @app.tool(model=True) — returns raw dict, callable by LLM and UI
+search_comps: @mcp.tool() — returns raw dict for LLM consumption
 comps_dashboard: @mcp.tool(app=True) — fetches data server-side, returns rich Prefab view
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from property_app.server import app, mcp
+from property_app.server import mcp
 
 
 # ---------------------------------------------------------------------------
@@ -47,9 +47,9 @@ def _search_comps(
 # ---------------------------------------------------------------------------
 
 
-@app.tool(
-    model=True,
-    description="Search comparable property sales for a UK postcode",
+@mcp.tool(
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+    tags={"comps"},
     timeout=60.0,
 )
 def search_comps(

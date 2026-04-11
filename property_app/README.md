@@ -45,43 +45,46 @@ Or local stdio:
 
 ## Tools
 
-All tools are LLM-callable. Dashboards add interactive Prefab UI on top.
+All tools are `@mcp.tool()` — LLM-callable, returning structured data.
 
-| Tool | Type | What it does |
+| Tool | Tags | What it does |
 |------|------|-------------|
-| `search_comps` | tool (model+app) | Comparable sales for a UK postcode |
-| `get_yield` | tool (model+app) | Gross rental yield analysis |
-| `get_rental` | tool (model+app) | Rental market stats |
-| `stamp_duty` | tool (Prefab inline) | SDLT calculator with band breakdown |
-| `planning_search` | tool | Find planning portal for a council |
-| `company_search` | tool | Companies House lookup |
-| `epc_lookup` | tool | Energy Performance Certificate data |
-| `rightmove_search` | tool | Browse Rightmove listings |
+| `search_comps` | comps | Comparable sales — raw dict |
+| `get_yield` | yield | Gross rental yield — raw dict |
+| `get_rental` | rental | Rental market stats — raw dict |
+| `stamp_duty` | calculator | SDLT calculator — Prefab inline view |
+| `planning_search` | planning | Find planning portal for a council |
+| `company_search` | companies | Companies House lookup |
+| `epc_lookup` | epc | Energy Performance Certificate data |
+| `rightmove_search` | listings | Browse Rightmove listings |
+| `component_test` | test | Prefab component sampler (dev tool) |
 
-### Interactive Dashboards
+### Dashboards (Prefab UI)
 
-These open a Prefab UI in hosts that support MCP Apps (Claude, ChatGPT):
+Pre-populated dashboards — data fetched server-side, rendered immediately. No empty forms or button clicks.
 
-| Dashboard | Opens via | Features |
-|-----------|----------|----------|
-| `comps_dashboard` | LLM calls it | Search form, stats grid, transaction table |
-| `yield_dashboard` | LLM calls it | Yield metrics, sale/rental breakdown |
-| `rental_dashboard` | LLM calls it | Rental stats, market depth, optional yield |
+| Dashboard | Features |
+|-----------|----------|
+| `comps_dashboard` | Tabs (Overview/Transactions), stats grid, BarChart, Sparkline, Table, Badges |
+| `yield_dashboard` | Yield metric with assessment Badge, sale/rental Cards |
+| `rental_dashboard` | Rent stats, range Cards, market depth Dot, Alert for thin market |
 
 ## Architecture
 
 ```
 property_app/
-├── server.py              # FastMCP + FastMCPApp wiring
-├── tools.py               # Plain @mcp.tool() wrappers
+├── server.py              # FastMCP server — all tools via @mcp.tool()
+├── tools.py               # Plain tools + stamp_duty (app=True) + component_test
 ├── formatting.py           # GBP, %, date helpers
 └── dashboards/
-    ├── comps.py            # @app.tool(model=True) + @app.ui()
-    ├── yield_view.py       # @app.tool(model=True) + @app.ui()
-    └── rental.py           # @app.tool(model=True) + @app.ui()
+    ├── comps.py            # search_comps + comps_dashboard (app=True)
+    ├── yield_view.py       # get_yield + yield_dashboard (app=True)
+    └── rental.py           # get_rental + rental_dashboard (app=True)
 ```
 
-Built on FastMCP 3.2+ and Prefab UI. All tools import directly from `property_core`.
+**Pattern:** Each dashboard file has a data tool (`@mcp.tool()` returning dict) and a visual dashboard (`@mcp.tool(app=True)` returning `ToolResult` with text + Prefab view). Both call the same `_helper()` function.
+
+Built on FastMCP 3.2+ and Prefab UI 0.19+. All tools import directly from `property_core`.
 
 ## Environment Variables
 

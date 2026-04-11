@@ -1,6 +1,6 @@
 """Yield analysis dashboard — pre-populated yield view.
 
-get_yield: @app.tool(model=True) — returns raw dict, callable by LLM and UI
+get_yield: @mcp.tool() — returns raw dict for LLM consumption
 yield_dashboard: @mcp.tool(app=True) — fetches data server-side, returns rich Prefab view
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from property_app.server import app, mcp
+from property_app.server import mcp
 
 
 # ---------------------------------------------------------------------------
@@ -46,9 +46,9 @@ async def _fetch_yield(
 # ---------------------------------------------------------------------------
 
 
-@app.tool(
-    model=True,
-    description="Analyse gross rental yield for a UK postcode",
+@mcp.tool(
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+    tags={"yield"},
     timeout=60.0,
 )
 async def get_yield(

@@ -1,6 +1,6 @@
 """Rental analysis dashboard — pre-populated rental market view.
 
-get_rental: @app.tool(model=True) — returns raw dict, callable by LLM and UI
+get_rental: @mcp.tool() — returns raw dict for LLM consumption
 rental_dashboard: @mcp.tool(app=True) — fetches data server-side, returns rich Prefab view
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from property_app.server import app, mcp
+from property_app.server import mcp
 
 
 # ---------------------------------------------------------------------------
@@ -42,9 +42,9 @@ async def _fetch_rental(
 # ---------------------------------------------------------------------------
 
 
-@app.tool(
-    model=True,
-    description="Analyse rental market for a UK postcode",
+@mcp.tool(
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+    tags={"rental"},
     timeout=60.0,
 )
 async def get_rental(
