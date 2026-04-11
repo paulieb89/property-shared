@@ -1,18 +1,15 @@
-"""Rental analysis dashboard -- get_rental tool + interactive Prefab UI.
+"""Rental analysis dashboard — pre-populated rental market view.
 
-The get_rental tool is registered on the FastMCPApp so it is callable
-by both LLMs and the Prefab UI via CallTool.  The rental_dashboard UI
-entry point opens an interactive form that submits to get_rental and
-renders rental market metrics, rent range, and market depth cards.
+get_rental: @app.tool(model=True) — returns raw dict, callable by LLM and UI
+rental_dashboard: @mcp.tool(app=True) — fetches data server-side, returns rich Prefab view
 """
 from __future__ import annotations
 
 from typing import Annotated
 
-from prefab_ui.app import PrefabApp  # module-level for forward ref
 from pydantic import Field
 
-from property_app.server import app
+from property_app.server import app, mcp
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +38,7 @@ async def _fetch_rental(
 
 
 # ---------------------------------------------------------------------------
-# MCP tool (LLM + UI callable)
+# Data tool (LLM + UI callable) — returns raw dict
 # ---------------------------------------------------------------------------
 
 
@@ -72,134 +69,152 @@ async def get_rental(
 
 
 # ---------------------------------------------------------------------------
-# Prefab UI entry point
+# Helpers for the Prefab view
 # ---------------------------------------------------------------------------
 
 
-@app.ui(
-    title="Rental Analysis",
-    description="Interactive rental market analyser with listing stats, rent range, and market depth",
+def _fmt_gbp(n: int | float | None) -> str:
+    if n is None:
+        return "—"
+    return f"\u00a3{int(n):,}"
+
+
+def _fmt_pct(n: float | None) -> str:
+    if n is None:
+        return "—"
+    return f"{n:.1f}%"
+
+
+# ---------------------------------------------------------------------------
+# Pre-populated Prefab dashboard
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(
+    app=True,
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+    tags={"rental", "dashboard"},
+    timeout=120.0,
 )
-def rental_dashboard(
-    postcode: Annotated[str, Field(description="UK postcode")] = "NG1 1AA",
-    radius: float = 0.5,
-    purchase_price: int | None = None,
-) -> "PrefabApp":
-    """Return an interactive Prefab dashboard for rental analysis."""
-    from prefab_ui.actions import SetState, ShowToast
-    from prefab_ui.actions.mcp import CallTool
-    from prefab_ui.app import PrefabApp
+async def rental_dashboard(
+    postcode: Annotated[str, Field(description="UK postcode e.g. NG1 1AA")],
+    radius: Annotated[float, Field(description="Search radius in miles")] = 0.5,
+    purchase_price: Annotated[int | None, Field(description="Purchase price for yield calc")] = None,
+):
+    """Show rental market analysis as an interactive dashboard.
+
+    Displays rental listing stats, rent range, market depth,
+    and optional gross yield if a purchase price is provided.
+    """
+    from fastmcp.tools import ToolResult
     from prefab_ui.components import (
-        Button,
         Card,
         CardContent,
         Column,
-        Form,
+        Dot,
         Grid,
         Heading,
-        Input,
         Metric,
+        Muted,
+        Row,
         Separator,
+        Text,
     )
-    from prefab_ui.rx import RESULT, Rx
 
-    return PrefabApp(
-        title="Rental Analysis",
-        state={"data": None, "postcode": postcode},
-        view=Column(
-            children=[
-                Heading("Rental Analysis", level=2),
-                Form(
-                    on_submit=CallTool(
-                        get_rental,
-                        arguments={
-                            "postcode": Rx("postcode"),
-                            "radius": radius,
-                        },
-                        on_success=[SetState(key="data", value=RESULT)],
-                        on_error=ShowToast(
-                            message="Analysis failed", variant="error"
-                        ),
-                    ),
-                    children=[
-                        Input(
-                            name="postcode",
-                            value=postcode,
-                            placeholder="Enter UK postcode",
-                        ),
-                        Input(
-                            name="radius",
-                            value=str(radius),
-                            input_type="number",
-                            placeholder="Radius (mi)",
-                        ),
-                        Input(
-                            name="purchase_price",
-                            input_type="number",
-                            placeholder="Purchase price (optional)",
-                        ),
-                        Button(label="Analyse", button_type="submit"),
-                    ],
-                    gap=4,
-                ),
-                Separator(),
-                Grid(
-                    columns=4,
-                    children=[
-                        Metric(
-                            label="Listings",
-                            value=Rx("data.rental_listings_count") | "\u2014",
-                        ),
-                        Metric(
-                            label="Median Rent",
-                            value=Rx("data.median_rent_monthly") | "\u2014",
-                        ),
-                        Metric(
-                            label="Avg Rent",
-                            value=Rx("data.average_rent_monthly") | "\u2014",
-                        ),
-                        Metric(
-                            label="Gross Yield",
-                            value=Rx("data.gross_yield_pct") | "\u2014",
-                        ),
-                    ],
-                ),
-                Grid(
-                    columns=2,
-                    children=[
-                        Card(
-                            children=[
-                                CardContent(
-                                    children=[
-                                        Heading("Rent Range", level=4),
-                                        Metric(
-                                            label="Min",
-                                            value=Rx("data.rent_range_low") | "\u2014",
-                                        ),
-                                        Metric(
-                                            label="Max",
-                                            value=Rx("data.rent_range_high") | "\u2014",
-                                        ),
-                                    ],
-                                ),
-                            ],
-                        ),
-                        Card(
-                            children=[
-                                CardContent(
-                                    children=[
-                                        Heading("Market Depth", level=4),
-                                        Metric(
-                                            label="Thin Market",
-                                            value=Rx("data.thin_market") | "\u2014",
-                                        ),
-                                    ],
-                                ),
-                            ],
-                        ),
-                    ],
-                ),
-            ],
-            gap=4,
-        ),
+    data = await _fetch_rental(
+        postcode=postcode,
+        radius=radius,
+        purchase_price=purchase_price,
     )
+
+    listing_count = data.get("rental_listings_count", 0)
+    median_rent = data.get("median_rent_monthly")
+    avg_rent = data.get("average_rent_monthly")
+    min_rent = data.get("min_rent")
+    max_rent = data.get("max_rent")
+    gross_yield = data.get("gross_yield_pct")
+    thin_market = data.get("thin_market", False)
+    escalated_from = data.get("escalated_from")
+    escalated_to = data.get("escalated_to")
+
+    # Build yield card only if purchase price was provided
+    yield_children = []
+    if purchase_price and gross_yield is not None:
+        yield_children = [
+            Separator(),
+            Heading("Investment Yield", level=3),
+            Grid(columns=2, children=[
+                Metric(label="Purchase Price", value=_fmt_gbp(purchase_price)),
+                Metric(label="Gross Yield", value=_fmt_pct(gross_yield)),
+            ]),
+        ]
+
+    # Escalation note
+    escalation_children = []
+    if escalated_from and escalated_to:
+        escalation_children = [
+            Muted(f"Search widened from {escalated_from}mi to {escalated_to}mi radius"),
+        ]
+
+    view = Column(
+        children=[
+            # Header
+            Heading(f"Rental Analysis \u2014 {postcode.upper()}", level=2),
+            Muted(f"{radius}mi radius \u00b7 {listing_count} listings"),
+
+            Separator(),
+
+            # Key stats
+            Grid(
+                columns=3,
+                children=[
+                    Metric(label="Median Rent/mo", value=_fmt_gbp(median_rent)),
+                    Metric(label="Average Rent/mo", value=_fmt_gbp(avg_rent)),
+                    Metric(label="Listings Found", value=str(listing_count)),
+                ],
+            ),
+
+            Separator(),
+
+            # Rent range + market depth
+            Grid(
+                columns=2,
+                children=[
+                    Card(children=[CardContent(children=[
+                        Heading("Rent Range", level=3),
+                        Metric(label="Lowest", value=_fmt_gbp(min_rent)),
+                        Metric(label="Highest", value=_fmt_gbp(max_rent)),
+                    ])]),
+                    Card(children=[CardContent(children=[
+                        Heading("Market Depth", level=3),
+                        Row(children=[
+                            Dot(variant="destructive" if thin_market else "success"),
+                            Text("Thin market" if thin_market else "Adequate listings"),
+                        ], gap=2, css_class="items-center"),
+                        Metric(label="Count", value=str(listing_count)),
+                    ])]),
+                ],
+            ),
+
+            # Optional yield section
+            *yield_children,
+
+            # Escalation note
+            *escalation_children,
+        ],
+        gap=4,
+    )
+
+    # Text summary for LLM reasoning
+    parts = [
+        f"Rental analysis for {postcode.upper()} ({radius}mi): "
+        f"{listing_count} listings, median {_fmt_gbp(median_rent)}/mo, "
+        f"avg {_fmt_gbp(avg_rent)}/mo, "
+        f"range {_fmt_gbp(min_rent)}\u2013{_fmt_gbp(max_rent)}"
+    ]
+    if thin_market:
+        parts.append(", thin market")
+    if gross_yield is not None:
+        parts.append(f", {_fmt_pct(gross_yield)} gross yield on {_fmt_gbp(purchase_price)}")
+
+    return ToolResult(content="".join(parts), structured_content=view)

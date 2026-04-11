@@ -1,18 +1,15 @@
-"""Yield analysis dashboard -- get_yield tool + interactive Prefab UI.
+"""Yield analysis dashboard — pre-populated yield view.
 
-The get_yield tool is registered on the FastMCPApp so it is callable
-by both LLMs and the Prefab UI via CallTool.  The yield_dashboard UI
-entry point opens an interactive form that submits to get_yield and
-renders yield metrics, assessment, and sale/rental detail cards.
+get_yield: @app.tool(model=True) — returns raw dict, callable by LLM and UI
+yield_dashboard: @mcp.tool(app=True) — fetches data server-side, returns rich Prefab view
 """
 from __future__ import annotations
 
 from typing import Annotated
 
-from prefab_ui.app import PrefabApp  # module-level for forward ref
 from pydantic import Field
 
-from property_app.server import app
+from property_app.server import app, mcp
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +42,7 @@ async def _fetch_yield(
 
 
 # ---------------------------------------------------------------------------
-# MCP tool (LLM + UI callable)
+# Data tool (LLM + UI callable) — returns raw dict
 # ---------------------------------------------------------------------------
 
 
@@ -76,139 +73,130 @@ async def get_yield(
 
 
 # ---------------------------------------------------------------------------
-# Prefab UI entry point
+# Helpers for the Prefab view
+# ---------------------------------------------------------------------------
+
+_ASSESSMENT_VARIANTS = {"strong": "success", "average": "warning", "weak": "destructive"}
+_QUALITY_VARIANTS = {"good": "success", "low": "warning", "insufficient": "destructive"}
+
+
+def _fmt_gbp(n: int | float | None) -> str:
+    if n is None:
+        return "—"
+    return f"\u00a3{int(n):,}"
+
+
+def _fmt_pct(n: float | None) -> str:
+    if n is None:
+        return "—"
+    return f"{n:.1f}%"
+
+
+# ---------------------------------------------------------------------------
+# Pre-populated Prefab dashboard
 # ---------------------------------------------------------------------------
 
 
-@app.ui(
-    title="Yield Dashboard",
-    description="Interactive gross rental yield analyser with sale and rental market metrics",
+@mcp.tool(
+    app=True,
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+    tags={"yield", "dashboard"},
+    timeout=120.0,
 )
-def yield_dashboard(
-    postcode: Annotated[str, Field(description="UK postcode")] = "NG1 1AA",
-    months: int = 24,
-    radius: float = 0.5,
-) -> "PrefabApp":
-    """Return an interactive Prefab dashboard for yield analysis."""
-    from prefab_ui.actions import SetState, ShowToast
-    from prefab_ui.actions.mcp import CallTool
-    from prefab_ui.app import PrefabApp
+async def yield_dashboard(
+    postcode: Annotated[str, Field(description="UK postcode e.g. NG1 1AA")],
+    months: Annotated[int, Field(description="Sale lookback months", ge=1, le=60)] = 24,
+    search_level: Annotated[str, Field(description="postcode, sector, or district")] = "sector",
+    radius: Annotated[float, Field(description="Rental search radius in miles")] = 0.5,
+):
+    """Show rental yield analysis as an interactive dashboard.
+
+    Combines Land Registry sale prices with Rightmove rental listings
+    to calculate gross yield, with assessment and data quality indicators.
+    """
+    from fastmcp.tools import ToolResult
     from prefab_ui.components import (
-        Button,
+        Badge,
         Card,
         CardContent,
         Column,
-        Form,
         Grid,
         Heading,
-        Input,
         Metric,
+        Muted,
+        Row,
         Separator,
-        Text,
     )
-    from prefab_ui.rx import RESULT, Rx
 
-    from property_app.formatting import fmt_gbp, fmt_pct
+    data = await _fetch_yield(
+        postcode=postcode,
+        months=months,
+        search_level=search_level,
+        radius=radius,
+    )
 
-    return PrefabApp(
-        title="Yield Dashboard",
-        state={"data": None, "postcode": postcode},
-        view=Column(
-            children=[
-                Heading("Yield Analysis", level=2),
-                Form(
-                    on_submit=CallTool(
-                        get_yield,
-                        arguments={
-                            "postcode": Rx("postcode"),
-                            "months": months,
-                            "radius": radius,
-                        },
-                        on_success=[SetState(key="data", value=RESULT)],
-                        on_error=ShowToast(
-                            message="Yield analysis failed", variant="error"
-                        ),
+    gross_yield = data.get("gross_yield_pct")
+    assessment = data.get("yield_assessment") or "—"
+    quality = data.get("data_quality") or "—"
+    median_price = data.get("median_sale_price")
+    median_rent = data.get("median_rent_monthly")
+    sale_count = data.get("sale_count", 0)
+    rental_count = data.get("rental_count", 0)
+
+    view = Column(
+        children=[
+            # Header
+            Heading(f"Yield Analysis \u2014 {postcode.upper()}", level=2),
+            Muted(f"{search_level} \u00b7 {months} months \u00b7 {radius}mi radius"),
+
+            Separator(),
+
+            # Key yield metric with assessment badges
+            Row(
+                children=[
+                    Metric(label="Gross Yield", value=_fmt_pct(gross_yield)),
+                    Badge(
+                        label=assessment.title(),
+                        variant=_ASSESSMENT_VARIANTS.get(assessment, "secondary"),
                     ),
-                    children=[
-                        Input(
-                            name="postcode",
-                            value=postcode,
-                            placeholder="Enter UK postcode",
-                        ),
-                        Input(
-                            name="months",
-                            value=str(months),
-                            input_type="number",
-                            placeholder="Lookback months",
-                        ),
-                        Input(
-                            name="radius",
-                            value=str(radius),
-                            input_type="number",
-                            placeholder="Rental search radius (miles)",
-                        ),
-                        Button(label="Analyse", button_type="submit"),
-                    ],
-                    gap=4,
-                ),
-                Separator(),
-                Grid(
-                    columns=3,
-                    children=[
-                        Metric(
-                            label="Gross Yield",
-                            value=Rx("data.gross_yield_pct") | "\u2014",
-                        ),
-                        Metric(
-                            label="Assessment",
-                            value=Rx("data.yield_assessment") | "\u2014",
-                        ),
-                        Metric(
-                            label="Data Quality",
-                            value=Rx("data.data_quality") | "\u2014",
-                        ),
-                    ],
-                ),
-                Grid(
-                    columns=2,
-                    children=[
-                        Card(
-                            children=[
-                                CardContent(
-                                    children=[
-                                        Heading("Sales", level=3),
-                                        Metric(
-                                            label="Median Price",
-                                            value=Rx("data.median_sale_price") | "\u2014",
-                                        ),
-                                        Metric(
-                                            label="Sale Count",
-                                            value=Rx("data.sale_count") | "\u2014",
-                                        ),
-                                    ],
-                                ),
-                            ],
-                        ),
-                        Card(
-                            children=[
-                                CardContent(
-                                    children=[
-                                        Heading("Rentals", level=3),
-                                        Metric(
-                                            label="Median Rent/mo",
-                                            value=Rx("data.median_monthly_rent") | "\u2014",
-                                        ),
-                                        Metric(
-                                            label="Rental Count",
-                                            value=Rx("data.rental_count") | "\u2014",
-                                        ),
-                                    ],
-                                ),
-                            ],
-                        ),
-                    ],
-                ),
-            ],
-            gap=4,
-        ),
+                    Badge(
+                        label=f"Data: {quality}",
+                        variant=_QUALITY_VARIANTS.get(quality, "secondary"),
+                    ),
+                ],
+                gap=4,
+                css_class="items-center",
+            ),
+
+            Separator(),
+
+            # Sale vs Rental breakdown
+            Grid(
+                columns=2,
+                children=[
+                    Card(children=[CardContent(children=[
+                        Heading("Sales", level=3),
+                        Metric(label="Median Price", value=_fmt_gbp(median_price)),
+                        Metric(label="Transactions", value=str(sale_count)),
+                    ])]),
+                    Card(children=[CardContent(children=[
+                        Heading("Rentals", level=3),
+                        Metric(label="Median Rent/mo", value=_fmt_gbp(median_rent)),
+                        Metric(label="Listings", value=str(rental_count)),
+                    ])]),
+                ],
+            ),
+        ],
+        gap=4,
     )
+
+    # Text summary for LLM reasoning
+    text = (
+        f"Yield analysis for {postcode.upper()} ({search_level}, {months}mo, {radius}mi): "
+        f"{_fmt_pct(gross_yield)} gross yield ({assessment}), "
+        f"median sale {_fmt_gbp(median_price)} ({sale_count} sales), "
+        f"median rent {_fmt_gbp(median_rent)}/mo ({rental_count} listings), "
+        f"data quality: {quality}"
+    )
+
+    return ToolResult(content=text, structured_content=view)
