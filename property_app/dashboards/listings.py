@@ -120,7 +120,7 @@ def listings_dashboard(
                 Image(
                     src=proxied_url,
                     alt=l.address or "Property",
-                    height=160,
+                    height="160px",
                     css_class="w-full object-cover rounded-t-lg",
                 )
             )

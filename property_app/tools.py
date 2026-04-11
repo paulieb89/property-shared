@@ -455,7 +455,7 @@ def component_test():
             Image(
                 src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAACXBIWXMAAAsTAAALEwEAmpwYAAABIklEQVR4nO3SQQ0AIAwAQfj3jAdWuECSzbkB+tme2Z0f2fkdwH8MiRkSMyRmSMyQmCExQ2KGxAyJGRIzJGZIzJCYITFDYobEDIkZEjMkZkjMkJghMUNihsQMiRkSMyRmSMyQmCExQ2KGxAyJGRIzJGZIzJCYITFDYobEDIkZEjMkZkjMkJghMUNihsQMiRkSMyRmSMyQmCExQ2KGxAyJGRIzJGZIzJCYITFDYobEDIkZEjMkZkjMkJghMUNihsQMiRkSMyRmSMyQmCExQ2KGxAyJGRIzJGZIzJCYITFDYobEDIkZEjMkZkjMkJghMUNihsQMiRkSMyRmSMyQmCExQ2KGxAyJGRIzJGZIzJCYITFDYobEDIn9AC9RBGTuOhELAAAAAElFTkSuQmCC",
                 alt="100x100 test square",
-                height=100,
+                height="100px",
             ),
 
             Separator(),
@@ -465,7 +465,7 @@ def component_test():
             Image(
                 src="https://propertydata.fly.dev/img?url=https%3A%2F%2Fmedia.rightmove.co.uk%3A443%2Fdir%2Fcrop%2F10%3A9-16%3A9%2Fproperty-photo%2Fb17d74096%2F174125315%2Fb17d74096dbcccb8c49b510d19b48625_max_476x317.jpeg",
                 alt="Proxied Rightmove image",
-                height=200,
+                height="200px",
             ),
         ],
         gap=4,
