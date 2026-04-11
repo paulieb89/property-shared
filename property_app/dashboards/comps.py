@@ -86,7 +86,7 @@ def search_comps(
 # ---------------------------------------------------------------------------
 
 _TYPE_LABELS = {"F": "Flat", "D": "Detached", "S": "Semi", "T": "Terraced", "O": "Other"}
-_TYPE_VARIANTS = {"F": "default", "D": "success", "S": "info", "T": "warning", "O": "secondary"}
+
 
 
 def _fmt_gbp(n: int | float | None) -> str:
@@ -164,23 +164,18 @@ def comps_dashboard(
     from fastmcp.tools import ToolResult
     from prefab_ui.components import (
         Alert,
-        Badge,
         Column,
+        DataTable,
         Grid,
         Heading,
         Metric,
         Muted,
         Separator,
         Tab,
-        Table,
-        TableBody,
-        TableCell,
-        TableHead,
-        TableHeader,
-        TableRow,
         Tabs,
     )
     from prefab_ui.components.charts import BarChart, ChartSeries, Sparkline
+    from prefab_ui.components.data_table import DataTableColumn
 
     data = _search_comps(
         postcode=postcode,
@@ -196,6 +191,15 @@ def comps_dashboard(
     p75 = data.get("percentile_75")
     txns = data.get("transactions", [])
 
+    # Median vs mean delta
+    median_delta: str | None = None
+    median_trend: str | None = None
+    if median is not None and mean is not None and mean != 0:
+        delta_pct = (median - mean) / mean * 100
+        sign = "+" if delta_pct >= 0 else ""
+        median_delta = f"{sign}{delta_pct:.1f}% vs avg"
+        median_trend = "up" if delta_pct >= 0 else "down"
+
     # Price distribution chart data
     price_buckets = _build_price_buckets(txns)
 
@@ -206,25 +210,24 @@ def comps_dashboard(
     )
     price_trend = [t["price"] for t in sorted_txns]
 
-    # Transaction table rows (latest 20)
-    table_rows = []
-    for t in txns[:20]:
-        addr = _build_address(t)
+    # DataTable rows (all transactions — paginated in the UI)
+    dt_columns = [
+        DataTableColumn(key="date", header="Date", sortable=True),
+        DataTableColumn(key="address", header="Address", sortable=True),
+        DataTableColumn(key="type", header="Type", sortable=True),
+        DataTableColumn(key="tenure", header="Tenure", sortable=True),
+        DataTableColumn(key="price", header="Price", sortable=True, align="right"),
+    ]
+    dt_rows = []
+    for t in txns:
         ptype = t.get("property_type", "O")
-        table_rows.append(
-            TableRow(children=[
-                TableCell(content=_fmt_date(t.get("date"))),
-                TableCell(content=addr),
-                TableCell(children=[
-                    Badge(
-                        label=_TYPE_LABELS.get(ptype, ptype),
-                        variant=_TYPE_VARIANTS.get(ptype, "secondary"),
-                    ),
-                ]),
-                TableCell(content=t.get("estate_type", "—")),
-                TableCell(content=_fmt_gbp(t.get("price"))),
-            ])
-        )
+        dt_rows.append({
+            "date": _fmt_date(t.get("date")),
+            "address": _build_address(t),
+            "type": _TYPE_LABELS.get(ptype, ptype),
+            "tenure": t.get("estate_type", "—"),
+            "price": _fmt_gbp(t.get("price")),
+        })
 
     # Escalation alert
     escalation_alert = []
@@ -252,7 +255,7 @@ def comps_dashboard(
             columns=5,
             children=[
                 Metric(label="Transactions", value=str(count)),
-                Metric(label="Median", value=_fmt_gbp(median)),
+                Metric(label="Median", value=_fmt_gbp(median), delta=median_delta, trend=median_trend),
                 Metric(label="Mean", value=_fmt_gbp(mean)),
                 Metric(label="Lower Quartile", value=_fmt_gbp(p25)),
                 Metric(label="Upper Quartile", value=_fmt_gbp(p75)),
@@ -282,19 +285,14 @@ def comps_dashboard(
         )
 
     # --- Transactions tab ---
-    if table_rows:
-        transactions_content = Table(children=[
-            TableHeader(children=[
-                TableRow(children=[
-                    TableHead(content="Date"),
-                    TableHead(content="Address"),
-                    TableHead(content="Type"),
-                    TableHead(content="Tenure"),
-                    TableHead(content="Price"),
-                ]),
-            ]),
-            TableBody(children=table_rows),
-        ])
+    if dt_rows:
+        transactions_content = DataTable(
+            columns=dt_columns,
+            rows=dt_rows,
+            search=True,
+            paginated=True,
+            page_size=10,
+        )
     else:
         transactions_content = Muted("No transactions found")
 
@@ -307,7 +305,7 @@ def comps_dashboard(
                 Tab(title="Overview", children=[
                     Column(children=overview_children, gap=4),
                 ]),
-                Tab(title=f"Transactions ({min(len(txns), 20)})", children=[
+                Tab(title=f"Transactions ({len(txns)})", children=[
                     transactions_content,
                 ]),
             ]),

@@ -78,6 +78,8 @@ async def get_yield(
 
 _ASSESSMENT_VARIANTS = {"strong": "success", "average": "warning", "weak": "destructive"}
 _QUALITY_VARIANTS = {"good": "success", "low": "warning", "insufficient": "destructive"}
+_ASSESSMENT_SENTIMENT = {"strong": "positive", "average": "neutral", "weak": "negative"}
+_ASSESSMENT_TREND = {"strong": "up", "average": "neutral", "weak": "down"}
 
 
 def _fmt_gbp(n: int | float | None) -> str:
@@ -154,7 +156,12 @@ async def yield_dashboard(
             # Key yield metric with assessment badges
             Row(
                 children=[
-                    Metric(label="Gross Yield", value=_fmt_pct(gross_yield)),
+                    Metric(
+                        label="Gross Yield",
+                        value=_fmt_pct(gross_yield),
+                        trend=_ASSESSMENT_TREND.get(assessment, "neutral"),
+                        trend_sentiment=_ASSESSMENT_SENTIMENT.get(assessment, "neutral"),
+                    ),
                     Badge(
                         label=assessment.title(),
                         variant=_ASSESSMENT_VARIANTS.get(assessment, "secondary"),
