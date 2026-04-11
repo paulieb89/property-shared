@@ -112,13 +112,9 @@ def comps_dashboard(
         Heading,
         Input,
         Metric,
-        Select,
-        SelectOption,
         Separator,
     )
     from prefab_ui.rx import RESULT, Rx
-
-    from property_app.formatting import fmt_gbp
 
     return PrefabApp(
         title="Comps Dashboard",
@@ -151,14 +147,10 @@ def comps_dashboard(
                             input_type="number",
                             placeholder="Lookback months",
                         ),
-                        Select(
+                        Input(
                             name="search_level",
                             value=search_level,
-                            children=[
-                                SelectOption(value="postcode", label="Postcode"),
-                                SelectOption(value="sector", label="Sector"),
-                                SelectOption(value="district", label="District"),
-                            ],
+                            placeholder="postcode, sector, or district",
                         ),
                         Button(label="Search", button_type="submit"),
                     ],
