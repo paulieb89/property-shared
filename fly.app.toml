@@ -1,0 +1,33 @@
+# Fly.io config for property_app (standalone MCP App server)
+# Deploy: fly deploy --config fly.app.toml
+
+app = "propertydata"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile.app"
+
+[env]
+  PORT = "8080"
+  MCP_TRANSPORT = "http"
+  FASTMCP_HOST = "0.0.0.0"
+  FASTMCP_PORT = "8080"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/health"
