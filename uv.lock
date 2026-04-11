@@ -492,7 +492,7 @@ wheels = [
 
 [[package]]
 name = "fastmcp"
-version = "3.1.1"
+version = "3.2.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "authlib" },
@@ -517,9 +517,14 @@ dependencies = [
     { name = "watchfiles" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/25/83/c95d3bf717698a693eccb43e137a32939d2549876e884e246028bff6ecce/fastmcp-3.1.1.tar.gz", hash = "sha256:db184b5391a31199323766a3abf3a8bfbb8010479f77eca84c0e554f18655c48", size = 17347644, upload-time = "2026-03-14T19:12:20.235Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b9/42/7eed0a38e3b7a386805fecacf8a5a9353a2b3040395ef9e30e585d8549ac/fastmcp-3.2.3.tar.gz", hash = "sha256:4f02ae8b00227285a0cf6544dea1db29b022c8cdd8d3dfdec7118540210ae60a", size = 26328743, upload-time = "2026-04-09T22:05:03.402Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/70/ea/570122de7e24f72138d006f799768e14cc1ccf7fcb22b7750b2bd276c711/fastmcp-3.1.1-py3-none-any.whl", hash = "sha256:8132ba069d89f14566b3266919d6d72e2ec23dd45d8944622dca407e9beda7eb", size = 633754, upload-time = "2026-03-14T19:12:22.736Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/48/84b6dcba793178a44b9d99b4def6cd62f870dcfc5bb7b9153ac390135812/fastmcp-3.2.3-py3-none-any.whl", hash = "sha256:cc50af6eed1f62ed8b6ebf4987286d8d1d006f08d5bec739d5c7fb76160e0911", size = 707260, upload-time = "2026-04-09T22:05:01.225Z" },
+]
+
+[package.optional-dependencies]
+apps = [
+    { name = "prefab-ui" },
 ]
 
 [[package]]
@@ -1136,6 +1141,20 @@ wheels = [
 ]
 
 [[package]]
+name = "prefab-ui"
+version = "0.19.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cyclopts" },
+    { name = "pydantic" },
+    { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/64/d1/c4459a29b85e411846da69c6c96f43d62d8e2ac9f57391186dc668771641/prefab_ui-0.19.0.tar.gz", hash = "sha256:e735b00207e85e3c9de67df22fa8da2073ec158abd6337b6d092b23cf9cbd9f6", size = 4078835, upload-time = "2026-04-10T00:16:34.743Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/03/badf1b950f00353eee2e58c2357533412faa24ed8b3cf6b7643bdd24fc87/prefab_ui-0.19.0-py3-none-any.whl", hash = "sha256:37be5995241de6f5483a670675a764c428897aff4b4cf3ef88ca630c3e119d6e", size = 1848525, upload-time = "2026-04-10T00:16:32.365Z" },
+]
+
+[[package]]
 name = "prometheus-client"
 version = "0.24.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1177,6 +1196,10 @@ api = [
     { name = "prometheus-fastapi-instrumentator" },
     { name = "uvicorn" },
 ]
+apps = [
+    { name = "fastmcp", extra = ["apps"] },
+    { name = "prefab-ui" },
+]
 cli = [
     { name = "rich" },
     { name = "typer" },
@@ -1202,11 +1225,13 @@ requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.14.3" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.128.0" },
     { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=3.0.0" },
+    { name = "fastmcp", extras = ["apps"], marker = "extra == 'apps'", specifier = ">=3.2.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "openai", marker = "extra == 'planning'", specifier = ">=1.83.0,<2" },
     { name = "openapi-python-client", marker = "extra == 'dev'", specifier = ">=0.28.1" },
     { name = "playwright", marker = "extra == 'planning'", specifier = ">=1.57.0" },
+    { name = "prefab-ui", marker = "extra == 'apps'", specifier = ">=0.19.0" },
     { name = "prometheus-fastapi-instrumentator", marker = "extra == 'api'", specifier = ">=7.0.0" },
     { name = "pydantic", specifier = ">=2.11.9" },
     { name = "pydantic-settings", specifier = ">=2.10.1" },
@@ -1219,7 +1244,7 @@ requires-dist = [
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.9.0" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.40.0" },
 ]
-provides-extras = ["planning", "dev", "api", "cli", "demo", "mcp"]
+provides-extras = ["planning", "dev", "api", "cli", "demo", "mcp", "apps"]
 
 [[package]]
 name = "py-key-value-aio"
