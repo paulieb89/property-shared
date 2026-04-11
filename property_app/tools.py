@@ -485,6 +485,27 @@ def component_test():
     )
 
     return ToolResult(
-        content="Component test: Badge, Progress, Ring, Dot, BarChart, Tabs, ForEach, Metric, Card",
+        content="Component test: Badge, Progress, Ring, Dot, BarChart, Tabs, ForEach, Metric, Card, Image",
         structured_content=app_view,
     )
+
+
+@mcp.tool(
+    annotations={"readOnlyHint": True},
+    tags={"test"},
+)
+def image_test():
+    """Test returning an image as a FastMCP ImageContent block."""
+    import httpx
+    from fastmcp.utilities.types import Image as McpImage
+
+    resp = httpx.get(
+        "https://media.rightmove.co.uk:443/dir/crop/10:9-16:9/"
+        "property-photo/b17d74096/174125315/"
+        "b17d74096dbcccb8c49b510d19b48625_max_476x317.jpeg",
+        timeout=10.0,
+    )
+    return [
+        "Here is a Rightmove property photo:",
+        McpImage(data=resp.content, format="jpeg"),
+    ]
