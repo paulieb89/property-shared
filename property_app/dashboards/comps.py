@@ -162,21 +162,25 @@ def comps_dashboard(
     distribution chart, and transaction list with property type badges.
     """
     from fastmcp.tools import ToolResult
-    from prefab_ui.app import PrefabApp
     from prefab_ui.components import (
+        Alert,
         Badge,
-        Card,
-        CardContent,
         Column,
         Grid,
         Heading,
         Metric,
         Muted,
-        Row,
         Separator,
-        Text,
+        Tab,
+        Table,
+        TableBody,
+        TableCell,
+        TableHead,
+        TableHeader,
+        TableRow,
+        Tabs,
     )
-    from prefab_ui.components.charts import BarChart, ChartSeries
+    from prefab_ui.components.charts import BarChart, ChartSeries, Sparkline
 
     data = _search_comps(
         postcode=postcode,
@@ -195,80 +199,118 @@ def comps_dashboard(
     # Price distribution chart data
     price_buckets = _build_price_buckets(txns)
 
-    # Build transaction rows (latest 15)
-    txn_rows = []
-    for t in txns[:15]:
+    # Price trend sparkline (chronological prices)
+    sorted_txns = sorted(
+        [t for t in txns if t.get("price")],
+        key=lambda t: t.get("date", ""),
+    )
+    price_trend = [t["price"] for t in sorted_txns]
+
+    # Transaction table rows (latest 20)
+    table_rows = []
+    for t in txns[:20]:
         addr = _build_address(t)
         ptype = t.get("property_type", "O")
-        txn_rows.append(
-            Row(
-                children=[
-                    Text(_fmt_date(t.get("date")), css_class="w-20 shrink-0"),
-                    Text(addr, css_class="flex-1 truncate"),
+        table_rows.append(
+            TableRow(children=[
+                TableCell(content=_fmt_date(t.get("date"))),
+                TableCell(content=addr),
+                TableCell(children=[
                     Badge(
                         label=_TYPE_LABELS.get(ptype, ptype),
                         variant=_TYPE_VARIANTS.get(ptype, "secondary"),
                     ),
-                    Text(_fmt_gbp(t.get("price")), css_class="w-24 text-right font-semibold"),
-                ],
-                gap=2,
-                css_class="items-center",
+                ]),
+                TableCell(content=t.get("estate_type", "—")),
+                TableCell(content=_fmt_gbp(t.get("price"))),
+            ])
+        )
+
+    # Escalation alert
+    escalation_alert = []
+    if data.get("escalated_from") and data.get("escalated_to"):
+        escalation_alert = [
+            Alert(
+                children=[Muted(f"Search widened from {data['escalated_from']} to {data['escalated_to']}")],
+                variant="warning",
+            ),
+        ]
+
+    # Thin market alert
+    thin_market_alert = []
+    if data.get("thin_market"):
+        thin_market_alert = [
+            Alert(
+                children=[Muted(f"Thin market \u2014 only {count} transactions found")],
+                variant="warning",
+            ),
+        ]
+
+    # --- Overview tab ---
+    overview_children = [
+        Grid(
+            columns=5,
+            children=[
+                Metric(label="Transactions", value=str(count)),
+                Metric(label="Median", value=_fmt_gbp(median)),
+                Metric(label="Mean", value=_fmt_gbp(mean)),
+                Metric(label="Lower Quartile", value=_fmt_gbp(p25)),
+                Metric(label="Upper Quartile", value=_fmt_gbp(p75)),
+            ],
+        ),
+        *thin_market_alert,
+        *escalation_alert,
+    ]
+
+    # Add sparkline if we have enough data points
+    if len(price_trend) >= 3:
+        overview_children.append(Separator())
+        overview_children.append(Heading("Price Trend", level=3))
+        overview_children.append(Sparkline(data=price_trend, height=60, fill=True, curve="smooth"))
+
+    # Add bar chart if we have buckets
+    if price_buckets:
+        overview_children.append(Separator())
+        overview_children.append(Heading("Price Distribution", level=3))
+        overview_children.append(
+            BarChart(
+                data=price_buckets,
+                series=[ChartSeries(dataKey="count", label="Sales")],
+                xAxis="range",
+                height=200,
             )
         )
 
-    # Escalation note
-    escalation_note = ""
-    if data.get("escalated_from") and data.get("escalated_to"):
-        escalation_note = f"Search widened from {data['escalated_from']} to {data['escalated_to']}"
+    # --- Transactions tab ---
+    if table_rows:
+        transactions_content = Table(children=[
+            TableHeader(children=[
+                TableRow(children=[
+                    TableHead(content="Date"),
+                    TableHead(content="Address"),
+                    TableHead(content="Type"),
+                    TableHead(content="Tenure"),
+                    TableHead(content="Price"),
+                ]),
+            ]),
+            TableBody(children=table_rows),
+        ])
+    else:
+        transactions_content = Muted("No transactions found")
 
     view = Column(
         children=[
-            # Header
             Heading(f"Comparable Sales \u2014 {postcode.upper()}", level=2),
             Muted(f"{search_level} \u00b7 {months} months \u00b7 Land Registry"),
-
             Separator(),
-
-            # Stats row
-            Grid(
-                columns=5,
-                children=[
-                    Metric(label="Transactions", value=str(count)),
-                    Metric(label="Median", value=_fmt_gbp(median)),
-                    Metric(label="Mean", value=_fmt_gbp(mean)),
-                    Metric(label="Lower Quartile", value=_fmt_gbp(p25)),
-                    Metric(label="Upper Quartile", value=_fmt_gbp(p75)),
-                ],
-            ),
-
-            Separator(),
-
-            # Price distribution chart
-            *(
-                [
-                    Heading("Price Distribution", level=3),
-                    BarChart(
-                        data=price_buckets,
-                        series=[ChartSeries(dataKey="count", label="Sales")],
-                        xAxis="range",
-                        height=200,
-                    ),
-                    Separator(),
-                ]
-                if price_buckets
-                else []
-            ),
-
-            # Recent transactions
-            Heading(f"Recent Transactions ({min(len(txns), 15)} of {count})", level=3),
-            *(txn_rows if txn_rows else [Muted("No transactions found")]),
-
-            # Escalation note
-            *(
-                [Separator(), Muted(escalation_note)]
-                if escalation_note
-                else []
-            ),
+            Tabs(children=[
+                Tab(title="Overview", children=[
+                    Column(children=overview_children, gap=4),
+                ]),
+                Tab(title=f"Transactions ({min(len(txns), 20)})", children=[
+                    transactions_content,
+                ]),
+            ]),
         ],
         gap=4,
     )

@@ -108,6 +108,7 @@ async def rental_dashboard(
     """
     from fastmcp.tools import ToolResult
     from prefab_ui.components import (
+        Alert,
         Card,
         CardContent,
         Column,
@@ -149,12 +150,18 @@ async def rental_dashboard(
             ]),
         ]
 
-    # Escalation note
-    escalation_children = []
+    # Alerts
+    alerts = []
+    if thin_market:
+        alerts.append(Alert(
+            children=[Muted(f"Thin market \u2014 only {listing_count} listings found")],
+            variant="warning",
+        ))
     if escalated_from and escalated_to:
-        escalation_children = [
-            Muted(f"Search widened from {escalated_from}mi to {escalated_to}mi radius"),
-        ]
+        alerts.append(Alert(
+            children=[Muted(f"Search widened from {escalated_from}mi to {escalated_to}mi radius")],
+            variant="info",
+        ))
 
     view = Column(
         children=[
@@ -176,7 +183,7 @@ async def rental_dashboard(
 
             Separator(),
 
-            # Rent range + market depth
+            # Rent range
             Grid(
                 columns=2,
                 children=[
@@ -186,21 +193,20 @@ async def rental_dashboard(
                         Metric(label="Highest", value=_fmt_gbp(max_rent)),
                     ])]),
                     Card(children=[CardContent(children=[
-                        Heading("Market Depth", level=3),
+                        Heading("Market", level=3),
                         Row(children=[
                             Dot(variant="destructive" if thin_market else "success"),
-                            Text("Thin market" if thin_market else "Adequate listings"),
+                            Text("Thin market" if thin_market else "Adequate supply"),
                         ], gap=2, css_class="items-center"),
-                        Metric(label="Count", value=str(listing_count)),
                     ])]),
                 ],
             ),
 
+            # Alerts (thin market, escalation)
+            *alerts,
+
             # Optional yield section
             *yield_children,
-
-            # Escalation note
-            *escalation_children,
         ],
         gap=4,
     )
