@@ -315,3 +315,142 @@ def rightmove_search(
         radius=radius,
         building_type=building_type,
     )
+
+
+# ---------------------------------------------------------------------------
+# Component Test (temporary — maps what claude.ai renderer supports)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(
+    app=True,
+    annotations={"readOnlyHint": True},
+    tags={"test"},
+)
+def component_test():
+    """Render a sampler of Prefab components to test claude.ai renderer support."""
+    from fastmcp.tools import ToolResult
+    from prefab_ui.components import (
+        Badge,
+        Card,
+        CardContent,
+        Column,
+        Dot,
+        ForEach,
+        Grid,
+        Heading,
+        Metric,
+        Muted,
+        Progress,
+        Ring,
+        Row,
+        Separator,
+        Tabs,
+        Tab,
+        Text,
+    )
+    from prefab_ui.components.charts import BarChart, ChartSeries
+
+    sample_chart_data = [
+        {"label": "Q1", "value": 42},
+        {"label": "Q2", "value": 58},
+        {"label": "Q3", "value": 35},
+        {"label": "Q4", "value": 71},
+    ]
+
+    view = Column(
+        children=[
+            Heading("Component Test", level=2),
+            Muted("Each section tests a component. If a section is missing, that component crashed the renderer."),
+            Separator(),
+
+            # Section 1: Badge
+            Heading("1. Badge", level=3),
+            Row(children=[
+                Badge("Flat", variant="default"),
+                Badge("Strong", variant="success"),
+                Badge("Weak", variant="destructive"),
+                Badge("Pending", variant="outline"),
+            ], gap=2),
+            Separator(),
+
+            # Section 2: Progress + Ring + Dot
+            Heading("2. Progress / Ring / Dot", level=3),
+            Progress(value=65),
+            Row(children=[
+                Ring(value=75, size=60),
+                Dot(color="green"),
+                Dot(color="red"),
+                Dot(color="amber"),
+            ], gap=4),
+            Separator(),
+
+            # Section 3: BarChart
+            Heading("3. BarChart", level=3),
+            BarChart(
+                data=sample_chart_data,
+                series=[ChartSeries(data_key="value", label="Revenue")],
+                x_axis="label",
+            ),
+            Separator(),
+
+            # Section 4: Tabs
+            Heading("4. Tabs", level=3),
+            Tabs(children=[
+                Tab(label="Overview", children=[
+                    Text("This is the overview tab content"),
+                ]),
+                Tab(label="Details", children=[
+                    Text("This is the details tab content"),
+                ]),
+            ]),
+            Separator(),
+
+            # Section 5: ForEach
+            Heading("5. ForEach", level=3),
+            ForEach(
+                items=[
+                    {"name": "Item A", "price": 100},
+                    {"name": "Item B", "price": 200},
+                    {"name": "Item C", "price": 300},
+                ],
+                children=[
+                    Row(children=[
+                        Text("{{ $item.name }}"),
+                        Badge("£{{ $item.price }}"),
+                    ], gap=2),
+                ],
+            ),
+            Separator(),
+
+            # Section 6: Metric with formatted values
+            Heading("6. Metric Grid", level=3),
+            Grid(columns=3, children=[
+                Metric(label="Count", value="50"),
+                Metric(label="Median", value="£150,000"),
+                Metric(label="Yield", value="6.9%"),
+            ]),
+            Separator(),
+
+            # Section 7: Card layout
+            Heading("7. Cards", level=3),
+            Grid(columns=2, children=[
+                Card(children=[CardContent(children=[
+                    Heading("Sales", level=4),
+                    Metric(label="Median", value="£150,000"),
+                    Metric(label="Count", value="50"),
+                ])]),
+                Card(children=[CardContent(children=[
+                    Heading("Rentals", level=4),
+                    Metric(label="Median/mo", value="£866"),
+                    Metric(label="Count", value="25"),
+                ])]),
+            ]),
+        ],
+        gap=4,
+    )
+
+    return ToolResult(
+        content="Component test: Badge, Progress, Ring, Dot, BarChart, Tabs, ForEach, Metric, Card",
+        structured_content=view,
+    )
