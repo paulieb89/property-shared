@@ -1,18 +1,15 @@
-"""Comps dashboard — search_comps tool + interactive Prefab UI.
+"""Comps dashboard — pre-populated comparable sales view.
 
-The search_comps tool is registered on the FastMCPApp so it is callable
-by both LLMs and the Prefab UI via CallTool.  The comps_dashboard UI
-entry point opens an interactive form that submits to search_comps and
-renders stats + a transaction table.
+search_comps: @app.tool(model=True) — returns raw dict, callable by LLM and UI
+comps_dashboard: @mcp.tool(app=True) — fetches data server-side, returns rich Prefab view
 """
 from __future__ import annotations
 
 from typing import Annotated
 
-from prefab_ui.app import PrefabApp
 from pydantic import Field
 
-from property_app.server import app
+from property_app.server import app, mcp
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +43,7 @@ def _search_comps(
 
 
 # ---------------------------------------------------------------------------
-# MCP tool (LLM + UI callable)
+# Data tool (LLM + UI callable) — returns raw dict
 # ---------------------------------------------------------------------------
 
 
@@ -85,133 +82,202 @@ def search_comps(
 
 
 # ---------------------------------------------------------------------------
-# Prefab UI entry point
+# Helpers for the Prefab view
+# ---------------------------------------------------------------------------
+
+_TYPE_LABELS = {"F": "Flat", "D": "Detached", "S": "Semi", "T": "Terraced", "O": "Other"}
+_TYPE_VARIANTS = {"F": "default", "D": "success", "S": "info", "T": "warning", "O": "secondary"}
+
+
+def _fmt_gbp(n: int | float | None) -> str:
+    if n is None:
+        return "—"
+    return f"\u00a3{int(n):,}"
+
+
+def _fmt_date(d: str | None) -> str:
+    if not d:
+        return "—"
+    parts = d.split("T")[0].split("-")
+    if len(parts) == 3:
+        return f"{parts[2]}/{parts[1]}/{parts[0]}"
+    return d
+
+
+def _build_price_buckets(transactions: list[dict]) -> list[dict]:
+    """Group transactions into price buckets for a bar chart."""
+    buckets = [
+        (0, 50_000, "<50k"),
+        (50_000, 100_000, "50-100k"),
+        (100_000, 150_000, "100-150k"),
+        (150_000, 200_000, "150-200k"),
+        (200_000, 250_000, "200-250k"),
+        (250_000, 300_000, "250-300k"),
+        (300_000, 400_000, "300-400k"),
+        (400_000, 500_000, "400-500k"),
+        (500_000, float("inf"), "500k+"),
+    ]
+    counts = {label: 0 for _, _, label in buckets}
+    for t in transactions:
+        price = t.get("price") or 0
+        for lo, hi, label in buckets:
+            if lo <= price < hi:
+                counts[label] += 1
+                break
+    return [{"range": label, "count": count} for label, count in counts.items() if count > 0]
+
+
+def _build_address(t: dict) -> str:
+    """Build a readable address from transaction fields."""
+    parts = []
+    if t.get("saon"):
+        parts.append(t["saon"])
+    if t.get("paon"):
+        parts.append(t["paon"])
+    if t.get("street"):
+        parts.append(t["street"])
+    return ", ".join(parts) or "—"
+
+
+# ---------------------------------------------------------------------------
+# Pre-populated Prefab dashboard
 # ---------------------------------------------------------------------------
 
 
-@app.ui(
-    title="Comps Dashboard",
-    description="Interactive comparable sales explorer with search, stats, and transaction table",
+@mcp.tool(
+    app=True,
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+    tags={"comps", "dashboard"},
+    timeout=120.0,
 )
 def comps_dashboard(
-    postcode: Annotated[str, Field(description="UK postcode")] = "SW1A 1AA",
-    months: int = 24,
-    search_level: str = "sector",
-) -> "PrefabApp":
-    """Return an interactive Prefab dashboard for comparable sales."""
-    from prefab_ui.actions import SetState, ShowToast
-    from prefab_ui.actions.mcp import CallTool
+    postcode: Annotated[str, Field(description="UK postcode e.g. NG1 1AA")],
+    months: Annotated[int, Field(description="Lookback period in months", ge=1, le=60)] = 24,
+    search_level: Annotated[str, Field(description="postcode, sector, or district")] = "sector",
+    property_type: Annotated[str | None, Field(description="F=flat, D=detached, S=semi, T=terrace")] = None,
+):
+    """Show comparable property sales as an interactive dashboard.
+
+    Fetches Land Registry transactions and displays stats, price
+    distribution chart, and transaction list with property type badges.
+    """
+    from fastmcp.tools import ToolResult
     from prefab_ui.app import PrefabApp
     from prefab_ui.components import (
-        Button,
+        Badge,
         Card,
         CardContent,
         Column,
-        Form,
         Grid,
         Heading,
-        Input,
         Metric,
+        Muted,
+        Row,
         Separator,
+        Text,
     )
-    from prefab_ui.rx import RESULT, Rx
+    from prefab_ui.components.charts import BarChart, ChartSeries
 
-    return PrefabApp(
-        title="Comps Dashboard",
-        state={"results": None, "postcode": postcode},
-        view=Column(
-            children=[
-                Heading("Comparable Sales", level=2),
-                Form(
-                    on_submit=CallTool(
-                        search_comps,
-                        arguments={
-                            "postcode": Rx("postcode"),
-                            "months": months,
-                        },
-                        on_success=[SetState(key="results", value=RESULT)],
-                        on_error=ShowToast(
-                            message="Search failed", variant="error"
-                        ),
-                    ),
-                    children=[
-                        Input(
-                            name="postcode",
-                            value=postcode,
-                            placeholder="Enter UK postcode",
-                        ),
-                        Input(
-                            name="months",
-                            value=str(months),
-                            input_type="number",
-                            placeholder="Lookback months",
-                        ),
-                        Button(label="Search", button_type="submit"),
-                    ],
-                    gap=4,
-                ),
-                Separator(),
-                Grid(
-                    columns=4,
-                    children=[
-                        Metric(
-                            label="Transactions",
-                            value=Rx("results.count") | "\u2014",
-                        ),
-                        Metric(
-                            label="Median",
-                            value=Rx("results.median") | "\u2014",
-                        ),
-                        Metric(
-                            label="25th Pctl",
-                            value=Rx("results.percentile_25") | "\u2014",
-                        ),
-                        Metric(
-                            label="75th Pctl",
-                            value=Rx("results.percentile_75") | "\u2014",
-                        ),
-                    ],
-                ),
-                Grid(
-                    columns=2,
-                    children=[
-                        Card(
-                            children=[
-                                CardContent(
-                                    children=[
-                                        Heading("Price Range", level=3),
-                                        Metric(
-                                            label="Min",
-                                            value=Rx("results.min") | "\u2014",
-                                        ),
-                                        Metric(
-                                            label="Max",
-                                            value=Rx("results.max") | "\u2014",
-                                        ),
-                                    ],
-                                ),
-                            ],
-                        ),
-                        Card(
-                            children=[
-                                CardContent(
-                                    children=[
-                                        Heading("Averages", level=3),
-                                        Metric(
-                                            label="Mean",
-                                            value=Rx("results.mean") | "\u2014",
-                                        ),
-                                        Metric(
-                                            label="Count",
-                                            value=Rx("results.count") | "\u2014",
-                                        ),
-                                    ],
-                                ),
-                            ],
-                        ),
-                    ],
-                ),
-            ],
-            gap=4,
-        ),
+    data = _search_comps(
+        postcode=postcode,
+        months=months,
+        search_level=search_level,
+        property_type=property_type,
     )
+
+    count = data.get("count", 0)
+    median = data.get("median")
+    mean = data.get("mean")
+    p25 = data.get("percentile_25")
+    p75 = data.get("percentile_75")
+    txns = data.get("transactions", [])
+
+    # Price distribution chart data
+    price_buckets = _build_price_buckets(txns)
+
+    # Build transaction rows (latest 15)
+    txn_rows = []
+    for t in txns[:15]:
+        addr = _build_address(t)
+        ptype = t.get("property_type", "O")
+        txn_rows.append(
+            Row(
+                children=[
+                    Text(_fmt_date(t.get("date")), css_class="w-20 shrink-0"),
+                    Text(addr, css_class="flex-1 truncate"),
+                    Badge(
+                        label=_TYPE_LABELS.get(ptype, ptype),
+                        variant=_TYPE_VARIANTS.get(ptype, "secondary"),
+                    ),
+                    Text(_fmt_gbp(t.get("price")), css_class="w-24 text-right font-semibold"),
+                ],
+                gap=2,
+                css_class="items-center",
+            )
+        )
+
+    # Escalation note
+    escalation_note = ""
+    if data.get("escalated_from") and data.get("escalated_to"):
+        escalation_note = f"Search widened from {data['escalated_from']} to {data['escalated_to']}"
+
+    view = Column(
+        children=[
+            # Header
+            Heading(f"Comparable Sales \u2014 {postcode.upper()}", level=2),
+            Muted(f"{search_level} \u00b7 {months} months \u00b7 Land Registry"),
+
+            Separator(),
+
+            # Stats row
+            Grid(
+                columns=5,
+                children=[
+                    Metric(label="Transactions", value=str(count)),
+                    Metric(label="Median", value=_fmt_gbp(median)),
+                    Metric(label="Mean", value=_fmt_gbp(mean)),
+                    Metric(label="Lower Quartile", value=_fmt_gbp(p25)),
+                    Metric(label="Upper Quartile", value=_fmt_gbp(p75)),
+                ],
+            ),
+
+            Separator(),
+
+            # Price distribution chart
+            *(
+                [
+                    Heading("Price Distribution", level=3),
+                    BarChart(
+                        data=price_buckets,
+                        series=[ChartSeries(dataKey="count", label="Sales")],
+                        xAxis="range",
+                        height=200,
+                    ),
+                    Separator(),
+                ]
+                if price_buckets
+                else []
+            ),
+
+            # Recent transactions
+            Heading(f"Recent Transactions ({min(len(txns), 15)} of {count})", level=3),
+            *(txn_rows if txn_rows else [Muted("No transactions found")]),
+
+            # Escalation note
+            *(
+                [Separator(), Muted(escalation_note)]
+                if escalation_note
+                else []
+            ),
+        ],
+        gap=4,
+    )
+
+    # Text summary for LLM reasoning
+    text = (
+        f"Comparable sales for {postcode.upper()} ({search_level}, {months}mo): "
+        f"{count} transactions, median {_fmt_gbp(median)}, "
+        f"mean {_fmt_gbp(mean)}, range {_fmt_gbp(p25)}\u2013{_fmt_gbp(p75)}"
+    )
+
+    return ToolResult(content=text, structured_content=view)
