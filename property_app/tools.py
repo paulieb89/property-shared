@@ -322,8 +322,13 @@ def rightmove_search(
 # ---------------------------------------------------------------------------
 
 
+def _component_test_config():
+    from fastmcp.apps import PrefabAppConfig, ResourceCSP
+    return PrefabAppConfig(csp=ResourceCSP(resource_domains=["https://propertydata.fly.dev"]))
+
+
 @mcp.tool(
-    app=True,
+    app=_component_test_config(),
     annotations={"readOnlyHint": True},
     tags={"test"},
 )
@@ -339,6 +344,7 @@ def component_test():
         ForEach,
         Grid,
         Heading,
+        Image,
         Metric,
         Muted,
         Progress,
@@ -442,6 +448,25 @@ def component_test():
                     Metric(label="Count", value="25"),
                 ])]),
             ]),
+            Separator(),
+
+            # Section 8: Image (data URI — no CSP needed)
+            Heading("8. Image (data URI)", level=3),
+            Image(
+                src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAACXBIWXMAAAsTAAALEwEAmpwYAAABIklEQVR4nO3SQQ0AIAwAQfj3jAdWuECSzbkB+tme2Z0f2fkdwH8MiRkSMyRmSMyQmCExQ2KGxAyJGRIzJGZIzJCYITFDYobEDIkZEjMkZkjMkJghMUNihsQMiRkSMyRmSMyQmCExQ2KGxAyJGRIzJGZIzJCYITFDYobEDIkZEjMkZkjMkJghMUNihsQMiRkSMyRmSMyQmCExQ2KGxAyJGRIzJGZIzJCYITFDYobEDIkZEjMkZkjMkJghMUNihsQMiRkSMyRmSMyQmCExQ2KGxAyJGRIzJGZIzJCYITFDYobEDIkZEjMkZkjMkJghMUNihsQMiRkSMyRmSMyQmCExQ2KGxAyJGRIzJGZIzJCYITFDYobEDIn9AC9RBGTuOhELAAAAAElFTkSuQmCC",
+                alt="100x100 test square",
+                height=100,
+            ),
+
+            Separator(),
+
+            # Section 9: Image (proxied external URL)
+            Heading("9. Image (proxied URL)", level=3),
+            Image(
+                src="https://propertydata.fly.dev/img?url=https%3A%2F%2Fmedia.rightmove.co.uk%3A443%2Fdir%2Fcrop%2F10%3A9-16%3A9%2Fproperty-photo%2Fb17d74096%2F174125315%2Fb17d74096dbcccb8c49b510d19b48625_max_476x317.jpeg",
+                alt="Proxied Rightmove image",
+                height=200,
+            ),
         ],
         gap=4,
     )
