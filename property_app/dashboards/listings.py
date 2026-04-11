@@ -39,19 +39,8 @@ def _fmt_rent(price: int | None, frequency: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _listings_app_config():
-    """CSP config allowing Rightmove image CDN."""
-    from fastmcp.apps import PrefabAppConfig, ResourceCSP
-
-    return PrefabAppConfig(
-        csp=ResourceCSP(
-            resource_domains=["https://propertydata.fly.dev"],
-        ),
-    )
-
-
 @mcp.tool(
-    app=_listings_app_config(),
+    app=True,
     annotations={"readOnlyHint": True, "openWorldHint": True},
     tags={"rightmove", "listings", "dashboard"},
     timeout=120.0,
@@ -80,7 +69,6 @@ def listings_dashboard(
         Column,
         Grid,
         Heading,
-        Image,
         Metric,
         Muted,
         Row,
@@ -110,21 +98,6 @@ def listings_dashboard(
     listing_cards = []
     for l in raw_listings[:12]:  # Cap at 12 for reasonable widget size
         # First image as thumbnail
-        img_children = []
-        if l.images:
-            from urllib.parse import quote
-
-            # Proxy through our domain to avoid CSP blocks
-            proxied_url = f"https://propertydata.fly.dev/img?url={quote(l.images[0], safe='')}"
-            img_children.append(
-                Image(
-                    src=proxied_url,
-                    alt=l.address or "Property",
-                    height="160px",
-                    css_class="w-full object-cover rounded-t-lg",
-                )
-            )
-
         # Status badge
         status_children = []
         if l.listing_status:
@@ -142,7 +115,6 @@ def listings_dashboard(
             price_text = _fmt_gbp(l.price)
 
         card = Card(children=[
-            *img_children,
             CardContent(children=[
                 Row(children=[
                     Heading(price_text, level=4),
