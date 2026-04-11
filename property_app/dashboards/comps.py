@@ -40,7 +40,9 @@ def _search_comps(
         address=address,
         property_type=property_type,
     )
-    return result.model_dump(mode="json")
+    from property_app.tools import _slim
+
+    return _slim(result.model_dump(mode="json"))
 
 
 # ---------------------------------------------------------------------------

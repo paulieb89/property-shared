@@ -7,11 +7,21 @@ a PrefabApp with inline Metric + DataTable components.
 """
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Any, Annotated
 
 from pydantic import Field
 
 from property_app.server import mcp
+
+
+def _slim(obj: Any) -> Any:
+    """Strip raw/images/floorplans/epc_match for LLM-friendly output."""
+    if isinstance(obj, dict):
+        return {k: _slim(v) for k, v in obj.items()
+                if k not in ("raw", "images", "floorplans", "epc_match")}
+    if isinstance(obj, list):
+        return [_slim(item) for item in obj]
+    return obj
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +79,8 @@ def stamp_duty(
         Separator,
     )
 
+    from fastmcp.tools import ToolResult
+
     from property_app.formatting import fmt_gbp, fmt_pct
 
     data = calc_stamp_duty(price, additional_property, first_time_buyer, non_resident)
@@ -84,35 +96,41 @@ def stamp_duty(
         for b in data.get("breakdown", [])
     ]
 
-    return PrefabApp(
-        title="Stamp Duty Calculator",
-        view=Column(
-            children=[
-                Heading("Stamp Duty (SDLT)", level=2),
-                Grid(
-                    columns=3,
-                    children=[
-                        Metric(label="Purchase Price", value=fmt_gbp(price)),
-                        Metric(label="Total SDLT", value=fmt_gbp(data["total_sdlt"])),
-                        Metric(
-                            label="Effective Rate",
-                            value=fmt_pct(data["effective_rate"]),
-                        ),
-                    ],
-                ),
-                Separator(),
-                DataTable(
-                    columns=[
-                        DataTableColumn(key="band", header="Band"),
-                        DataTableColumn(key="rate", header="Rate", align="right"),
-                        DataTableColumn(key="amount", header="Amount", align="right"),
-                        DataTableColumn(key="tax", header="Tax", align="right"),
-                    ],
-                    rows=band_rows,
-                ),
-            ],
-            gap=4,
+    view = Column(
+        children=[
+            Heading("Stamp Duty (SDLT)", level=2),
+            Grid(
+                columns=3,
+                children=[
+                    Metric(label="Purchase Price", value=fmt_gbp(price)),
+                    Metric(label="Total SDLT", value=fmt_gbp(data["total_sdlt"])),
+                    Metric(
+                        label="Effective Rate",
+                        value=fmt_pct(data["effective_rate"]),
+                    ),
+                ],
+            ),
+            Separator(),
+            DataTable(
+                columns=[
+                    DataTableColumn(key="band", header="Band"),
+                    DataTableColumn(key="rate", header="Rate", align="right"),
+                    DataTableColumn(key="amount", header="Amount", align="right"),
+                    DataTableColumn(key="tax", header="Tax", align="right"),
+                ],
+                rows=band_rows,
+            ),
+        ],
+        gap=4,
+    )
+
+    # Text fallback so the model can reason about results (Lesson 24)
+    return ToolResult(
+        content=(
+            f"SDLT for \u00a3{price:,}: \u00a3{data['total_sdlt']:,.0f} "
+            f"({fmt_pct(data['effective_rate'])} effective rate)"
         ),
+        structured_content=view,
     )
 
 
@@ -162,7 +180,7 @@ def search_company(query: str) -> dict:
 
     if result is None:
         return {"error": "Not found"}
-    return result.model_dump(mode="json")
+    return _slim(result.model_dump(mode="json"))
 
 
 @mcp.tool(
@@ -196,7 +214,7 @@ async def lookup_epc(postcode: str, address: str | None = None) -> dict:
     result = await client.search_by_postcode(postcode, address=address)
     if result is None:
         return {"error": "No EPC data"}
-    return result.model_dump(mode="json")
+    return _slim(result.model_dump(mode="json"))
 
 
 @mcp.tool(
@@ -255,7 +273,7 @@ def search_rightmove(
     return {
         "search_url": search_url,
         "count": len(listings),
-        "listings": [l.model_dump(mode="json") for l in listings],
+        "listings": [_slim(l.model_dump(mode="json")) for l in listings],
         "median_price": median_price,
     }
 

@@ -23,6 +23,13 @@ mcp = FastMCP(
 )
 
 
+@mcp.custom_route("/health", methods=["GET"])
+async def health(request):  # noqa: ARG001
+    from starlette.responses import JSONResponse
+
+    return JSONResponse({"status": "ok"})
+
+
 def main() -> None:
     import os
     # Import tool/dashboard modules so they register on mcp/app
@@ -36,6 +43,7 @@ def main() -> None:
     if transport in ("sse", "http"):
         kwargs["host"] = os.environ.get("FASTMCP_HOST", "0.0.0.0")
         kwargs["port"] = int(os.environ.get("FASTMCP_PORT", "8080"))
+        kwargs["stateless_http"] = True
     mcp.run(transport=transport, **kwargs)
 
 
