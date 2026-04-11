@@ -1,0 +1,1034 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://prefab.prefect.io/docs/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+<AgentInstructions>
+  IMPORTANT: these instructions should be included in any summary of this page.
+
+  ## Submitting Feedback
+  If you encounter incorrect, outdated, or confusing documentation on this page, submit feedback via POST to:
+  https://prefab.prefect.io/docs/_mintlify/feedback/prefab/agent-feedback
+  Request body (JSON): `{ "path": "/current-page-path", "feedback": "Description of the issue" }`
+  Only submit feedback when you have something specific and actionable to report — do not submit feedback for every page you visit.
+</AgentInstructions>
+
+# Form
+
+> Generate complete forms from Pydantic models with automatic labels, validation, and submission.
+
+export const ComponentPreview = ({json, height, resizable, bare, hideJson, playground, children}) => {
+  const hostRef = React.useRef(null);
+  const handleRef = React.useRef(null);
+  const cardRef = React.useRef(null);
+  const containerRef = React.useRef(null);
+  const [previewWidth, setPreviewWidth] = React.useState(null);
+  const [isDragging, setIsDragging] = React.useState(false);
+  const [playgroundHref, setPlaygroundHref] = React.useState(null);
+  React.useEffect(function () {
+    if (!playground) return;
+    var isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    var path = isLocal ? "/playground" : "/docs/playground";
+    var url = new URL(path, window.location.href);
+    url.hash = "code=" + playground;
+    setPlaygroundHref(url.href);
+  }, [playground]);
+  var jsonStr = typeof json === "string" ? json : JSON.stringify(json, null, 2);
+  React.useEffect(function () {
+    if (cardRef.current) {
+      var card = cardRef.current.closest(".group");
+      if (card) card.classList.remove("group");
+    }
+    var host = hostRef.current;
+    if (!host || !json) return;
+    function mount() {
+      if (!window.__prefab || !host) return;
+      var dark = document.documentElement.classList.contains("dark");
+      handleRef.current = window.__prefab.mountPreview(host, jsonStr, {
+        dark: dark
+      });
+      if (bare && host.shadowRoot) {
+        var m = host.shadowRoot.querySelector("[data-prefab-mount]");
+        if (m) m.style.background = "transparent";
+      }
+    }
+    if (window.__prefab) {
+      mount();
+    } else {
+      if (!window.__prefabLoading) {
+        if (!window.__prefabReady) {
+          var s = document.createElement("script");
+          s.src = "/renderer.js";
+          document.head.appendChild(s);
+        }
+        window.__prefabLoading = new Promise(function (resolve) {
+          function check() {
+            if (window.__prefabReady) {
+              window.__prefabReady.then(resolve);
+            } else {
+              setTimeout(check, 10);
+            }
+          }
+          check();
+        });
+      }
+      window.__prefabLoading.then(mount);
+    }
+    var observer = new MutationObserver(function () {
+      var dark = document.documentElement.classList.contains("dark");
+      if (handleRef.current) handleRef.current.setDark(dark);
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"]
+    });
+    return function () {
+      observer.disconnect();
+      if (handleRef.current) {
+        handleRef.current.unmount();
+        handleRef.current = null;
+      }
+    };
+  }, [json]);
+  function startResize(e) {
+    e.preventDefault();
+    var startX = e.clientX;
+    var startW = hostRef.current ? hostRef.current.offsetWidth : 0;
+    var maxW = containerRef.current ? containerRef.current.offsetWidth - 10 : startW;
+    setIsDragging(true);
+    function onMove(ev) {
+      var w = Math.max(260, Math.min(startW + (ev.clientX - startX), maxW));
+      setPreviewWidth(w);
+    }
+    function onUp() {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      setIsDragging(false);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+  if (bare) {
+    return <div ref={hostRef} />;
+  }
+  if (resizable) {
+    return <Card>
+        <div ref={cardRef} />
+        <div ref={containerRef} style={{
+      display: "flex",
+      position: "relative",
+      overflow: "hidden"
+    }}>
+          <div ref={hostRef} style={{
+      flex: previewWidth ? "none" : 1,
+      width: previewWidth ? previewWidth + "px" : undefined,
+      minWidth: 0
+    }} />
+          <div onMouseDown={startResize} style={{
+      width: "14px",
+      flexShrink: 0,
+      cursor: "col-resize",
+      background: isDragging ? "var(--border, #e5e7eb)" : "color-mix(in srgb, var(--border, #e5e7eb) 40%, transparent)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      transition: "background 0.15s",
+      userSelect: "none"
+    }}>
+            <svg width="6" height="24" style={{
+      opacity: 0.5
+    }}>
+              <circle cx="2" cy="4" r="1.2" fill="currentColor" />
+              <circle cx="2" cy="9" r="1.2" fill="currentColor" />
+              <circle cx="2" cy="14" r="1.2" fill="currentColor" />
+              <circle cx="2" cy="19" r="1.2" fill="currentColor" />
+              <circle cx="5" cy="4" r="1.2" fill="currentColor" />
+              <circle cx="5" cy="9" r="1.2" fill="currentColor" />
+              <circle cx="5" cy="14" r="1.2" fill="currentColor" />
+              <circle cx="5" cy="19" r="1.2" fill="currentColor" />
+            </svg>
+          </div>
+          <div style={{
+      flex: previewWidth ? 1 : "0 0 24px",
+      minWidth: "24px",
+      background: "repeating-linear-gradient(-45deg, transparent, transparent 3px, var(--border, #e5e7eb) 3px, var(--border, #e5e7eb) 4px)",
+      opacity: 0.4
+    }} />
+          {previewWidth && <div style={{
+      position: "absolute",
+      bottom: "8px",
+      right: "8px",
+      background: "var(--background, white)",
+      border: "1px solid var(--border, #e5e7eb)",
+      borderRadius: "4px",
+      padding: "1px 6px",
+      fontSize: "11px",
+      fontFamily: "monospace",
+      color: "var(--muted-foreground, #6b7280)",
+      pointerEvents: "none"
+    }}>
+              {previewWidth}px
+            </div>}
+        </div>
+        {playgroundHref && <div style={{
+      display: "flex",
+      justifyContent: "flex-end",
+      padding: "4px 0 8px"
+    }}>
+            <a href={playgroundHref} target="_blank" rel="noopener noreferrer" style={{
+      fontSize: "11px",
+      opacity: 0.4,
+      textDecoration: "none",
+      textDecorationLine: "none",
+      borderBottom: "none",
+      boxShadow: "none",
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "3px",
+      transition: "opacity 0.15s",
+      fontWeight: 400
+    }} onMouseOver={function (e) {
+      e.currentTarget.style.opacity = "0.6";
+    }} onMouseOut={function (e) {
+      e.currentTarget.style.opacity = "0.4";
+    }}>
+              Edit in Playground
+              <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>
+            </a>
+          </div>}
+        <div style={{
+      marginBottom: "-2rem"
+    }}>{children}</div>
+      </Card>;
+  }
+  return <Card>
+      <div ref={cardRef} />
+      <div ref={hostRef} />
+      {playgroundHref && <div style={{
+    display: "flex",
+    justifyContent: "flex-end",
+    padding: "4px 0 8px"
+  }}>
+          <a href={playgroundHref} target="_blank" rel="noopener noreferrer" style={{
+    fontSize: "11px",
+    opacity: 0.4,
+    textDecoration: "none",
+    textDecorationLine: "none",
+    borderBottom: "none",
+    boxShadow: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "3px",
+    transition: "opacity 0.15s",
+    fontWeight: 400
+  }} onMouseOver={function (e) {
+    e.currentTarget.style.opacity = "0.6";
+  }} onMouseOut={function (e) {
+    e.currentTarget.style.opacity = "0.4";
+  }}>
+            Edit in Playground
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>
+          </a>
+        </div>}
+      <div style={{
+    marginBottom: "-2rem"
+  }}>{children}</div>
+    </Card>;
+};
+
+Forms collect structured data from users. You can build them by hand with individual input components, or generate them automatically from a Pydantic model with `Form.from_model()`.
+
+## Basic Usage
+
+A `Form` groups labeled inputs with a submit action. Named inputs automatically sync their values to client state, so `{{ name }}` always reflects the current value of `Input(name="name")`. Wrap in a `Card` for visual structure.
+
+<ComponentPreview json={{"view":{"cssClass":"gap-6 grid-cols-2","type":"Grid","children":[{"cssClass":"gap-4","type":"Form","onSubmit":{"action":"toolCall","tool":"create_user","arguments":{"name":"{{ name }}","email":"{{ email }}"}},"children":[{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Name","optional":false},{"name":"name","type":"Input","inputType":"text","placeholder":"Your name","disabled":false,"readOnly":false,"required":false}]},{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Email","optional":false},{"name":"email","type":"Input","inputType":"email","placeholder":"you@example.com","disabled":false,"readOnly":false,"required":false}]},{"type":"Button","label":"Submit","variant":"default","size":"default","disabled":false}]},{"type":"Card","children":[{"cssClass":"gap-4","type":"Form","onSubmit":{"action":"toolCall","tool":"create_user","arguments":{"name":"{{ name }}","email":"{{ email }}"}},"children":[{"type":"CardHeader","children":[{"type":"CardTitle","content":"Create Account"},{"type":"CardDescription","content":"Enter your information to get started."}]},{"type":"CardContent","children":[{"cssClass":"gap-4","type":"Column","children":[{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Name","optional":false},{"name":"name","type":"Input","inputType":"text","placeholder":"Your name","disabled":false,"readOnly":false,"required":false}]},{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Email","optional":false},{"name":"email","type":"Input","inputType":"email","placeholder":"you@example.com","disabled":false,"readOnly":false,"required":false}]}]}]},{"cssClass":"justify-end","type":"CardFooter","children":[{"type":"Button","label":"Submit","variant":"default","size":"default","disabled":false}]}]}]}]}}} playground="ZnJvbSBwcmVmYWJfdWkuY29tcG9uZW50cyBpbXBvcnQgKAogICAgQnV0dG9uLCBDYXJkLCBDYXJkQ29udGVudCwgQ2FyZERlc2NyaXB0aW9uLCBDYXJkRm9vdGVyLAogICAgQ2FyZEhlYWRlciwgQ2FyZFRpdGxlLCBDb2x1bW4sIEZvcm0sIEdyaWQsIElucHV0LCBMYWJlbCwKKQpmcm9tIHByZWZhYl91aS5hY3Rpb25zLm1jcCBpbXBvcnQgQ2FsbFRvb2wKCnN1Ym1pdCA9IENhbGxUb29sKCJjcmVhdGVfdXNlciIsIGFyZ3VtZW50cz17Im5hbWUiOiAie3sgbmFtZSB9fSIsICJlbWFpbCI6ICJ7eyBlbWFpbCB9fSJ9KQoKd2l0aCBHcmlkKGNvbHVtbnM9MiwgZ2FwPTYpOgogICAgd2l0aCBGb3JtKG9uX3N1Ym1pdD1zdWJtaXQpOgogICAgICAgIHdpdGggQ29sdW1uKGdhcD0yKToKICAgICAgICAgICAgTGFiZWwoIk5hbWUiKQogICAgICAgICAgICBJbnB1dChuYW1lPSJuYW1lIiwgcGxhY2Vob2xkZXI9IllvdXIgbmFtZSIpCiAgICAgICAgd2l0aCBDb2x1bW4oZ2FwPTIpOgogICAgICAgICAgICBMYWJlbCgiRW1haWwiKQogICAgICAgICAgICBJbnB1dChuYW1lPSJlbWFpbCIsIGlucHV0X3R5cGU9ImVtYWlsIiwgcGxhY2Vob2xkZXI9InlvdUBleGFtcGxlLmNvbSIpCiAgICAgICAgQnV0dG9uKCJTdWJtaXQiKQoKICAgIHdpdGggQ2FyZCgpOgogICAgICAgIHdpdGggRm9ybShvbl9zdWJtaXQ9c3VibWl0KToKICAgICAgICAgICAgd2l0aCBDYXJkSGVhZGVyKCk6CiAgICAgICAgICAgICAgICBDYXJkVGl0bGUoIkNyZWF0ZSBBY2NvdW50IikKICAgICAgICAgICAgICAgIENhcmREZXNjcmlwdGlvbigiRW50ZXIgeW91ciBpbmZvcm1hdGlvbiB0byBnZXQgc3RhcnRlZC4iKQogICAgICAgICAgICB3aXRoIENhcmRDb250ZW50KCk6CiAgICAgICAgICAgICAgICB3aXRoIENvbHVtbihnYXA9NCk6CiAgICAgICAgICAgICAgICAgICAgd2l0aCBDb2x1bW4oZ2FwPTIpOgogICAgICAgICAgICAgICAgICAgICAgICBMYWJlbCgiTmFtZSIpCiAgICAgICAgICAgICAgICAgICAgICAgIElucHV0KG5hbWU9Im5hbWUiLCBwbGFjZWhvbGRlcj0iWW91ciBuYW1lIikKICAgICAgICAgICAgICAgICAgICB3aXRoIENvbHVtbihnYXA9Mik6CiAgICAgICAgICAgICAgICAgICAgICAgIExhYmVsKCJFbWFpbCIpCiAgICAgICAgICAgICAgICAgICAgICAgIElucHV0KG5hbWU9ImVtYWlsIiwgaW5wdXRfdHlwZT0iZW1haWwiLCBwbGFjZWhvbGRlcj0ieW91QGV4YW1wbGUuY29tIikKICAgICAgICAgICAgd2l0aCBDYXJkRm9vdGVyKGNzc19jbGFzcz0ianVzdGlmeS1lbmQiKToKICAgICAgICAgICAgICAgIEJ1dHRvbigiU3VibWl0IikK">
+  <CodeGroup>
+    ```python Python icon="python" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    from prefab_ui.components import (
+        Button, Card, CardContent, CardDescription, CardFooter,
+        CardHeader, CardTitle, Column, Form, Grid, Input, Label,
+    )
+    from prefab_ui.actions.mcp import CallTool
+
+    submit = CallTool("create_user", arguments={"name": "{{ name }}", "email": "{{ email }}"})
+
+    with Grid(columns=2, gap=6):
+        with Form(on_submit=submit):
+            with Column(gap=2):
+                Label("Name")
+                Input(name="name", placeholder="Your name")
+            with Column(gap=2):
+                Label("Email")
+                Input(name="email", input_type="email", placeholder="you@example.com")
+            Button("Submit")
+
+        with Card():
+            with Form(on_submit=submit):
+                with CardHeader():
+                    CardTitle("Create Account")
+                    CardDescription("Enter your information to get started.")
+                with CardContent():
+                    with Column(gap=4):
+                        with Column(gap=2):
+                            Label("Name")
+                            Input(name="name", placeholder="Your name")
+                        with Column(gap=2):
+                            Label("Email")
+                            Input(name="email", input_type="email", placeholder="you@example.com")
+                with CardFooter(css_class="justify-end"):
+                    Button("Submit")
+    ```
+
+    ```json Protocol icon="brackets-curly" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    {
+      "view": {
+        "cssClass": "gap-6 grid-cols-2",
+        "type": "Grid",
+        "children": [
+          {
+            "cssClass": "gap-4",
+            "type": "Form",
+            "onSubmit": {
+              "action": "toolCall",
+              "tool": "create_user",
+              "arguments": {"name": "{{ name }}", "email": "{{ email }}"}
+            },
+            "children": [
+              {
+                "cssClass": "gap-2",
+                "type": "Column",
+                "children": [
+                  {"type": "Label", "text": "Name", "optional": false},
+                  {
+                    "name": "name",
+                    "type": "Input",
+                    "inputType": "text",
+                    "placeholder": "Your name",
+                    "disabled": false,
+                    "readOnly": false,
+                    "required": false
+                  }
+                ]
+              },
+              {
+                "cssClass": "gap-2",
+                "type": "Column",
+                "children": [
+                  {"type": "Label", "text": "Email", "optional": false},
+                  {
+                    "name": "email",
+                    "type": "Input",
+                    "inputType": "email",
+                    "placeholder": "you@example.com",
+                    "disabled": false,
+                    "readOnly": false,
+                    "required": false
+                  }
+                ]
+              },
+              {
+                "type": "Button",
+                "label": "Submit",
+                "variant": "default",
+                "size": "default",
+                "disabled": false
+              }
+            ]
+          },
+          {
+            "type": "Card",
+            "children": [
+              {
+                "cssClass": "gap-4",
+                "type": "Form",
+                "onSubmit": {
+                  "action": "toolCall",
+                  "tool": "create_user",
+                  "arguments": {"name": "{{ name }}", "email": "{{ email }}"}
+                },
+                "children": [
+                  {
+                    "type": "CardHeader",
+                    "children": [
+                      {"type": "CardTitle", "content": "Create Account"},
+                      {"type": "CardDescription", "content": "Enter your information to get started."}
+                    ]
+                  },
+                  {
+                    "type": "CardContent",
+                    "children": [
+                      {
+                        "cssClass": "gap-4",
+                        "type": "Column",
+                        "children": [
+                          {
+                            "cssClass": "gap-2",
+                            "type": "Column",
+                            "children": [
+                              {"type": "Label", "text": "Name", "optional": false},
+                              {
+                                "name": "name",
+                                "type": "Input",
+                                "inputType": "text",
+                                "placeholder": "Your name",
+                                "disabled": false,
+                                "readOnly": false,
+                                "required": false
+                              }
+                            ]
+                          },
+                          {
+                            "cssClass": "gap-2",
+                            "type": "Column",
+                            "children": [
+                              {"type": "Label", "text": "Email", "optional": false},
+                              {
+                                "name": "email",
+                                "type": "Input",
+                                "inputType": "email",
+                                "placeholder": "you@example.com",
+                                "disabled": false,
+                                "readOnly": false,
+                                "required": false
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "cssClass": "justify-end",
+                    "type": "CardFooter",
+                    "children": [
+                      {
+                        "type": "Button",
+                        "label": "Submit",
+                        "variant": "default",
+                        "size": "default",
+                        "disabled": false
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+    ```
+  </CodeGroup>
+</ComponentPreview>
+
+Building forms by hand gives full control over layout and behavior, but requires wiring up every label, input type, and argument template yourself. For models with many fields, `Form.from_model()` handles all of that automatically.
+
+## Generating Forms Automatically
+
+`Form.from_model()` introspects a Pydantic model and generates a complete form — labels, typed inputs, validation constraints, and a submit button — from the model's field definitions. Pass a `CallTool` as the submit action, and `from_model()` automatically wires up the arguments from the model's fields so you don't have to write `{{ template }}` expressions for every field.
+
+<ComponentPreview json={{"view":{"cssClass":"gap-4","type":"Form","onSubmit":{"onError":{"action":"showToast","message":"{{ $error }}","variant":"error"},"action":"toolCall","tool":"submit_contact","arguments":{"data":{"name":"{{ name }}","email":"{{ email }}","message":"{{ message }}"}}},"children":[{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Full Name","optional":false},{"name":"name","type":"Input","inputType":"text","placeholder":"Full Name","disabled":false,"readOnly":false,"required":true,"minLength":1}]},{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Email","optional":false},{"name":"email","type":"Input","inputType":"email","placeholder":"Email","disabled":false,"readOnly":false,"required":true}]},{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Message","optional":false},{"name":"message","type":"Textarea","placeholder":"Your message","rows":4,"disabled":false,"required":true}]},{"type":"Button","label":"Submit","variant":"default","size":"default","disabled":false}]}}} playground="ZnJvbSBweWRhbnRpYyBpbXBvcnQgQmFzZU1vZGVsLCBGaWVsZApmcm9tIHByZWZhYl91aS5jb21wb25lbnRzIGltcG9ydCBGb3JtCmZyb20gcHJlZmFiX3VpLmFjdGlvbnMubWNwIGltcG9ydCBDYWxsVG9vbAoKY2xhc3MgQ29udGFjdEluZm8oQmFzZU1vZGVsKToKICAgIG5hbWU6IHN0ciA9IEZpZWxkKHRpdGxlPSJGdWxsIE5hbWUiLCBtaW5fbGVuZ3RoPTEpCiAgICBlbWFpbDogc3RyCiAgICBtZXNzYWdlOiBzdHIgPSBGaWVsZCgKICAgICAgICBkZXNjcmlwdGlvbj0iWW91ciBtZXNzYWdlIiwKICAgICAgICBqc29uX3NjaGVtYV9leHRyYT17InVpIjogeyJ0eXBlIjogInRleHRhcmVhIiwgInJvd3MiOiA0fX0sCiAgICApCgpGb3JtLmZyb21fbW9kZWwoQ29udGFjdEluZm8sIG9uX3N1Ym1pdD1DYWxsVG9vbCgic3VibWl0X2NvbnRhY3QiKSkK">
+  <CodeGroup>
+    ```python Python icon="python" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    from pydantic import BaseModel, Field
+    from prefab_ui.components import Form
+    from prefab_ui.actions.mcp import CallTool
+
+    class ContactInfo(BaseModel):
+        name: str = Field(title="Full Name", min_length=1)
+        email: str
+        message: str = Field(
+            description="Your message",
+            json_schema_extra={"ui": {"type": "textarea", "rows": 4}},
+        )
+
+    Form.from_model(ContactInfo, on_submit=CallTool("submit_contact"))
+    ```
+
+    ```json Protocol icon="brackets-curly" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    {
+      "view": {
+        "cssClass": "gap-4",
+        "type": "Form",
+        "onSubmit": {
+          "onError": {"action": "showToast", "message": "{{ $error }}", "variant": "error"},
+          "action": "toolCall",
+          "tool": "submit_contact",
+          "arguments": {
+            "data": {"name": "{{ name }}", "email": "{{ email }}", "message": "{{ message }}"}
+          }
+        },
+        "children": [
+          {
+            "cssClass": "gap-2",
+            "type": "Column",
+            "children": [
+              {"type": "Label", "text": "Full Name", "optional": false},
+              {
+                "name": "name",
+                "type": "Input",
+                "inputType": "text",
+                "placeholder": "Full Name",
+                "disabled": false,
+                "readOnly": false,
+                "required": true,
+                "minLength": 1
+              }
+            ]
+          },
+          {
+            "cssClass": "gap-2",
+            "type": "Column",
+            "children": [
+              {"type": "Label", "text": "Email", "optional": false},
+              {
+                "name": "email",
+                "type": "Input",
+                "inputType": "email",
+                "placeholder": "Email",
+                "disabled": false,
+                "readOnly": false,
+                "required": true
+              }
+            ]
+          },
+          {
+            "cssClass": "gap-2",
+            "type": "Column",
+            "children": [
+              {"type": "Label", "text": "Message", "optional": false},
+              {
+                "name": "message",
+                "type": "Textarea",
+                "placeholder": "Your message",
+                "rows": 4,
+                "disabled": false,
+                "required": true
+              }
+            ]
+          },
+          {
+            "type": "Button",
+            "label": "Submit",
+            "variant": "default",
+            "size": "default",
+            "disabled": false
+          }
+        ]
+      }
+    }
+    ```
+  </CodeGroup>
+</ComponentPreview>
+
+Notice that the `CallTool` only specifies the tool name — no `arguments`. `from_model()` generates them automatically, wrapping each field as `{{ field_name }}` under a `data` key. It also adds a default error toast so validation failures are visible without any extra configuration.
+
+### Custom Layout
+
+The turnkey `from_model()` handles everything: the `Form` wrapper, the submit button, and the `CallTool` argument wiring. When you need more control — a Card with a footer, a cancel button, a title — pass `fields_only=True` to generate just the labeled inputs, and take over the rest.
+
+With `fields_only`, three things that were automatic become your responsibility. You create the `Form` yourself and provide `on_submit` with explicit `arguments` (the turnkey version auto-generates these from the model, but `fields_only` doesn't touch your `CallTool`). You add your own submit button wherever it belongs in the layout. And you handle spacing — wrap the fields in a `Column(gap=4)` since they're no longer inside a Form that provides gap for you.
+
+<ComponentPreview json={{"view":{"cssClass":"w-full max-w-lg","type":"Card","children":[{"cssClass":"gap-4","type":"Form","onSubmit":{"onSuccess":{"action":"showToast","message":"Message sent!","variant":"success"},"onError":{"action":"showToast","message":"{{ $error }}","variant":"error"},"action":"toolCall","tool":"submit_contact","arguments":{"name":"{{ name }}","email":"{{ email }}","message":"{{ message }}"}},"children":[{"type":"CardContent","children":[{"cssClass":"mb-2","type":"CardTitle","content":"Contact Us"},{"cssClass":"gap-4","type":"Column","children":[{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Full Name","optional":false},{"name":"name","type":"Input","inputType":"text","placeholder":"Full Name","disabled":false,"readOnly":false,"required":true,"minLength":1}]},{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Email","optional":false},{"name":"email","type":"Input","inputType":"email","placeholder":"Email","disabled":false,"readOnly":false,"required":true}]},{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Message","optional":false},{"name":"message","type":"Textarea","placeholder":"Your message","rows":4,"disabled":false,"required":true}]}]}]},{"cssClass":"justify-end gap-2","type":"CardFooter","children":[{"type":"Button","label":"Cancel","variant":"outline","size":"default","buttonType":"button","disabled":false},{"type":"Button","label":"Send Message","variant":"default","size":"default","disabled":false}]}]}]}}} playground="ZnJvbSBweWRhbnRpYyBpbXBvcnQgQmFzZU1vZGVsLCBGaWVsZApmcm9tIHByZWZhYl91aS5jb21wb25lbnRzIGltcG9ydCAoCiAgICBCdXR0b24sIENhcmQsIENhcmRDb250ZW50LCBDYXJkRm9vdGVyLCBDYXJkVGl0bGUsCiAgICBDb2x1bW4sIEZvcm0sCikKZnJvbSBwcmVmYWJfdWkuYWN0aW9ucyBpbXBvcnQgU2hvd1RvYXN0CmZyb20gcHJlZmFiX3VpLmFjdGlvbnMubWNwIGltcG9ydCBDYWxsVG9vbAoKY2xhc3MgQ29udGFjdEluZm8oQmFzZU1vZGVsKToKICAgIG5hbWU6IHN0ciA9IEZpZWxkKHRpdGxlPSJGdWxsIE5hbWUiLCBtaW5fbGVuZ3RoPTEpCiAgICBlbWFpbDogc3RyCiAgICBtZXNzYWdlOiBzdHIgPSBGaWVsZCgKICAgICAgICBkZXNjcmlwdGlvbj0iWW91ciBtZXNzYWdlIiwKICAgICAgICBqc29uX3NjaGVtYV9leHRyYT17InVpIjogeyJ0eXBlIjogInRleHRhcmVhIiwgInJvd3MiOiA0fX0sCiAgICApCgp3aXRoIENhcmQoY3NzX2NsYXNzPSJ3LWZ1bGwgbWF4LXctbGciKToKICAgIHdpdGggRm9ybShvbl9zdWJtaXQ9Q2FsbFRvb2woCiAgICAgICAgInN1Ym1pdF9jb250YWN0IiwKICAgICAgICBhcmd1bWVudHM9eyJuYW1lIjogInt7IG5hbWUgfX0iLCAiZW1haWwiOiAie3sgZW1haWwgfX0iLCAibWVzc2FnZSI6ICJ7eyBtZXNzYWdlIH19In0sCiAgICAgICAgb25fc3VjY2Vzcz1TaG93VG9hc3QoIk1lc3NhZ2Ugc2VudCEiLCB2YXJpYW50PSJzdWNjZXNzIiksCiAgICAgICAgb25fZXJyb3I9U2hvd1RvYXN0KCJ7eyAkZXJyb3IgfX0iLCB2YXJpYW50PSJlcnJvciIpLAogICAgKSk6CgogICAgICAgIHdpdGggQ2FyZENvbnRlbnQoKToKICAgICAgICAgICAgQ2FyZFRpdGxlKCJDb250YWN0IFVzIiwgY3NzX2NsYXNzPSJtYi0yIikKICAgICAgICAgICAgd2l0aCBDb2x1bW4oZ2FwPTQpOgogICAgICAgICAgICAgICAgRm9ybS5mcm9tX21vZGVsKENvbnRhY3RJbmZvLCBmaWVsZHNfb25seT1UcnVlKQogICAgICAgIHdpdGggQ2FyZEZvb3Rlcihjc3NfY2xhc3M9Imp1c3RpZnktZW5kIGdhcC0yIik6CiAgICAgICAgICAgIEJ1dHRvbigiQ2FuY2VsIiwgdmFyaWFudD0ib3V0bGluZSIsIGJ1dHRvbl90eXBlPSJidXR0b24iKQogICAgICAgICAgICBCdXR0b24oIlNlbmQgTWVzc2FnZSIpCg">
+  <CodeGroup>
+    ```python Python icon="python" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    from pydantic import BaseModel, Field
+    from prefab_ui.components import (
+        Button, Card, CardContent, CardFooter, CardTitle,
+        Column, Form,
+    )
+    from prefab_ui.actions import ShowToast
+    from prefab_ui.actions.mcp import CallTool
+
+    class ContactInfo(BaseModel):
+        name: str = Field(title="Full Name", min_length=1)
+        email: str
+        message: str = Field(
+            description="Your message",
+            json_schema_extra={"ui": {"type": "textarea", "rows": 4}},
+        )
+
+    with Card(css_class="w-full max-w-lg"):
+        with Form(on_submit=CallTool(
+            "submit_contact",
+            arguments={"name": "{{ name }}", "email": "{{ email }}", "message": "{{ message }}"},
+            on_success=ShowToast("Message sent!", variant="success"),
+            on_error=ShowToast("{{ $error }}", variant="error"),
+        )):
+
+            with CardContent():
+                CardTitle("Contact Us", css_class="mb-2")
+                with Column(gap=4):
+                    Form.from_model(ContactInfo, fields_only=True)
+            with CardFooter(css_class="justify-end gap-2"):
+                Button("Cancel", variant="outline", button_type="button")
+                Button("Send Message")
+    ```
+
+    ```json Protocol icon="brackets-curly" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    {
+      "view": {
+        "cssClass": "w-full max-w-lg",
+        "type": "Card",
+        "children": [
+          {
+            "cssClass": "gap-4",
+            "type": "Form",
+            "onSubmit": {
+              "onSuccess": {"action": "showToast", "message": "Message sent!", "variant": "success"},
+              "onError": {"action": "showToast", "message": "{{ $error }}", "variant": "error"},
+              "action": "toolCall",
+              "tool": "submit_contact",
+              "arguments": {"name": "{{ name }}", "email": "{{ email }}", "message": "{{ message }}"}
+            },
+            "children": [
+              {
+                "type": "CardContent",
+                "children": [
+                  {"cssClass": "mb-2", "type": "CardTitle", "content": "Contact Us"},
+                  {
+                    "cssClass": "gap-4",
+                    "type": "Column",
+                    "children": [
+                      {
+                        "cssClass": "gap-2",
+                        "type": "Column",
+                        "children": [
+                          {"type": "Label", "text": "Full Name", "optional": false},
+                          {
+                            "name": "name",
+                            "type": "Input",
+                            "inputType": "text",
+                            "placeholder": "Full Name",
+                            "disabled": false,
+                            "readOnly": false,
+                            "required": true,
+                            "minLength": 1
+                          }
+                        ]
+                      },
+                      {
+                        "cssClass": "gap-2",
+                        "type": "Column",
+                        "children": [
+                          {"type": "Label", "text": "Email", "optional": false},
+                          {
+                            "name": "email",
+                            "type": "Input",
+                            "inputType": "email",
+                            "placeholder": "Email",
+                            "disabled": false,
+                            "readOnly": false,
+                            "required": true
+                          }
+                        ]
+                      },
+                      {
+                        "cssClass": "gap-2",
+                        "type": "Column",
+                        "children": [
+                          {"type": "Label", "text": "Message", "optional": false},
+                          {
+                            "name": "message",
+                            "type": "Textarea",
+                            "placeholder": "Your message",
+                            "rows": 4,
+                            "disabled": false,
+                            "required": true
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "cssClass": "justify-end gap-2",
+                "type": "CardFooter",
+                "children": [
+                  {
+                    "type": "Button",
+                    "label": "Cancel",
+                    "variant": "outline",
+                    "size": "default",
+                    "buttonType": "button",
+                    "disabled": false
+                  },
+                  {
+                    "type": "Button",
+                    "label": "Send Message",
+                    "variant": "default",
+                    "size": "default",
+                    "disabled": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+    ```
+  </CodeGroup>
+</ComponentPreview>
+
+Compare this to the turnkey version above: the `CallTool` now has explicit `arguments`, the buttons are placed in `CardFooter`, and the fields are wrapped in `Column(gap=4)` for spacing. The model still defines all the labels, input types, and validation — `fields_only` just stops short of deciding how to lay them out.
+
+### Type Mapping
+
+Each field's Python type determines which input component is rendered. A field named `email` gets an email input automatically, a `bool` becomes a checkbox, number types get number inputs with constraints, and so on.
+
+<ComponentPreview json={{"view":{"cssClass":"gap-4","type":"Form","children":[{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Username","optional":false},{"name":"username","type":"Input","inputType":"text","placeholder":"Username","disabled":false,"readOnly":false,"required":true}]},{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Email","optional":false},{"name":"email","type":"Input","inputType":"email","placeholder":"Email","disabled":false,"readOnly":false,"required":true}]},{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Age","optional":false},{"name":"age","type":"Input","inputType":"number","placeholder":"Age","disabled":false,"readOnly":false,"required":true,"min":0.0,"max":150.0}]},{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Password","optional":false},{"name":"password","type":"Input","inputType":"password","placeholder":"Password","disabled":false,"readOnly":false,"required":true}]},{"name":"active","value":true,"type":"Checkbox","label":"Active","disabled":false,"required":false}]},"state":{"active":true}}} playground="ZnJvbSBweWRhbnRpYyBpbXBvcnQgQmFzZU1vZGVsLCBGaWVsZCwgU2VjcmV0U3RyCmZyb20gcHJlZmFiX3VpLmNvbXBvbmVudHMgaW1wb3J0IEZvcm0KCmNsYXNzIFVzZXJQcm9maWxlKEJhc2VNb2RlbCk6CiAgICB1c2VybmFtZTogc3RyCiAgICBlbWFpbDogc3RyCiAgICBhZ2U6IGludCA9IEZpZWxkKGdlPTAsIGxlPTE1MCkKICAgIHBhc3N3b3JkOiBTZWNyZXRTdHIKICAgIGFjdGl2ZTogYm9vbCA9IFRydWUKCkZvcm0uZnJvbV9tb2RlbChVc2VyUHJvZmlsZSkK">
+  <CodeGroup>
+    ```python Python icon="python" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    from pydantic import BaseModel, Field, SecretStr
+    from prefab_ui.components import Form
+
+    class UserProfile(BaseModel):
+        username: str
+        email: str
+        age: int = Field(ge=0, le=150)
+        password: SecretStr
+        active: bool = True
+
+    Form.from_model(UserProfile)
+    ```
+
+    ```json Protocol icon="brackets-curly" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    {
+      "view": {
+        "cssClass": "gap-4",
+        "type": "Form",
+        "children": [
+          {
+            "cssClass": "gap-2",
+            "type": "Column",
+            "children": [
+              {"type": "Label", "text": "Username", "optional": false},
+              {
+                "name": "username",
+                "type": "Input",
+                "inputType": "text",
+                "placeholder": "Username",
+                "disabled": false,
+                "readOnly": false,
+                "required": true
+              }
+            ]
+          },
+          {
+            "cssClass": "gap-2",
+            "type": "Column",
+            "children": [
+              {"type": "Label", "text": "Email", "optional": false},
+              {
+                "name": "email",
+                "type": "Input",
+                "inputType": "email",
+                "placeholder": "Email",
+                "disabled": false,
+                "readOnly": false,
+                "required": true
+              }
+            ]
+          },
+          {
+            "cssClass": "gap-2",
+            "type": "Column",
+            "children": [
+              {"type": "Label", "text": "Age", "optional": false},
+              {
+                "name": "age",
+                "type": "Input",
+                "inputType": "number",
+                "placeholder": "Age",
+                "disabled": false,
+                "readOnly": false,
+                "required": true,
+                "min": 0.0,
+                "max": 150.0
+              }
+            ]
+          },
+          {
+            "cssClass": "gap-2",
+            "type": "Column",
+            "children": [
+              {"type": "Label", "text": "Password", "optional": false},
+              {
+                "name": "password",
+                "type": "Input",
+                "inputType": "password",
+                "placeholder": "Password",
+                "disabled": false,
+                "readOnly": false,
+                "required": true
+              }
+            ]
+          },
+          {
+            "name": "active",
+            "value": true,
+            "type": "Checkbox",
+            "label": "Active",
+            "disabled": false,
+            "required": false
+          }
+        ]
+      },
+      "state": {"active": true}
+    }
+    ```
+  </CodeGroup>
+</ComponentPreview>
+
+The full type mapping:
+
+| Python type              | Input component                                                             |
+| ------------------------ | --------------------------------------------------------------------------- |
+| `str`                    | Text input (auto-detects `email`, `password`, `tel`, `url` from field name) |
+| `int`, `float`           | Number input                                                                |
+| `bool`                   | Checkbox                                                                    |
+| `Literal["a", "b", "c"]` | Select dropdown                                                             |
+| `SecretStr`              | Password input                                                              |
+| `datetime.date`          | Date picker                                                                 |
+| `datetime.time`          | Time picker                                                                 |
+| `datetime.datetime`      | Datetime picker                                                             |
+
+### Field Metadata
+
+Pydantic `Field()` parameters control labels, placeholders, and HTML validation constraints. In this example, `title` sets the label, `description` sets the placeholder, `min_length` enforces a minimum, and the `ui` hint overrides the default text input with a textarea.
+
+<ComponentPreview json={{"view":{"cssClass":"gap-4","type":"Form","children":[{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Your Name","optional":false},{"name":"name","type":"Input","inputType":"text","placeholder":"How should we address you?","disabled":false,"readOnly":false,"required":true,"minLength":2,"maxLength":50}]},{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Bio","optional":true},{"name":"bio","value":"","type":"Textarea","placeholder":"Tell us about yourself","rows":3,"disabled":false,"required":false}]}]},"state":{"bio":""}}} playground="ZnJvbSBweWRhbnRpYyBpbXBvcnQgQmFzZU1vZGVsLCBGaWVsZApmcm9tIHByZWZhYl91aS5jb21wb25lbnRzIGltcG9ydCBGb3JtCgpjbGFzcyBQcm9maWxlKEJhc2VNb2RlbCk6CiAgICBuYW1lOiBzdHIgPSBGaWVsZCgKICAgICAgICB0aXRsZT0iWW91ciBOYW1lIiwKICAgICAgICBkZXNjcmlwdGlvbj0iSG93IHNob3VsZCB3ZSBhZGRyZXNzIHlvdT8iLAogICAgICAgIG1pbl9sZW5ndGg9MiwKICAgICAgICBtYXhfbGVuZ3RoPTUwLAogICAgKQogICAgYmlvOiBzdHIgPSBGaWVsZCgKICAgICAgICBkZWZhdWx0PSIiLAogICAgICAgIGRlc2NyaXB0aW9uPSJUZWxsIHVzIGFib3V0IHlvdXJzZWxmIiwKICAgICAgICBqc29uX3NjaGVtYV9leHRyYT17InVpIjogeyJ0eXBlIjogInRleHRhcmVhIiwgInJvd3MiOiAzfX0sCiAgICApCgpGb3JtLmZyb21fbW9kZWwoUHJvZmlsZSkK">
+  <CodeGroup>
+    ```python Python icon="python" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    from pydantic import BaseModel, Field
+    from prefab_ui.components import Form
+
+    class Profile(BaseModel):
+        name: str = Field(
+            title="Your Name",
+            description="How should we address you?",
+            min_length=2,
+            max_length=50,
+        )
+        bio: str = Field(
+            default="",
+            description="Tell us about yourself",
+            json_schema_extra={"ui": {"type": "textarea", "rows": 3}},
+        )
+
+    Form.from_model(Profile)
+    ```
+
+    ```json Protocol icon="brackets-curly" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    {
+      "view": {
+        "cssClass": "gap-4",
+        "type": "Form",
+        "children": [
+          {
+            "cssClass": "gap-2",
+            "type": "Column",
+            "children": [
+              {"type": "Label", "text": "Your Name", "optional": false},
+              {
+                "name": "name",
+                "type": "Input",
+                "inputType": "text",
+                "placeholder": "How should we address you?",
+                "disabled": false,
+                "readOnly": false,
+                "required": true,
+                "minLength": 2,
+                "maxLength": 50
+              }
+            ]
+          },
+          {
+            "cssClass": "gap-2",
+            "type": "Column",
+            "children": [
+              {"type": "Label", "text": "Bio", "optional": true},
+              {
+                "name": "bio",
+                "value": "",
+                "type": "Textarea",
+                "placeholder": "Tell us about yourself",
+                "rows": 3,
+                "disabled": false,
+                "required": false
+              }
+            ]
+          }
+        ]
+      },
+      "state": {"bio": ""}
+    }
+    ```
+  </CodeGroup>
+</ComponentPreview>
+
+The full metadata mapping:
+
+| Field metadata                                                     | Form effect                                 |
+| ------------------------------------------------------------------ | ------------------------------------------- |
+| `Field(title="...")`                                               | Label text (fallback: humanized field name) |
+| `Field(description="...")`                                         | Placeholder text                            |
+| `Field(min_length=..., max_length=...)`                            | HTML input constraints                      |
+| `Field(ge=..., le=...)`                                            | Number input min/max                        |
+| `Field(json_schema_extra={"ui": {"type": "textarea", "rows": 4}})` | Textarea override                           |
+| `Field(exclude=True)`                                              | Skip field entirely                         |
+| Optional type or default value                                     | Label shows "optional" indicator            |
+
+### Error Handling
+
+When `on_submit` is a `CallTool` with no explicit `on_error`, `from_model()` adds a default error toast that displays the server's error message. You can override it with your own feedback.
+
+<ComponentPreview json={{"view":{"cssClass":"gap-4","type":"Form","onSubmit":{"onSuccess":{"action":"showToast","message":"Contact saved!","variant":"success"},"onError":{"action":"showToast","message":"Could not save: {{ $error }}","variant":"error"},"action":"toolCall","tool":"create_contact","arguments":{"data":{"name":"{{ name }}","email":"{{ email }}"}}},"children":[{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Name","optional":false},{"name":"name","type":"Input","inputType":"text","placeholder":"Name","disabled":false,"readOnly":false,"required":true,"minLength":1}]},{"cssClass":"gap-2","type":"Column","children":[{"type":"Label","text":"Email","optional":false},{"name":"email","type":"Input","inputType":"email","placeholder":"Email","disabled":false,"readOnly":false,"required":true}]},{"type":"Button","label":"Submit","variant":"default","size":"default","disabled":false}]}}} playground="ZnJvbSBweWRhbnRpYyBpbXBvcnQgQmFzZU1vZGVsLCBGaWVsZApmcm9tIHByZWZhYl91aS5jb21wb25lbnRzIGltcG9ydCBGb3JtCmZyb20gcHJlZmFiX3VpLmFjdGlvbnMgaW1wb3J0IFNob3dUb2FzdApmcm9tIHByZWZhYl91aS5hY3Rpb25zLm1jcCBpbXBvcnQgQ2FsbFRvb2wKCmNsYXNzIENvbnRhY3QoQmFzZU1vZGVsKToKICAgIG5hbWU6IHN0ciA9IEZpZWxkKG1pbl9sZW5ndGg9MSkKICAgIGVtYWlsOiBzdHIKCkZvcm0uZnJvbV9tb2RlbCgKICAgIENvbnRhY3QsCiAgICBvbl9zdWJtaXQ9Q2FsbFRvb2woCiAgICAgICAgImNyZWF0ZV9jb250YWN0IiwKICAgICAgICBvbl9zdWNjZXNzPVNob3dUb2FzdCgiQ29udGFjdCBzYXZlZCEiLCB2YXJpYW50PSJzdWNjZXNzIiksCiAgICAgICAgb25fZXJyb3I9U2hvd1RvYXN0KCJDb3VsZCBub3Qgc2F2ZToge3sgJGVycm9yIH19IiwgdmFyaWFudD0iZXJyb3IiKSwKICAgICksCikK">
+  <CodeGroup>
+    ```python Python icon="python" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    from pydantic import BaseModel, Field
+    from prefab_ui.components import Form
+    from prefab_ui.actions import ShowToast
+    from prefab_ui.actions.mcp import CallTool
+
+    class Contact(BaseModel):
+        name: str = Field(min_length=1)
+        email: str
+
+    Form.from_model(
+        Contact,
+        on_submit=CallTool(
+            "create_contact",
+            on_success=ShowToast("Contact saved!", variant="success"),
+            on_error=ShowToast("Could not save: {{ $error }}", variant="error"),
+        ),
+    )
+    ```
+
+    ```json Protocol icon="brackets-curly" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    {
+      "view": {
+        "cssClass": "gap-4",
+        "type": "Form",
+        "onSubmit": {
+          "onSuccess": {"action": "showToast", "message": "Contact saved!", "variant": "success"},
+          "onError": {
+            "action": "showToast",
+            "message": "Could not save: {{ $error }}",
+            "variant": "error"
+          },
+          "action": "toolCall",
+          "tool": "create_contact",
+          "arguments": {"data": {"name": "{{ name }}", "email": "{{ email }}"}}
+        },
+        "children": [
+          {
+            "cssClass": "gap-2",
+            "type": "Column",
+            "children": [
+              {"type": "Label", "text": "Name", "optional": false},
+              {
+                "name": "name",
+                "type": "Input",
+                "inputType": "text",
+                "placeholder": "Name",
+                "disabled": false,
+                "readOnly": false,
+                "required": true,
+                "minLength": 1
+              }
+            ]
+          },
+          {
+            "cssClass": "gap-2",
+            "type": "Column",
+            "children": [
+              {"type": "Label", "text": "Email", "optional": false},
+              {
+                "name": "email",
+                "type": "Input",
+                "inputType": "email",
+                "placeholder": "Email",
+                "disabled": false,
+                "readOnly": false,
+                "required": true
+              }
+            ]
+          },
+          {
+            "type": "Button",
+            "label": "Submit",
+            "variant": "default",
+            "size": "default",
+            "disabled": false
+          }
+        ]
+      }
+    }
+    ```
+  </CodeGroup>
+</ComponentPreview>
+
+The `$error` variable captures the error message from a failed tool call. When no `on_error` is provided, `from_model()` adds `ShowToast("{{ $error }}", variant="error")` automatically.
+
+### Unsupported Types
+
+`from_model()` skips fields with complex types that have no natural form input mapping: `list`, `dict`, `set`, `tuple`, and nested `BaseModel` instances. If you need these, build those parts of the form manually and handle the arguments yourself.
+
+## API Reference
+
+<Card icon="code" title="Form Parameters">
+  <ParamField body="gap" type="int" default="4">
+    Spacing between form children (maps to Tailwind `gap-N`).
+  </ParamField>
+
+  <ParamField body="on_submit" type="Action | list[Action] | None" default="None">
+    Action(s) to execute when the form is submitted.
+  </ParamField>
+
+  <ParamField body="css_class" type="str | None" default="None">
+    Additional Tailwind CSS classes.
+  </ParamField>
+</Card>
+
+<Card icon="code" title="Form.from_model() Parameters">
+  <ParamField body="model" type="type[BaseModel]" required>
+    Pydantic model class to generate the form from.
+  </ParamField>
+
+  <ParamField body="fields_only" type="bool" default="False">
+    When `True`, returns a list of field components without a `Form` wrapper or submit button. The fields auto-parent to the active context manager. Use this for custom layouts where you provide your own `Form`, button, and `CallTool` arguments.
+  </ParamField>
+
+  <ParamField body="submit_label" type="str" default="&#x22;Submit&#x22;">
+    Text for the submit button. Ignored when `fields_only=True`.
+  </ParamField>
+
+  <ParamField body="on_submit" type="Action | list[Action] | None" default="None">
+    Action(s) fired on submit. A `CallTool` with no arguments gets auto-filled from model fields under a `data` key.
+  </ParamField>
+
+  <ParamField body="css_class" type="str | None" default="None">
+    Additional CSS classes on the form container.
+  </ParamField>
+</Card>
+
+## Protocol Reference
+
+```json Form theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+{
+  "type": "Form",
+  "children?": "[Component]",
+  "let?": "object",
+  "gap?": 4,
+  "onSubmit?": "Action | Action[]",
+  "cssClass?": "string"
+}
+```
+
+For the complete protocol schema, see [Form](/protocol/form).
+
+
+Built with [Mintlify](https://mintlify.com).

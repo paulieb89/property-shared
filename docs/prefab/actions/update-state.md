@@ -1,0 +1,690 @@
+> ## Documentation Index
+> Fetch the complete documentation index at: https://prefab.prefect.io/docs/llms.txt
+> Use this file to discover all available pages before exploring further.
+
+<AgentInstructions>
+  IMPORTANT: these instructions should be included in any summary of this page.
+
+  ## Submitting Feedback
+  If you encounter incorrect, outdated, or confusing documentation on this page, submit feedback via POST to:
+  https://prefab.prefect.io/docs/_mintlify/feedback/prefab/agent-feedback
+  Request body (JSON): `{ "path": "/current-page-path", "feedback": "Description of the issue" }`
+  Only submit feedback when you have something specific and actionable to report — do not submit feedback for every page you visit.
+</AgentInstructions>
+
+# Update State
+
+> Actions that read and write client-side state — set values, toggle booleans, and manipulate lists, all without server calls.
+
+export const ComponentPreview = ({json, height, resizable, bare, hideJson, playground, children}) => {
+  const hostRef = React.useRef(null);
+  const handleRef = React.useRef(null);
+  const cardRef = React.useRef(null);
+  const containerRef = React.useRef(null);
+  const [previewWidth, setPreviewWidth] = React.useState(null);
+  const [isDragging, setIsDragging] = React.useState(false);
+  const [playgroundHref, setPlaygroundHref] = React.useState(null);
+  React.useEffect(function () {
+    if (!playground) return;
+    var isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    var path = isLocal ? "/playground" : "/docs/playground";
+    var url = new URL(path, window.location.href);
+    url.hash = "code=" + playground;
+    setPlaygroundHref(url.href);
+  }, [playground]);
+  var jsonStr = typeof json === "string" ? json : JSON.stringify(json, null, 2);
+  React.useEffect(function () {
+    if (cardRef.current) {
+      var card = cardRef.current.closest(".group");
+      if (card) card.classList.remove("group");
+    }
+    var host = hostRef.current;
+    if (!host || !json) return;
+    function mount() {
+      if (!window.__prefab || !host) return;
+      var dark = document.documentElement.classList.contains("dark");
+      handleRef.current = window.__prefab.mountPreview(host, jsonStr, {
+        dark: dark
+      });
+      if (bare && host.shadowRoot) {
+        var m = host.shadowRoot.querySelector("[data-prefab-mount]");
+        if (m) m.style.background = "transparent";
+      }
+    }
+    if (window.__prefab) {
+      mount();
+    } else {
+      if (!window.__prefabLoading) {
+        if (!window.__prefabReady) {
+          var s = document.createElement("script");
+          s.src = "/renderer.js";
+          document.head.appendChild(s);
+        }
+        window.__prefabLoading = new Promise(function (resolve) {
+          function check() {
+            if (window.__prefabReady) {
+              window.__prefabReady.then(resolve);
+            } else {
+              setTimeout(check, 10);
+            }
+          }
+          check();
+        });
+      }
+      window.__prefabLoading.then(mount);
+    }
+    var observer = new MutationObserver(function () {
+      var dark = document.documentElement.classList.contains("dark");
+      if (handleRef.current) handleRef.current.setDark(dark);
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"]
+    });
+    return function () {
+      observer.disconnect();
+      if (handleRef.current) {
+        handleRef.current.unmount();
+        handleRef.current = null;
+      }
+    };
+  }, [json]);
+  function startResize(e) {
+    e.preventDefault();
+    var startX = e.clientX;
+    var startW = hostRef.current ? hostRef.current.offsetWidth : 0;
+    var maxW = containerRef.current ? containerRef.current.offsetWidth - 10 : startW;
+    setIsDragging(true);
+    function onMove(ev) {
+      var w = Math.max(260, Math.min(startW + (ev.clientX - startX), maxW));
+      setPreviewWidth(w);
+    }
+    function onUp() {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      setIsDragging(false);
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+  if (bare) {
+    return <div ref={hostRef} />;
+  }
+  if (resizable) {
+    return <Card>
+        <div ref={cardRef} />
+        <div ref={containerRef} style={{
+      display: "flex",
+      position: "relative",
+      overflow: "hidden"
+    }}>
+          <div ref={hostRef} style={{
+      flex: previewWidth ? "none" : 1,
+      width: previewWidth ? previewWidth + "px" : undefined,
+      minWidth: 0
+    }} />
+          <div onMouseDown={startResize} style={{
+      width: "14px",
+      flexShrink: 0,
+      cursor: "col-resize",
+      background: isDragging ? "var(--border, #e5e7eb)" : "color-mix(in srgb, var(--border, #e5e7eb) 40%, transparent)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      transition: "background 0.15s",
+      userSelect: "none"
+    }}>
+            <svg width="6" height="24" style={{
+      opacity: 0.5
+    }}>
+              <circle cx="2" cy="4" r="1.2" fill="currentColor" />
+              <circle cx="2" cy="9" r="1.2" fill="currentColor" />
+              <circle cx="2" cy="14" r="1.2" fill="currentColor" />
+              <circle cx="2" cy="19" r="1.2" fill="currentColor" />
+              <circle cx="5" cy="4" r="1.2" fill="currentColor" />
+              <circle cx="5" cy="9" r="1.2" fill="currentColor" />
+              <circle cx="5" cy="14" r="1.2" fill="currentColor" />
+              <circle cx="5" cy="19" r="1.2" fill="currentColor" />
+            </svg>
+          </div>
+          <div style={{
+      flex: previewWidth ? 1 : "0 0 24px",
+      minWidth: "24px",
+      background: "repeating-linear-gradient(-45deg, transparent, transparent 3px, var(--border, #e5e7eb) 3px, var(--border, #e5e7eb) 4px)",
+      opacity: 0.4
+    }} />
+          {previewWidth && <div style={{
+      position: "absolute",
+      bottom: "8px",
+      right: "8px",
+      background: "var(--background, white)",
+      border: "1px solid var(--border, #e5e7eb)",
+      borderRadius: "4px",
+      padding: "1px 6px",
+      fontSize: "11px",
+      fontFamily: "monospace",
+      color: "var(--muted-foreground, #6b7280)",
+      pointerEvents: "none"
+    }}>
+              {previewWidth}px
+            </div>}
+        </div>
+        {playgroundHref && <div style={{
+      display: "flex",
+      justifyContent: "flex-end",
+      padding: "4px 0 8px"
+    }}>
+            <a href={playgroundHref} target="_blank" rel="noopener noreferrer" style={{
+      fontSize: "11px",
+      opacity: 0.4,
+      textDecoration: "none",
+      textDecorationLine: "none",
+      borderBottom: "none",
+      boxShadow: "none",
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "3px",
+      transition: "opacity 0.15s",
+      fontWeight: 400
+    }} onMouseOver={function (e) {
+      e.currentTarget.style.opacity = "0.6";
+    }} onMouseOut={function (e) {
+      e.currentTarget.style.opacity = "0.4";
+    }}>
+              Edit in Playground
+              <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>
+            </a>
+          </div>}
+        <div style={{
+      marginBottom: "-2rem"
+    }}>{children}</div>
+      </Card>;
+  }
+  return <Card>
+      <div ref={cardRef} />
+      <div ref={hostRef} />
+      {playgroundHref && <div style={{
+    display: "flex",
+    justifyContent: "flex-end",
+    padding: "4px 0 8px"
+  }}>
+          <a href={playgroundHref} target="_blank" rel="noopener noreferrer" style={{
+    fontSize: "11px",
+    opacity: 0.4,
+    textDecoration: "none",
+    textDecorationLine: "none",
+    borderBottom: "none",
+    boxShadow: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "3px",
+    transition: "opacity 0.15s",
+    fontWeight: 400
+  }} onMouseOver={function (e) {
+    e.currentTarget.style.opacity = "0.6";
+  }} onMouseOut={function (e) {
+    e.currentTarget.style.opacity = "0.4";
+  }}>
+            Edit in Playground
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>
+          </a>
+        </div>}
+      <div style={{
+    marginBottom: "-2rem"
+  }}>{children}</div>
+    </Card>;
+};
+
+State is client-side data that your UI can read and write. Components display state values, actions change them, and updates are instant — no server round-trip needed.
+
+## Setting Up State
+
+Pass initial state to `PrefabApp` via the `state` parameter. Any component in your UI can then read them through `Rx()` references or template expressions:
+
+<ComponentPreview json={{"view":{"cssClass":"gap-3","type":"Column","children":[{"name":"brightness","type":"Slider","min":0.0,"max":100.0,"disabled":false,"size":"default"},{"content":"Brightness: {{ brightness }}%","type":"Muted"}]}}} playground="ZnJvbSBwcmVmYWJfdWkuY29tcG9uZW50cyBpbXBvcnQgU2xpZGVyLCBNdXRlZCwgQ29sdW1uCmZyb20gcHJlZmFiX3VpLnJ4IGltcG9ydCBSeAoKYnJpZ2h0bmVzcyA9IFJ4KCJicmlnaHRuZXNzIikKCndpdGggQ29sdW1uKGdhcD0zKToKICAgIFNsaWRlcihuYW1lPSJicmlnaHRuZXNzIiwgbWluPTAsIG1heD0xMDApCiAgICBNdXRlZChmIkJyaWdodG5lc3M6IHticmlnaHRuZXNzfSUiKQo">
+  <CodeGroup>
+    ```python Python icon="python" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    from prefab_ui.components import Slider, Muted, Column
+    from prefab_ui.rx import Rx
+
+    brightness = Rx("brightness")
+
+    with Column(gap=3):
+        Slider(name="brightness", min=0, max=100)
+        Muted(f"Brightness: {brightness}%")
+    ```
+
+    ```json Protocol icon="brackets-curly" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    {
+      "view": {
+        "cssClass": "gap-3",
+        "type": "Column",
+        "children": [
+          {
+            "name": "brightness",
+            "type": "Slider",
+            "min": 0.0,
+            "max": 100.0,
+            "disabled": false,
+            "size": "default"
+          },
+          {"content": "Brightness: {{ brightness }}%", "type": "Muted"}
+        ]
+      }
+    }
+    ```
+  </CodeGroup>
+</ComponentPreview>
+
+Drag the slider — the text updates instantly. The Slider has `name="brightness"`, which means it automatically reads from and writes to the `brightness` state key. Most form controls (Input, Checkbox, Switch, Select, etc.) support this `name` prop for automatic state binding.
+
+For MCP tools, you can also provide initial state through `AppResult.state`:
+
+```python AppResult State theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+from prefab_ui import AppResult
+
+@mcp.tool()
+async def settings() -> AppResult:
+    return AppResult(
+        view=...,
+        state={"volume": 75, "muted": False},
+    )
+```
+
+## SetState
+
+`SetState` explicitly sets a state key to a value. Both arguments are required — the key and the value to write:
+
+<ComponentPreview json={{"view":{"cssClass":"gap-3","type":"Column","children":[{"cssClass":"gap-2","type":"Row","children":[{"type":"Button","label":"Improbability","variant":"outline","size":"default","disabled":false,"onClick":{"action":"setState","key":"drive","value":"improbability"}},{"type":"Button","label":"Conventional","variant":"outline","size":"default","disabled":false,"onClick":{"action":"setState","key":"drive","value":"conventional"}},{"type":"Button","label":"Bistromath","variant":"outline","size":"default","disabled":false,"onClick":{"action":"setState","key":"drive","value":"bistromath"}}]},{"type":"Badge","label":"Active drive: {{ drive }}","variant":"default"}]}}} playground="ZnJvbSBwcmVmYWJfdWkuY29tcG9uZW50cyBpbXBvcnQgQmFkZ2UsIEJ1dHRvbiwgQ29sdW1uLCBSb3cKZnJvbSBwcmVmYWJfdWkuYWN0aW9ucyBpbXBvcnQgU2V0U3RhdGUKZnJvbSBwcmVmYWJfdWkucnggaW1wb3J0IFJ4Cgpkcml2ZSA9IFJ4KCJkcml2ZSIpCgp3aXRoIENvbHVtbihnYXA9Myk6CiAgICB3aXRoIFJvdyhnYXA9Mik6CiAgICAgICAgQnV0dG9uKCJJbXByb2JhYmlsaXR5IiwgdmFyaWFudD0ib3V0bGluZSIsCiAgICAgICAgICAgICAgIG9uX2NsaWNrPVNldFN0YXRlKCJkcml2ZSIsICJpbXByb2JhYmlsaXR5IikpCiAgICAgICAgQnV0dG9uKCJDb252ZW50aW9uYWwiLCB2YXJpYW50PSJvdXRsaW5lIiwKICAgICAgICAgICAgICAgb25fY2xpY2s9U2V0U3RhdGUoImRyaXZlIiwgImNvbnZlbnRpb25hbCIpKQogICAgICAgIEJ1dHRvbigiQmlzdHJvbWF0aCIsIHZhcmlhbnQ9Im91dGxpbmUiLAogICAgICAgICAgICAgICBvbl9jbGljaz1TZXRTdGF0ZSgiZHJpdmUiLCAiYmlzdHJvbWF0aCIpKQogICAgQmFkZ2UoZiJBY3RpdmUgZHJpdmU6IHtkcml2ZX0iKQo">
+  <CodeGroup>
+    ```python Python icon="python" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    from prefab_ui.components import Badge, Button, Column, Row
+    from prefab_ui.actions import SetState
+    from prefab_ui.rx import Rx
+
+    drive = Rx("drive")
+
+    with Column(gap=3):
+        with Row(gap=2):
+            Button("Improbability", variant="outline",
+                   on_click=SetState("drive", "improbability"))
+            Button("Conventional", variant="outline",
+                   on_click=SetState("drive", "conventional"))
+            Button("Bistromath", variant="outline",
+                   on_click=SetState("drive", "bistromath"))
+        Badge(f"Active drive: {drive}")
+    ```
+
+    ```json Protocol icon="brackets-curly" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    {
+      "view": {
+        "cssClass": "gap-3",
+        "type": "Column",
+        "children": [
+          {
+            "cssClass": "gap-2",
+            "type": "Row",
+            "children": [
+              {
+                "type": "Button",
+                "label": "Improbability",
+                "variant": "outline",
+                "size": "default",
+                "disabled": false,
+                "onClick": {"action": "setState", "key": "drive", "value": "improbability"}
+              },
+              {
+                "type": "Button",
+                "label": "Conventional",
+                "variant": "outline",
+                "size": "default",
+                "disabled": false,
+                "onClick": {"action": "setState", "key": "drive", "value": "conventional"}
+              },
+              {
+                "type": "Button",
+                "label": "Bistromath",
+                "variant": "outline",
+                "size": "default",
+                "disabled": false,
+                "onClick": {"action": "setState", "key": "drive", "value": "bistromath"}
+              }
+            ]
+          },
+          {"type": "Badge", "label": "Active drive: {{ drive }}", "variant": "default"}
+        ]
+      }
+    }
+    ```
+  </CodeGroup>
+</ComponentPreview>
+
+### Dot-paths
+
+State keys can contain dots to reach into nested objects. `profile.name` means "the `name` field inside the `profile` object." A purely numeric segment like `0` means an array index, so `todos.0.done` means "the `done` field of the first item in the `todos` array."
+
+The `name` prop works with dot-paths too — type in the inputs below to see the card update:
+
+<ComponentPreview json={{"view":{"cssClass":"gap-3","type":"Column","children":[{"type":"Card","children":[{"type":"CardHeader","children":[{"type":"CardTitle","content":"{{ profile.name }}"},{"type":"CardDescription","content":"{{ profile.title }}"}]}]},{"name":"profile.name","type":"Input","inputType":"text","placeholder":"Name","disabled":false,"readOnly":false,"required":false},{"name":"profile.title","type":"Input","inputType":"text","placeholder":"Title","disabled":false,"readOnly":false,"required":false}]}}} playground="ZnJvbSBwcmVmYWJfdWkuY29tcG9uZW50cyBpbXBvcnQgKAogICAgQ2FyZCwgQ2FyZERlc2NyaXB0aW9uLCBDYXJkSGVhZGVyLCBDYXJkVGl0bGUsCiAgICBDb2x1bW4sIElucHV0LAopCmZyb20gcHJlZmFiX3VpLnJ4IGltcG9ydCBSeAoKcHJvZmlsZSA9IFJ4KCJwcm9maWxlIikKCndpdGggQ29sdW1uKGdhcD0zKToKICAgIHdpdGggQ2FyZCgpOgogICAgICAgIHdpdGggQ2FyZEhlYWRlcigpOgogICAgICAgICAgICBDYXJkVGl0bGUocHJvZmlsZS5uYW1lKQogICAgICAgICAgICBDYXJkRGVzY3JpcHRpb24ocHJvZmlsZS50aXRsZSkKICAgIElucHV0KG5hbWU9InByb2ZpbGUubmFtZSIsIHBsYWNlaG9sZGVyPSJOYW1lIikKICAgIElucHV0KG5hbWU9InByb2ZpbGUudGl0bGUiLCBwbGFjZWhvbGRlcj0iVGl0bGUiKQo">
+  <CodeGroup>
+    ```python Python icon="python" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    from prefab_ui.components import (
+        Card, CardDescription, CardHeader, CardTitle,
+        Column, Input,
+    )
+    from prefab_ui.rx import Rx
+
+    profile = Rx("profile")
+
+    with Column(gap=3):
+        with Card():
+            with CardHeader():
+                CardTitle(profile.name)
+                CardDescription(profile.title)
+        Input(name="profile.name", placeholder="Name")
+        Input(name="profile.title", placeholder="Title")
+    ```
+
+    ```json Protocol icon="brackets-curly" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    {
+      "view": {
+        "cssClass": "gap-3",
+        "type": "Column",
+        "children": [
+          {
+            "type": "Card",
+            "children": [
+              {
+                "type": "CardHeader",
+                "children": [
+                  {"type": "CardTitle", "content": "{{ profile.name }}"},
+                  {"type": "CardDescription", "content": "{{ profile.title }}"}
+                ]
+              }
+            ]
+          },
+          {
+            "name": "profile.name",
+            "type": "Input",
+            "inputType": "text",
+            "placeholder": "Name",
+            "disabled": false,
+            "readOnly": false,
+            "required": false
+          },
+          {
+            "name": "profile.title",
+            "type": "Input",
+            "inputType": "text",
+            "placeholder": "Title",
+            "disabled": false,
+            "readOnly": false,
+            "required": false
+          }
+        ]
+      }
+    }
+    ```
+  </CodeGroup>
+</ComponentPreview>
+
+Integer segments address array items. Inside a [ForEach](/components/foreach) loop, combine this with `{{ $index }}` to target the current row:
+
+```python Array Paths theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+from prefab_ui.components import Checkbox, Text
+from prefab_ui.components.control_flow import ForEach
+
+with ForEach("todos"):
+    Checkbox(name="todos.{{ $index }}.done")
+    Text("{{ $item.text }}")
+```
+
+`SetState("todos.0.done", True)` would also work for a hardcoded index — but `{{ $index }}` is how you target whichever row the user is interacting with.
+
+<Warning>
+  If an intermediate path segment is missing or the wrong type (e.g. an integer segment pointing at a non-array), the update is a no-op with a console warning.
+</Warning>
+
+## ToggleState
+
+`ToggleState` flips a boolean — `True` becomes `False`, `False` becomes `True`. Pair it with [If](/components/conditional) for show/hide patterns:
+
+<ComponentPreview json={{"view":{"cssClass":"gap-2","type":"Column","children":[{"type":"Button","label":"Toggle Details","variant":"outline","size":"default","disabled":false,"onClick":{"action":"toggleState","key":"showDetails"}},{"type":"Condition","cases":[{"when":"{{ showDetails }}","children":[{"type":"Alert","variant":"default","children":[{"type":"AlertTitle","content":"Here are the details!"}]}]}]}]}}} playground="ZnJvbSBwcmVmYWJfdWkuY29tcG9uZW50cyBpbXBvcnQgQWxlcnQsIEFsZXJ0VGl0bGUsIEJ1dHRvbiwgQ29sdW1uCmZyb20gcHJlZmFiX3VpLmNvbXBvbmVudHMuY29udHJvbF9mbG93IGltcG9ydCBJZgpmcm9tIHByZWZhYl91aS5hY3Rpb25zIGltcG9ydCBUb2dnbGVTdGF0ZQpmcm9tIHByZWZhYl91aS5yeCBpbXBvcnQgUngKCnNob3dEZXRhaWxzID0gUngoInNob3dEZXRhaWxzIikKCndpdGggQ29sdW1uKGdhcD0yKToKICAgIEJ1dHRvbigiVG9nZ2xlIERldGFpbHMiLCB2YXJpYW50PSJvdXRsaW5lIiwKICAgICAgICAgICBvbl9jbGljaz1Ub2dnbGVTdGF0ZSgic2hvd0RldGFpbHMiKSkKICAgIHdpdGggSWYoc2hvd0RldGFpbHMpOgogICAgICAgIHdpdGggQWxlcnQoKToKICAgICAgICAgICAgQWxlcnRUaXRsZSgiSGVyZSBhcmUgdGhlIGRldGFpbHMhIikK">
+  <CodeGroup>
+    ```python Python icon="python" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    from prefab_ui.components import Alert, AlertTitle, Button, Column
+    from prefab_ui.components.control_flow import If
+    from prefab_ui.actions import ToggleState
+    from prefab_ui.rx import Rx
+
+    showDetails = Rx("showDetails")
+
+    with Column(gap=2):
+        Button("Toggle Details", variant="outline",
+               on_click=ToggleState("showDetails"))
+        with If(showDetails):
+            with Alert():
+                AlertTitle("Here are the details!")
+    ```
+
+    ```json Protocol icon="brackets-curly" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    {
+      "view": {
+        "cssClass": "gap-2",
+        "type": "Column",
+        "children": [
+          {
+            "type": "Button",
+            "label": "Toggle Details",
+            "variant": "outline",
+            "size": "default",
+            "disabled": false,
+            "onClick": {"action": "toggleState", "key": "showDetails"}
+          },
+          {
+            "type": "Condition",
+            "cases": [
+              {
+                "when": "{{ showDetails }}",
+                "children": [
+                  {
+                    "type": "Alert",
+                    "variant": "default",
+                    "children": [{"type": "AlertTitle", "content": "Here are the details!"}]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+    ```
+  </CodeGroup>
+</ComponentPreview>
+
+## AppendState and PopState
+
+`AppendState` adds an item to a state array. `PopState` removes one by index. Together with [ForEach](/components/foreach), they let you build dynamic lists entirely client-side.
+
+Type a name and click Add to see it appear in the list. Click × to remove a row.
+
+<ComponentPreview json={{"view":{"cssClass":"gap-3","type":"Column","children":[{"let":{"_loop_1":"{{ $item }}","_loop_1_idx":"{{ $index }}"},"type":"ForEach","key":"crew","children":[{"cssClass":"gap-2 items-center","type":"Row","children":[{"content":"{{ $item }}","type":"Text"},{"type":"Button","label":"\u00d7","variant":"ghost","size":"sm","disabled":false,"onClick":{"action":"popState","key":"crew","index":"{{ $index }}"}}]}]},{"cssClass":"gap-2","type":"Row","children":[{"name":"new_member","type":"Input","inputType":"text","placeholder":"Crew member name...","disabled":false,"readOnly":false,"required":false},{"type":"Button","label":"Add","variant":"default","size":"default","disabled":false,"onClick":[{"action":"appendState","key":"crew","value":"{{ new_member }}"},{"action":"setState","key":"new_member","value":""}]}]},{"content":"{{ crew | length }} crew members","type":"Muted"}]}}} playground="ZnJvbSBwcmVmYWJfdWkuY29tcG9uZW50cyBpbXBvcnQgKAogICAgQnV0dG9uLCBDb2x1bW4sIEZvckVhY2gsIElucHV0LCBNdXRlZCwgUm93LCBUZXh0LAopCmZyb20gcHJlZmFiX3VpLmFjdGlvbnMgaW1wb3J0IEFwcGVuZFN0YXRlLCBQb3BTdGF0ZSwgU2V0U3RhdGUKZnJvbSBwcmVmYWJfdWkucnggaW1wb3J0IFJ4CgpuZXdfbWVtYmVyID0gUngoIm5ld19tZW1iZXIiKQpjcmV3ID0gUngoImNyZXciKQoKd2l0aCBDb2x1bW4oZ2FwPTMpOgogICAgd2l0aCBGb3JFYWNoKCJjcmV3Iik6CiAgICAgICAgd2l0aCBSb3coZ2FwPTIsIGFsaWduPSJjZW50ZXIiKToKICAgICAgICAgICAgVGV4dCgie3sgJGl0ZW0gfX0iKQogICAgICAgICAgICBCdXR0b24oCiAgICAgICAgICAgICAgICAiw5ciLCB2YXJpYW50PSJnaG9zdCIsIHNpemU9InNtIiwKICAgICAgICAgICAgICAgIG9uX2NsaWNrPVBvcFN0YXRlKCJjcmV3IiwgInt7ICRpbmRleCB9fSIpLAogICAgICAgICAgICApCiAgICB3aXRoIFJvdyhnYXA9Mik6CiAgICAgICAgSW5wdXQobmFtZT0ibmV3X21lbWJlciIsIHBsYWNlaG9sZGVyPSJDcmV3IG1lbWJlciBuYW1lLi4uIikKICAgICAgICBCdXR0b24oIkFkZCIsIG9uX2NsaWNrPVsKICAgICAgICAgICAgQXBwZW5kU3RhdGUoImNyZXciLCBuZXdfbWVtYmVyKSwKICAgICAgICAgICAgU2V0U3RhdGUoIm5ld19tZW1iZXIiLCAiIiksCiAgICAgICAgXSkKICAgIE11dGVkKGYie2NyZXcubGVuZ3RoKCl9IGNyZXcgbWVtYmVycyIpCg">
+  <CodeGroup>
+    ```python Python icon="python" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    from prefab_ui.components import (
+        Button, Column, ForEach, Input, Muted, Row, Text,
+    )
+    from prefab_ui.actions import AppendState, PopState, SetState
+    from prefab_ui.rx import Rx
+
+    new_member = Rx("new_member")
+    crew = Rx("crew")
+
+    with Column(gap=3):
+        with ForEach("crew"):
+            with Row(gap=2, align="center"):
+                Text("{{ $item }}")
+                Button(
+                    "×", variant="ghost", size="sm",
+                    on_click=PopState("crew", "{{ $index }}"),
+                )
+        with Row(gap=2):
+            Input(name="new_member", placeholder="Crew member name...")
+            Button("Add", on_click=[
+                AppendState("crew", new_member),
+                SetState("new_member", ""),
+            ])
+        Muted(f"{crew.length()} crew members")
+    ```
+
+    ```json Protocol icon="brackets-curly" theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+    {
+      "view": {
+        "cssClass": "gap-3",
+        "type": "Column",
+        "children": [
+          {
+            "let": {"_loop_1": "{{ $item }}", "_loop_1_idx": "{{ $index }}"},
+            "type": "ForEach",
+            "key": "crew",
+            "children": [
+              {
+                "cssClass": "gap-2 items-center",
+                "type": "Row",
+                "children": [
+                  {"content": "{{ $item }}", "type": "Text"},
+                  {
+                    "type": "Button",
+                    "label": "\u00d7",
+                    "variant": "ghost",
+                    "size": "sm",
+                    "disabled": false,
+                    "onClick": {"action": "popState", "key": "crew", "index": "{{ $index }}"}
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "cssClass": "gap-2",
+            "type": "Row",
+            "children": [
+              {
+                "name": "new_member",
+                "type": "Input",
+                "inputType": "text",
+                "placeholder": "Crew member name...",
+                "disabled": false,
+                "readOnly": false,
+                "required": false
+              },
+              {
+                "type": "Button",
+                "label": "Add",
+                "variant": "default",
+                "size": "default",
+                "disabled": false,
+                "onClick": [
+                  {"action": "appendState", "key": "crew", "value": "{{ new_member }}"},
+                  {"action": "setState", "key": "new_member", "value": ""}
+                ]
+              }
+            ]
+          },
+          {"content": "{{ crew | length }} crew members", "type": "Muted"}
+        ]
+      }
+    }
+    ```
+  </CodeGroup>
+</ComponentPreview>
+
+The "Add" button chains two actions: `AppendState` pushes the input value onto the array, then `SetState` clears the input. Each × button uses `PopState` with `{{ $index }}` — a variable provided by `ForEach` that gives the current row's position.
+
+`AppendState` can also insert at a specific position with `index=0` to prepend or negative indices to count from the end. If the key doesn't exist yet, it creates a new array automatically.
+
+## Valid State Keys
+
+State keys must be identifiers: letters, numbers, and underscores, starting with a letter or underscore (`volume`, `_count`, `item_2`). No hyphens (they conflict with expressions) and no periods (the dot is the path separator). These rules are validated in Python when you create the action.
+
+## API Reference
+
+<Card icon="code" title="SetState Parameters">
+  <ParamField body="key" type="str | Rx | StatefulComponent" required>
+    State key, dot-path, `Rx` reference, or a stateful component (Slider, Input, Pages, etc.). When a component is passed, its state key is extracted automatically.
+  </ParamField>
+
+  <ParamField body="value" type="Any" default="EVENT">
+    Value to assign. Defaults to `EVENT` — the value from the triggering interaction (slider position, input text, checkbox state, etc.).
+  </ParamField>
+</Card>
+
+<Card icon="code" title="ToggleState Parameters">
+  <ParamField body="key" type="str | Rx | StatefulComponent" required>
+    State key, dot-path, `Rx` reference, or a stateful component.
+  </ParamField>
+</Card>
+
+<Card icon="code" title="AppendState Parameters">
+  <ParamField body="key" type="str | Rx | StatefulComponent" required>
+    State key, dot-path, `Rx` reference, or a stateful component.
+  </ParamField>
+
+  <ParamField body="value" type="Any" default="EVENT">
+    Value to append.
+  </ParamField>
+
+  <ParamField body="index" type="int | str | None" default="None">
+    Insert position. `None` appends to end. Supports negative indices and template strings like `"{{ $index }}"`.
+  </ParamField>
+</Card>
+
+<Card icon="code" title="PopState Parameters">
+  <ParamField body="key" type="str | Rx | StatefulComponent" required>
+    State key, dot-path, `Rx` reference, or a stateful component.
+  </ParamField>
+
+  <ParamField body="index" type="int | str" required>
+    Index to remove. Supports negative indices and template strings like `"{{ $index }}"`.
+  </ParamField>
+</Card>
+
+## Protocol Reference
+
+```json SetState theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+{
+  "action": "setState",
+  "key": "string (required)",
+  "value": "any (required)"
+}
+```
+
+```json ToggleState theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+{
+  "action": "toggleState",
+  "key": "string (required)"
+}
+```
+
+```json AppendState theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+{
+  "action": "appendState",
+  "key": "string (required)",
+  "value": "any (required)",
+  "index?": "number | string"
+}
+```
+
+```json PopState theme={"theme":{"light":"snazzy-light","dark":"dark-plus"}}
+{
+  "action": "popState",
+  "key": "string (required)",
+  "index": "number | string (required)"
+}
+```
+
+For the complete protocol schema, see [SetState](/protocol/set-state), [ToggleState](/protocol/toggle-state), [AppendState](/protocol/append-state), [PopState](/protocol/pop-state).
+
+
+Built with [Mintlify](https://mintlify.com).
