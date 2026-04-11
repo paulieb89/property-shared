@@ -397,10 +397,10 @@ def component_test():
             # Section 4: Tabs
             Heading("4. Tabs", level=3),
             Tabs(children=[
-                Tab(label="Overview", children=[
+                Tab(title="Overview", children=[
                     Text("This is the overview tab content"),
                 ]),
-                Tab(label="Details", children=[
+                Tab(title="Details", children=[
                     Text("This is the details tab content"),
                 ]),
             ]),
