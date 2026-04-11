@@ -27,6 +27,26 @@ async def health(request):  # noqa: ARG001
     return JSONResponse({"status": "ok"})
 
 
+@mcp.custom_route("/img", methods=["GET"])
+async def proxy_image(request):
+    """Proxy external images through our domain to avoid CSP blocks."""
+    import httpx
+    from starlette.responses import Response
+
+    url = request.query_params.get("url", "")
+    if not url or not url.startswith("https://media.rightmove.co.uk"):
+        return Response(status_code=400, content=b"Invalid URL")
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, follow_redirects=True, timeout=10.0)
+
+    return Response(
+        content=resp.content,
+        media_type=resp.headers.get("content-type", "image/jpeg"),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 def main() -> None:
     import os
     # Import tool/dashboard modules so they register on mcp/app
