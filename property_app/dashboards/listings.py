@@ -45,7 +45,10 @@ def _listings_app_config():
 
     return PrefabAppConfig(
         csp=ResourceCSP(
-            resource_domains=["https://media.rightmove.co.uk"],
+            resource_domains=[
+                "https://media.rightmove.co.uk",
+                "https://media.rightmove.co.uk:443",
+            ],
         ),
     )
 
@@ -112,9 +115,11 @@ def listings_dashboard(
         # First image as thumbnail
         img_children = []
         if l.images:
+            # Strip :443 from URLs — redundant for HTTPS and may cause CSP mismatch
+            img_url = l.images[0].replace(":443", "")
             img_children.append(
                 Image(
-                    src=l.images[0],
+                    src=img_url,
                     alt=l.address or "Property",
                     height=160,
                     css_class="w-full object-cover rounded-t-lg",
