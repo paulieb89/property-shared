@@ -118,7 +118,7 @@ def yield_dashboard(
                 Heading("Yield Analysis", level=2),
                 Form(
                     on_submit=CallTool(
-                        tool="get_yield",
+                        get_yield,
                         arguments={
                             "postcode": Rx("postcode"),
                             "months": months,

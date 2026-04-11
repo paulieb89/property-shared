@@ -111,7 +111,7 @@ def rental_dashboard(
                 Heading("Rental Analysis", level=2),
                 Form(
                     on_submit=CallTool(
-                        tool="get_rental",
+                        get_rental,
                         arguments={
                             "postcode": Rx("postcode"),
                             "radius": radius,

@@ -128,7 +128,7 @@ def comps_dashboard(
                 Heading("Comparable Sales", level=2),
                 Form(
                     on_submit=CallTool(
-                        tool="search_comps",
+                        search_comps,
                         arguments={
                             "postcode": Rx("postcode"),
                             "months": months,
