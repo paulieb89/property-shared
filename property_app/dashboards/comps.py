@@ -104,9 +104,9 @@ def comps_dashboard(
     from prefab_ui.app import PrefabApp
     from prefab_ui.components import (
         Button,
+        Card,
+        CardContent,
         Column,
-        DataTable,
-        DataTableColumn,
         Form,
         Grid,
         Heading,
@@ -128,7 +128,6 @@ def comps_dashboard(
                         arguments={
                             "postcode": Rx("postcode"),
                             "months": months,
-                            "search_level": Rx("search_level"),
                         },
                         on_success=[SetState(key="results", value=RESULT)],
                         on_error=ShowToast(
@@ -146,11 +145,6 @@ def comps_dashboard(
                             value=str(months),
                             input_type="number",
                             placeholder="Lookback months",
-                        ),
-                        Input(
-                            name="search_level",
-                            value=search_level,
-                            placeholder="postcode, sector, or district",
                         ),
                         Button(label="Search", button_type="submit"),
                     ],
@@ -178,15 +172,44 @@ def comps_dashboard(
                         ),
                     ],
                 ),
-                DataTable(
-                    columns=[
-                        DataTableColumn(key="date", header="Date"),
-                        DataTableColumn(key="price", header="Price", align="right"),
-                        DataTableColumn(key="address", header="Address"),
-                        DataTableColumn(key="postcode", header="Postcode"),
-                        DataTableColumn(key="property_type", header="Type"),
+                Grid(
+                    columns=2,
+                    children=[
+                        Card(
+                            children=[
+                                CardContent(
+                                    children=[
+                                        Heading("Price Range", level=3),
+                                        Metric(
+                                            label="Min",
+                                            value=Rx("results.min") | "\u2014",
+                                        ),
+                                        Metric(
+                                            label="Max",
+                                            value=Rx("results.max") | "\u2014",
+                                        ),
+                                    ],
+                                ),
+                            ],
+                        ),
+                        Card(
+                            children=[
+                                CardContent(
+                                    children=[
+                                        Heading("Averages", level=3),
+                                        Metric(
+                                            label="Mean",
+                                            value=Rx("results.mean") | "\u2014",
+                                        ),
+                                        Metric(
+                                            label="Count",
+                                            value=Rx("results.count") | "\u2014",
+                                        ),
+                                    ],
+                                ),
+                            ],
+                        ),
                     ],
-                    rows=Rx("results.transactions") | [],
                 ),
             ],
             gap=4,
