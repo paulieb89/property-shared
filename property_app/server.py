@@ -13,7 +13,8 @@ mcp = FastMCP(
     instructions=(
         "UK property tools with interactive dashboards. "
         "Tools return data directly -- dashboards add visual Prefab UI. "
-        "Use comps_dashboard, yield_dashboard, rental_dashboard, listings_dashboard for rich visual views. "
+        "Use property_dashboard for a unified view combining sales, yield, and rental data. "
+        "Use comps_dashboard, yield_dashboard, rental_dashboard, listings_dashboard for focused single-topic views. "
         "Use search_comps, get_yield, get_rental for raw data. "
         "Use stamp_duty, planning_search, company_search, epc_lookup, rightmove_search for quick lookups."
     ),
@@ -51,7 +52,7 @@ def main() -> None:
     import os
     # Import tool/dashboard modules so they register on mcp/app
     from property_app import tools  # noqa: F401
-    from property_app.dashboards import comps, listings, yield_view, rental  # noqa: F401
+    from property_app.dashboards import comps, listings, rental, unified, yield_view  # noqa: F401
 
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
     if transport not in ("stdio", "sse", "http"):
