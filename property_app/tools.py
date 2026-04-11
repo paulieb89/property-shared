@@ -378,7 +378,7 @@ def component_test():
             Heading("2. Progress / Ring / Dot", level=3),
             Progress(value=65),
             Row(children=[
-                Ring(value=75, size=60),
+                Ring(value=75, size="lg"),
                 Dot(color="green"),
                 Dot(color="red"),
                 Dot(color="amber"),
