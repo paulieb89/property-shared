@@ -1,5 +1,6 @@
 # Property Shared
 
+[![SafeSkill 86/100](https://img.shields.io/badge/SafeSkill-86%2F100_Passes%20with%20Notes-yellow)](https://safeskill.dev/scan/paulieb89-property-shared)
 <!-- mcp-name: io.github.paulieb89/property-shared -->
 
 UK property data in one package. Pulls Land Registry sales, EPC certificates, Rightmove listings, rental yields, stamp duty calculations, planning portal links, and Companies House records.
