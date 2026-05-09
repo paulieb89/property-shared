@@ -6,9 +6,7 @@
 
 UK property data in one package. Pulls Land Registry sales, EPC certificates, Rightmove listings, rental yields, stamp duty calculations, planning portal links, and Companies House records.
 
-Use it as a **Python library**, **CLI**, or **HTTP API**.
-
-> **MCP server moved:** The MCP server is now [`uk-property-mcp`](https://github.com/paulieb89/uk-property-mcp) — install with `pip install uk-property-mcp`. `https://property-shared.fly.dev/mcp` remains available as a permanent proxy to `uk-property-mcp`.
+Use it as a **Python library**, **CLI**, **HTTP API**, or **MCP server**.
 
 ## What You Get
 
@@ -26,6 +24,27 @@ Use it as a **Python library**, **CLI**, or **HTTP API**.
 ## Skills
 
 Want structured property reports instead of raw data? Claude skills that chain these tools into investment summaries are available at [bouch.dev/products](https://bouch.dev/products).
+
+## Use as MCP Server
+
+No install required — paste the URL into your MCP client config and go.
+
+**Claude Code, Cursor, any MCP client:**
+
+```json
+{
+  "mcpServers": {
+    "property-shared": {
+      "type": "http",
+      "url": "https://property-shared.fly.dev/mcp"
+    }
+  }
+}
+```
+
+**Claude Desktop, ChatGPT and clients with visual dashboards** — use `https://propertydata.fly.dev/mcp` instead. This server adds interactive UI dashboards (wip). Not supported in all MCP clients.
+
+Both servers expose the same core tools. `property-shared.fly.dev` is the plain tools-only server that works everywhere.
 
 ## Install
 
