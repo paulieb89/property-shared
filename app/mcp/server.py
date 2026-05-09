@@ -7,8 +7,14 @@ from __future__ import annotations
 
 from importlib.metadata import version as _pkg_version
 
+import asyncio
+
+import httpx
 from fastmcp import FastMCP
 from fastmcp.server.http import create_streamable_http_app
+from fastmcp.tools import ToolResult
+from fastmcp.utilities.types import Image
+from mcp.types import TextContent
 
 mcp = FastMCP(
     "property-data",
@@ -24,6 +30,17 @@ mcp = FastMCP(
         "a company by name."
     ),
 )
+
+
+async def _fetch_rightmove_image(url: str) -> bytes | None:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"https://propertydata.fly.dev/img?url={url}")
+            if resp.status_code != 200:
+                return None
+            return resp.content
+    except Exception:
+        return None
 
 
 @mcp.tool()
@@ -160,20 +177,48 @@ async def rightmove_search(
 
 
 @mcp.tool()
-def rightmove_listing(
+async def rightmove_listing(
     property_url_or_id: str,
     include_images: bool = False,
-) -> dict:
+    max_images: int = 3,
+) -> dict | ToolResult:
     """Full detail for a single Rightmove listing (URL or numeric ID).
 
-    include_images returns photo and floorplan URLs — useful for eval fixtures
-    but adds significant payload size.
+    include_images fetches and embeds photos and floorplans as MCP image content.
+    max_images caps the number of property photos (default 3); floorplans always included.
     """
+    import anyio
     from property_core import fetch_listing
-    result = fetch_listing(property_url_or_id)
-    if include_images:
-        return result.model_dump()
-    return result.model_dump(exclude={"images", "floorplans"})
+
+    result = await anyio.to_thread.run_sync(lambda: fetch_listing(property_url_or_id))
+
+    if not include_images:
+        return result.model_dump(exclude={"images", "floorplans"})
+
+    photo_urls = (result.images or [])[:max_images]
+    floorplan_urls = result.floorplans or []
+    all_urls = photo_urls + floorplan_urls
+
+    raw_results = await asyncio.gather(
+        *[_fetch_rightmove_image(u) for u in all_urls],
+        return_exceptions=True,
+    )
+
+    price_str = f"£{result.price:,}" if result.price else "price unknown"
+    beds = result.bedrooms if result.bedrooms is not None else "?"
+    prop_type = result.property_type or "property"
+    address = result.address or "unknown address"
+    summary = f"{address} — {price_str} — {beds} bed {prop_type}"
+
+    content: list = [TextContent(type="text", text=summary)]
+    for img_bytes in raw_results:
+        if isinstance(img_bytes, bytes) and img_bytes:
+            content.append(Image(data=img_bytes, format="jpeg"))
+
+    return ToolResult(
+        content=content,
+        structured_content=result.model_dump(exclude={"images", "floorplans"}),
+    )
 
 
 @mcp.tool()
