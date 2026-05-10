@@ -90,3 +90,8 @@ exclude = [".uv-cache", ".venv", "*.pyc", "__pycache__", ".pytest_cache", ".git"
 
 [tool.pytest.ini_options]
 addopts = "-ra"
+
+[dependency-groups]
+dev = [
+    "tiktoken>=0.12.0",
+]

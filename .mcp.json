@@ -8,9 +8,13 @@
       "type": "http",
       "url": "https://developers.openai.com/mcp"
     },
-    "property-shared": {
+    "property-mcp": {
       "type": "http",
-      "url": "https://property-shared.fly.dev/mcp"
+      "url": "https://uk-property-mcp.fly.dev/mcp"
+    },
+    "mcp-ui Docs": {
+      "type": "http",
+      "url": "https://gitmcp.io/idosal/mcp-ui"
     }
   }
 }
