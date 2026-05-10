@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 
 def test_calc_stamp_duty_basic():
-    """calc_stamp_duty returns dict with total_sdlt and effective_rate."""
+    """calc_stamp_duty returns correct SDLT for a standard £300k purchase (April 2025 bands)."""
     from property_app.tools import calc_stamp_duty
 
     result = calc_stamp_duty(price=300000)
@@ -19,7 +19,8 @@ def test_calc_stamp_duty_basic():
     assert "total_sdlt" in result
     assert "effective_rate" in result
     assert result["price"] == 300000
-    assert result["total_sdlt"] > 0
+    # 0% on £0–£125k + 2% on £125k–£250k + 5% on £250k–£300k = £5,000
+    assert result["total_sdlt"] == 5000
     assert result["effective_rate"] > 0
 
 

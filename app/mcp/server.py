@@ -43,7 +43,7 @@ async def _fetch_rightmove_image(url: str) -> bytes | None:
         return None
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True})
 async def property_comps(
     postcode: str,
     months: int = 24,
@@ -76,7 +76,7 @@ async def property_comps(
     return result.model_dump()
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True})
 async def property_yield(
     postcode: str,
     months: int = 24,
@@ -93,7 +93,7 @@ async def property_yield(
     )).model_dump()
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True})
 async def rental_analysis(
     postcode: str,
     radius: float = 0.5,
@@ -115,7 +115,7 @@ async def rental_analysis(
     )).model_dump()
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True})
 async def property_epc(postcode: str, address: str | None = None) -> dict | None:
     """EPC energy certificate lookup by postcode (+ optional address filter)."""
     from property_core import EPCClient
@@ -123,7 +123,7 @@ async def property_epc(postcode: str, address: str | None = None) -> dict | None
     return result.model_dump() if result else None
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True})
 def stamp_duty(
     price: int,
     additional_property: bool = False,
@@ -140,7 +140,7 @@ def stamp_duty(
     ).model_dump()
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True})
 async def rightmove_search(
     postcode: str,
     listing_type: str = "sale",
@@ -176,7 +176,7 @@ async def rightmove_search(
     return [l.model_dump(exclude={"images"}) for l in listings]
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True})
 async def rightmove_listing(
     property_url_or_id: str,
     include_images: bool = False,
@@ -221,13 +221,13 @@ async def rightmove_listing(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True})
 async def property_blocks(
     postcode: str,
     search_level: str = "sector",
     months: int = 24,
 ) -> dict:
-    """Block-buy analysis — identify buildings with multiple flat sales."""
+    """Property block analysis — identify buildings with multiple flat sales (block-buy opportunities)."""
     import anyio
     from property_core import analyze_blocks
     result = await anyio.to_thread.run_sync(
@@ -240,7 +240,7 @@ async def property_blocks(
     return result.model_dump()
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True})
 def company_search(name: str) -> dict:
     """Search Companies House for a company by name."""
     from property_core import CompaniesHouseClient
@@ -248,7 +248,7 @@ def company_search(name: str) -> dict:
     return result.model_dump() if result else {"items": []}
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True})
 async def property_report(
     address: str,
     postcode: str,
@@ -267,14 +267,14 @@ async def property_report(
     return result.model_dump()
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True})
 def planning_search(postcode: str) -> dict:
     """Find the council planning portal URL for a postcode."""
     from property_core import PlanningService
     return PlanningService().search(postcode)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True})
 def ppd_transactions(
     postcode: str,
     limit: int = 10,
