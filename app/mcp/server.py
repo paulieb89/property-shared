@@ -282,12 +282,16 @@ def ppd_transactions(
 ) -> dict:
     """Raw Land Registry Price Paid transactions for a postcode."""
     from property_core import PPDService
-    return PPDService().search_transactions(
+    result = PPDService().search_transactions(
         postcode=postcode,
         postcode_prefix=None,
         limit=limit,
         property_type=property_type,
     )
+    return {
+        **{k: v for k, v in result.items() if k != "results"},
+        "results": [t.model_dump() for t in result["results"]],
+    }
 
 
 _http_app = create_streamable_http_app(

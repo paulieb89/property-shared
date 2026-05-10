@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PostcodeResult(BaseModel):
@@ -18,7 +18,7 @@ class PostcodeResult(BaseModel):
     longitude: float | None = None
     codes: dict[str, str] | None = None
     rural_urban: str | None = None
-    raw: dict[str, Any] | None = None
+    raw: dict[str, Any] | None = Field(default=None, exclude=True)
 
     @classmethod
     def from_api_response(cls, data: Dict[str, Any]) -> PostcodeResult:

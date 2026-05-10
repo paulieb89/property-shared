@@ -156,17 +156,13 @@ class PropertyReportService:
         current_market = None
 
         if include_rentals or include_sales_market:
-            rightmove_tasks = []
+            named_tasks = []
             if include_rentals:
-                rightmove_tasks.append(
-                    ("rentals", self._fetch_rental_data(postcode, search_radius))
-                )
+                named_tasks.append(("rentals", asyncio.create_task(self._fetch_rental_data(postcode, search_radius))))
             if include_sales_market:
-                rightmove_tasks.append(
-                    ("sales", self._fetch_sales_market(postcode, search_radius))
-                )
+                named_tasks.append(("sales", asyncio.create_task(self._fetch_sales_market(postcode, search_radius))))
 
-            for name, task in rightmove_tasks:
+            for name, task in named_tasks:
                 result = await task
                 if name == "rentals":
                     if result["success"]:

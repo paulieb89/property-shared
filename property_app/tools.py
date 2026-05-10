@@ -31,7 +31,7 @@ def _slim(obj: Any) -> Any:
 
 def calc_stamp_duty(
     price: int,
-    additional_property: bool = True,
+    additional_property: bool = False,
     first_time_buyer: bool = False,
     non_resident: bool = False,
 ) -> dict:
@@ -56,7 +56,7 @@ def stamp_duty(
     price: Annotated[int, Field(description="Purchase price in GBP")],
     additional_property: Annotated[
         bool, Field(description="Buying an additional property (+5% surcharge)")
-    ] = True,
+    ] = False,
     first_time_buyer: Annotated[
         bool, Field(description="First-time buyer relief (up to 300k nil rate)")
     ] = False,
