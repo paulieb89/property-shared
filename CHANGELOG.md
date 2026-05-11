@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Breaking Changes
+- REST API `/v1/ppd/comps` now defaults `auto_escalate=true`. Previously the REST API was the odd one out —  All three interfaces now behave identically: thin markets auto-widen from postcode→sector→district, with the `escalated_from`/`escalated_to` fields in the response indicating any widening that occurred. Pass `auto_escalate=false` to opt out.
+
 ## v1.4.0 (2026-03-28)
 
 ### New Features

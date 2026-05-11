@@ -138,7 +138,7 @@ async def comps(
     search_level: Literal["postcode", "sector", "district"] = "sector",
     address: Optional[str] = Query(None, description="Subject property address for context"),
     enrich_epc: bool = Query(False, description="Enrich comps with EPC floor area and price/sqft"),
-    auto_escalate: bool = Query(False, description="Auto-widen search area if fewer than 5 results"),
+    auto_escalate: bool = Query(True, description="Auto-widen search area if fewer than 5 results (default true)"),
 ) -> PPDCompsResponse:
     """Get comparable sales summary for a postcode (sector/district supported).
 
