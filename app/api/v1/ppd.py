@@ -132,7 +132,30 @@ def address_search(
 @router.get("/comps", response_model=PPDCompsResponse)
 async def comps(
     postcode: str = Query(..., min_length=2),
-    property_type: Optional[str] = Query(None, description="D/S/T/F/O"),
+    property_type: Optional[str] = Query(
+        None,
+        description=(
+            "Property type filter. Default (omitted) returns the residential "
+            "set (F+D+S+T). Pass a single code (F/D/S/T/O) for one type, or "
+            "the sentinel 'ALL' to include commercial/other and return the "
+            "unfiltered firehose."
+        ),
+    ),
+    transaction_category: Optional[str] = Query(
+        "A",
+        description=(
+            "Transaction category. Default 'A' = standard residential sales. "
+            "Pass an empty value or 'all' to include category-B (bulk transfers, "
+            "non-standard conveyances)."
+        ),
+    ),
+    filter_outliers: bool = Query(
+        False,
+        description=(
+            "When true, apply a 1.5*IQR price filter — outliers are dropped "
+            "from both the stats and the transaction list. Needs >=4 prices."
+        ),
+    ),
     months: int = Query(24, ge=1, le=120),
     limit: int = Query(50, ge=1, le=200),
     search_level: Literal["postcode", "sector", "district"] = "sector",
@@ -142,14 +165,29 @@ async def comps(
 ) -> PPDCompsResponse:
     """Get comparable sales summary for a postcode (sector/district supported).
 
+    Defaults are tuned for residential investment use cases:
+    - transaction_category defaults to 'A' (standard sales); pass 'all' for the firehose.
+    - property_type defaults to the residential set (F+D+S+T); pass 'ALL' to disable type filtering.
+    - filter_outliers defaults to false; opt in for IQR-trimmed stats AND transaction list.
+    - auto_escalate widens search from postcode->sector->district on thin markets.
+
     If address is provided, returns subject_property with its transaction history.
     If enrich_epc is True, attaches EPC floor area and price-per-sqft to each comp.
-    If auto_escalate is True, widens search from postcode→sector→district on thin markets.
     """
+    # Allow callers to disable category filtering with an empty string or "all".
+    if transaction_category is not None:
+        tc_clean = transaction_category.strip()
+        if tc_clean == "" or tc_clean.lower() == "all":
+            transaction_category = None
+        else:
+            transaction_category = tc_clean.upper()
+
     try:
         result = service.comps(
             postcode=postcode,
             property_type=property_type,
+            transaction_category=transaction_category,
+            filter_outliers=filter_outliers,
             months=months,
             limit=limit,
             search_level=search_level,

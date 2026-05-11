@@ -4,6 +4,10 @@
 
 ### Breaking Changes
 - REST API `/v1/ppd/comps` now defaults `auto_escalate=true`. Previously the REST API was the odd one out —  All three interfaces now behave identically: thin markets auto-widen from postcode→sector→district, with the `escalated_from`/`escalated_to` fields in the response indicating any widening that occurred. Pass `auto_escalate=false` to opt out.
+- `PPDService.comps()` now defaults `transaction_category="A"` (standard residential sales). Category-B rows (bulk transfers, non-standard conveyances) are excluded unless callers explicitly opt back in via `transaction_category=None`. This fixes data-parity with the production `prop` MCP server.
+- `PPDService.comps()` `property_type=None` no longer means "no filter" — it now restricts results to the residential set (F+D+S+T). Pass the new sentinel `property_type="ALL"` for the unfiltered Land Registry firehose (including commercial/other). Specific codes (`"F"`/`"D"`/`"S"`/`"T"`/`"O"`) continue to filter to a single type.
+- `PPDService.comps()` now accepts `filter_outliers: bool = False`. When set to `True`, a 1.5×IQR filter is applied to prices — outliers are dropped from BOTH the computed stats and the returned `transactions` list, so the response is internally consistent. Needs ≥4 prices, otherwise no-op.
+- The three new defaults and the `"ALL"` sentinel are exposed across all consumer interfaces — REST `/v1/ppd/comps`, MCP `property_comps`, MCP app `search_comps`/`comps_dashboard`, and CLI `property-cli ppd comps` (with `--transaction-category`, `--property-type`, `--filter-outliers`/`--no-filter-outliers`). CLI accepts `--transaction-category all` as the firehose escape hatch.
 
 ## v1.4.0 (2026-03-28)
 

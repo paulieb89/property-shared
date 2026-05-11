@@ -58,6 +58,8 @@ def test_search_comps_passes_all_params():
         search_level="district",
         address="1 Test Street",
         property_type="F",
+        transaction_category="A",
+        filter_outliers=False,
     )
 
 

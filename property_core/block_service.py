@@ -36,7 +36,11 @@ def analyze_blocks(
     """
     service = PPDService()
 
-    # Fetch more transactions than requested blocks to find groupings
+    # Fetch more transactions than requested blocks to find groupings.
+    # Block analysis explicitly wants the firehose (including category-B
+    # bulk transfers, which are highly relevant for block-buy detection)
+    # and no outlier filtering, so we opt out of the residential-only
+    # defaults on PPDService.comps().
     fetch_limit = min(limit * 3, 200)
     result = service.comps(
         postcode=postcode,
@@ -44,6 +48,9 @@ def analyze_blocks(
         limit=fetch_limit,
         search_level=search_level,
         property_type=property_type,
+        transaction_category=None,
+        filter_outliers=False,
+        auto_escalate=False,
     )
 
     # Group transactions by building: (paon, street, postcode)

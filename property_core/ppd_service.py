@@ -23,6 +23,14 @@ DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
 FORM_MAX_LIMIT = 50
 
+# Residential property type codes used for the default comps() residential filter.
+# F=Flat, D=Detached, S=Semi, T=Terraced. O=Other (commercial/non-standard) is excluded
+# unless the caller opts in via property_type="O" or property_type="ALL".
+_RESIDENTIAL_TYPES = {"F", "D", "S", "T"}
+
+# Sentinel for property_type meaning "no filter at all" — the raw firehose.
+_PROPERTY_TYPE_ALL = "ALL"
+
 
 class PPDService:
     """Domain service for PPD operations.
@@ -180,20 +188,38 @@ class PPDService:
         *,
         postcode: str,
         property_type: Optional[str] = None,
+        transaction_category: Optional[str] = "A",
+        filter_outliers: bool = False,
         months: int = 24,
         limit: int = DEFAULT_LIMIT,
         search_level: str = "sector",
         address: Optional[str] = None,
-        auto_escalate: bool = False,
+        auto_escalate: bool = True,
         thin_market_threshold: int = 5,
     ) -> PPDCompsResponse:
         """Return comparable sales and summary stats for a postcode.
 
-        If address is provided, also returns subject_property with its transaction history.
+        Defaults are tuned for residential investment use cases:
+
+        * ``transaction_category="A"`` — standard residential sales only.
+          Pass ``None`` to include category-B (bulk transfers, non-standard
+          conveyances) as well.
+        * ``property_type=None`` — residential set (F/D/S/T). Pass a single
+          code ("F"/"D"/"S"/"T"/"O") to filter to that one type, or the
+          sentinel ``"ALL"`` to disable type filtering entirely (firehose).
+        * ``filter_outliers=False`` — opt in to a 1.5*IQR price filter; when
+          enabled, outlier transactions are dropped from BOTH the stats and
+          the returned transaction list (needs >=4 prices, otherwise no-op).
+        * ``auto_escalate=True`` — widen postcode→sector→district when the
+          result set is below ``thin_market_threshold``.
+
+        If address is provided, also returns subject_property with its
+        transaction history.
 
         All stats (median, mean, percentiles, min, max) are computed from the
-        final filtered transaction list — after property-type filtering and
-        subject-property removal — so they are always consistent.
+        final filtered transaction list — after property-type filtering,
+        subject-property removal, and optional outlier filtering — so they
+        are always consistent with the returned ``transactions``.
         """
         if limit <= 0:
             limit = DEFAULT_LIMIT
@@ -216,19 +242,41 @@ class PPDService:
             prefix = pc.split()[0] if " " in pc else pc
             exact_postcode = None
 
-        # 2. Fetch transactions via SPARQL (client handles post-fetch filtering)
+        # 2. Resolve the property_type argument into a SPARQL filter value
+        # and a post-fetch residential filter flag.
+        #
+        #   None       -> fetch all types, post-filter to F/D/S/T
+        #   "ALL"      -> fetch all types, no post-filter (firehose)
+        #   "F"/"D"/"S"/"T"/"O" -> push down to SPARQL, no post-filter
+        if property_type is None:
+            sparql_property_type: Optional[str] = None
+            apply_residential_filter = True
+        elif property_type == _PROPERTY_TYPE_ALL:
+            sparql_property_type = None
+            apply_residential_filter = False
+        else:
+            sparql_property_type = property_type
+            apply_residential_filter = False
+
+        # 3. Fetch transactions via SPARQL (client handles post-fetch filtering)
         from_date = (date.today() - timedelta(days=months * 30)).isoformat()
 
         transactions = self.client.sparql_search(
             postcode=exact_postcode,
             postcode_prefix=prefix,
             from_date=from_date,
-            property_type=property_type,
+            property_type=sparql_property_type,
+            transaction_category=transaction_category,
             limit=limit,
             order_desc=True,
         )
 
-        # 4. Subject property matching
+        # 4. Apply residential post-filter when property_type=None.
+        # transaction_category filtering happens server-side via SPARQL above.
+        if apply_residential_filter:
+            transactions = [t for t in transactions if t.property_type in _RESIDENTIAL_TYPES]
+
+        # 5. Subject property matching
         subject_property = None
         if address:
             subject_property = self._find_subject_property(postcode, address)
@@ -236,11 +284,24 @@ class PPDService:
                 subject_ids = {t.transaction_id for t in subject_property.transaction_history}
                 transactions = [t for t in transactions if t.transaction_id not in subject_ids]
 
-        # 5. Compute ALL stats from the final filtered list (fixes stats bug)
+        # 6. Drop priceless rows before stats / outlier filtering.
         transactions = [t for t in transactions if t.price is not None]
+
+        # 7. Optional IQR outlier filter (1.5 * IQR rule, needs >= 4 prices).
+        # Filter both the stats list and the returned transactions, so the
+        # response remains internally consistent.
+        if filter_outliers and len(transactions) >= 4:
+            prices_for_iqr = [t.price for t in transactions]
+            q = quantiles(prices_for_iqr, n=4)
+            q1, q3 = q[0], q[2]
+            iqr = q3 - q1
+            lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+            transactions = [t for t in transactions if lo <= t.price <= hi]
+
         prices = [t.price for t in transactions]
         count = len(transactions)
 
+        # 8. Compute ALL stats from the final filtered list (fixes stats bug)
         computed_median = int(median(prices)) if prices else None
         computed_mean = int(round(mean(prices))) if prices else None
         p25 = None
@@ -250,7 +311,7 @@ class PPDService:
             p25 = int(round(q[0]))
             p75 = int(round(q[2]))
 
-        # 6. Subject comparison
+        # 9. Subject comparison
         subject_price_percentile = None
         subject_vs_median_pct = None
         last_sale_price = (
@@ -290,18 +351,23 @@ class PPDService:
             subject_vs_median_pct=subject_vs_median_pct,
         )
 
-        # Auto-escalate to wider search area if thin market
+        # Auto-escalate to wider search area if thin market.
+        # Preserve caller's intent for property_type / transaction_category /
+        # filter_outliers — pass them through verbatim.
         if auto_escalate and response.thin_market:
             next_level = {"postcode": "sector", "sector": "district"}.get(search_level)
             if next_level:
                 wider = self.comps(
                     postcode=postcode,
                     property_type=property_type,
+                    transaction_category=transaction_category,
+                    filter_outliers=filter_outliers,
                     months=months,
                     limit=limit,
                     search_level=next_level,
                     address=address,
                     auto_escalate=True,
+                    thin_market_threshold=thin_market_threshold,
                 )
                 wider.escalated_from = search_level
                 wider.escalated_to = wider.query.search_level

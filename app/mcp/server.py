@@ -48,12 +48,22 @@ async def property_comps(
     postcode: str,
     months: int = 24,
     property_type: str | None = None,
+    transaction_category: str | None = "A",
+    filter_outliers: bool = False,
     search_level: str = "sector",
     address: str | None = None,
     limit: int = 50,
     enrich_epc: bool = False,
 ) -> dict:
     """Comparable sales from Land Registry Price Paid Data.
+
+    Defaults return the standard residential set:
+    - property_type=None means residential (F+D+S+T). Pass "F"/"D"/"S"/"T"/"O"
+      for a single type, or "ALL" to disable type filtering (firehose).
+    - transaction_category defaults to "A" (standard sales). Pass None to
+      include category-B (bulk transfers, non-standard conveyances).
+    - filter_outliers=False by default; set True for IQR-trimmed stats AND
+      transaction list (1.5*IQR rule, needs >=4 prices).
 
     limit caps returned transactions (max 200). enrich_epc attaches EPC floor
     area and price-per-sqft to each transaction — slower but richer.
@@ -63,6 +73,8 @@ async def property_comps(
         postcode=postcode,
         months=months,
         property_type=property_type,
+        transaction_category=transaction_category,
+        filter_outliers=filter_outliers,
         search_level=search_level,
         address=address,
         limit=limit,

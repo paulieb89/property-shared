@@ -72,7 +72,27 @@ app.add_typer(ppd, name="ppd")
 @ppd.command("comps")
 def ppd_comps(
     postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
-    property_type: Optional[str] = typer.Option(None, help="D/S/T/F/O"),
+    property_type: Optional[str] = typer.Option(
+        None,
+        "--property-type",
+        help=(
+            "Property type filter. Omit for residential set (F+D+S+T). "
+            "Pass D/S/T/F/O for one type, or 'ALL' to disable type filtering (firehose)."
+        ),
+    ),
+    transaction_category: str = typer.Option(
+        "A",
+        "--transaction-category",
+        help=(
+            "Transaction category. Default 'A' = standard residential sales. "
+            "Pass 'B' for bulk/non-standard transfers, or 'all' to include both."
+        ),
+    ),
+    filter_outliers: bool = typer.Option(
+        False,
+        "--filter-outliers/--no-filter-outliers",
+        help="Apply a 1.5*IQR price filter to stats AND the transaction list.",
+    ),
     months: int = typer.Option(24, help="Lookback months"),
     limit: int = typer.Option(50, help="Max transactions"),
     search_level: str = typer.Option("sector", help="postcode|sector|district"),
@@ -82,9 +102,20 @@ def ppd_comps(
 ) -> None:
     """Get comparable sales summary for a postcode.
 
+    Defaults are tuned for residential investment use cases — standard sales
+    (category A) of flats, detached, semi, and terraced properties.
+
     If --address is provided, also returns subject property transaction history.
     If --enrich-epc is set, attaches EPC floor area and price-per-sqft to each comp.
     """
+    # Resolve transaction_category — "all" (case insensitive) means no filter.
+    tc_clean = transaction_category.strip()
+    tc_value: Optional[str]
+    if tc_clean.lower() == "all" or tc_clean == "":
+        tc_value = None
+    else:
+        tc_value = tc_clean.upper()
+
     postcode_value = _join_tokens(postcode)
     http = _maybe_http_client(api_url)
     if http:
@@ -93,9 +124,15 @@ def ppd_comps(
             "months": months,
             "limit": limit,
             "search_level": search_level,
+            "filter_outliers": filter_outliers,
         }
         if property_type:
             params["property_type"] = property_type
+        if tc_value is not None:
+            params["transaction_category"] = tc_value
+        else:
+            # Send empty string so the API resolves it to "no filter".
+            params["transaction_category"] = ""
         if address:
             params["address"] = address
         if enrich_epc:
@@ -109,6 +146,8 @@ def ppd_comps(
         result = service.comps(
             postcode=postcode_value,
             property_type=property_type,
+            transaction_category=tc_value,
+            filter_outliers=filter_outliers,
             months=months,
             limit=limit,
             search_level=search_level,

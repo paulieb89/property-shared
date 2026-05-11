@@ -24,6 +24,8 @@ def _search_comps(
     search_level: str = "sector",
     address: str | None = None,
     property_type: str | None = None,
+    transaction_category: str | None = "A",
+    filter_outliers: bool = False,
 ) -> dict:
     """Call PPDService.comps() and return a plain dict."""
     from property_core import PPDService
@@ -36,6 +38,8 @@ def _search_comps(
         search_level=search_level,
         address=address,
         property_type=property_type,
+        transaction_category=transaction_category,
+        filter_outliers=filter_outliers,
     )
     from property_app.tools import _slim
 
@@ -63,13 +67,42 @@ def search_comps(
         str | None, Field(description="Street address for subject property")
     ] = None,
     property_type: Annotated[
-        str | None, Field(description="F=flat, D=detached, S=semi, T=terrace")
+        str | None,
+        Field(
+            description=(
+                "Property type filter. Omit (None) for the residential set "
+                "(F+D+S+T). Pass F/D/S/T/O for a single type, or 'ALL' to "
+                "disable type filtering (firehose)."
+            ),
+        ),
     ] = None,
+    transaction_category: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Transaction category. Default 'A' = standard residential sales. "
+                "Pass None to include category-B bulk/non-standard transfers."
+            ),
+        ),
+    ] = "A",
+    filter_outliers: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true, apply a 1.5*IQR price filter — outliers are dropped "
+                "from both the stats and the transaction list."
+            ),
+        ),
+    ] = False,
 ) -> dict:
     """Search comparable property sales for a UK postcode.
 
     Returns transaction count, median/percentile stats, and individual
     transactions within the lookback period.
+
+    Defaults are residential-only: standard sales (category A) of flats,
+    detached, semi, and terraced properties. Use property_type='ALL' and
+    transaction_category=None for the unfiltered Land Registry firehose.
     """
     return _search_comps(
         postcode=postcode,
@@ -78,6 +111,8 @@ def search_comps(
         search_level=search_level,
         address=address,
         property_type=property_type,
+        transaction_category=transaction_category,
+        filter_outliers=filter_outliers,
     )
 
 
