@@ -77,3 +77,15 @@ async def test_full_property_analysis_registered_on_mcp_app():
     prompts = await mcp.list_prompts()
     names = [p.name for p in prompts]
     assert "full_property_analysis" in names
+
+
+@pytest.mark.anyio
+async def test_dev_utility_tools_removed_from_mcp_app():
+    """component_test and image_test are dev utilities, should not be in production."""
+    import property_app.tools  # noqa: F401
+    from property_app.server import mcp
+
+    tools = await mcp.list_tools()
+    names = [t.name for t in tools]
+    assert "component_test" not in names
+    assert "image_test" not in names
