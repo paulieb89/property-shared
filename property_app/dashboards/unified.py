@@ -1,6 +1,6 @@
 """Unified property dashboard — single-call view combining comps + yield + rental.
 
-get_property_data: @mcp.tool() — returns combined dict for LLM consumption
+_fetch_unified: shared helper that fetches comps + yield + rental in parallel
 property_dashboard: @mcp.tool(app=True) — returns PrefabApp with interactive view
 """
 from __future__ import annotations
@@ -69,42 +69,6 @@ async def _fetch_unified(
     )
 
     return {"comps": comps, "yield_data": yield_data, "rental": rental}
-
-
-# ---------------------------------------------------------------------------
-# Data tool
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool(
-    annotations={"readOnlyHint": True, "openWorldHint": True},
-    tags={"property", "unified"},
-    timeout=120.0,
-)
-async def get_property_data(
-    postcode: Annotated[str, Field(description="UK postcode e.g. NG1 1AA")],
-    months: Annotated[int, Field(description="Sale lookback months", ge=1, le=60)] = 24,
-    search_level: Annotated[str, Field(description="postcode, sector, or district")] = "sector",
-    property_type: Annotated[str | None, Field(description="F=flat, D=detached, S=semi, T=terrace")] = None,
-    radius: Annotated[float, Field(description="Rental search radius in miles", ge=0.1, le=5.0)] = 0.5,
-    limit: Annotated[int, Field(description="Max transactions to return (default 10 for LLM context efficiency; increase if you need more detail)", ge=1, le=50)] = 10,
-) -> dict:
-    """Combined property data: comparable sales, rental yield, and rental market.
-
-    Returns transaction count, price stats, gross yield percentage,
-    yield assessment, rental listings, and data quality classification.
-
-    The default limit of 10 transactions keeps responses ~4k tokens. Raise to 30+
-    only when you need the full transaction list for detailed analysis.
-    """
-    return await _fetch_unified(
-        postcode=postcode,
-        months=months,
-        search_level=search_level,
-        property_type=property_type,
-        radius=radius,
-        limit=limit,
-    )
 
 
 # ---------------------------------------------------------------------------

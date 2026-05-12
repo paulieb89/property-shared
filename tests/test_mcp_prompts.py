@@ -39,3 +39,20 @@ async def test_property_report_tool_removed_from_plain_mcp():
     assert "property_report" not in names, (
         "property_report should be removed; use full_property_analysis prompt instead"
     )
+
+
+@pytest.mark.anyio
+async def test_get_property_data_tool_removed_from_mcp_app():
+    """get_property_data was a composition tool; replaced by full_property_analysis prompt."""
+    import property_app.tools  # noqa: F401
+    import property_app.dashboards.comps  # noqa: F401
+    import property_app.dashboards.yield_view  # noqa: F401
+    import property_app.dashboards.rental  # noqa: F401
+    import property_app.dashboards.listings  # noqa: F401
+    import property_app.dashboards.unified  # noqa: F401
+    from property_app.server import mcp
+
+    tools = await mcp.list_tools()
+    names = [t.name for t in tools]
+    assert "get_property_data" not in names
+    assert "property_dashboard" in names  # UI tool preserved

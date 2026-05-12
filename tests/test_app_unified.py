@@ -180,8 +180,7 @@ def test_property_dashboard_text_has_key_stats():
 
 
 def test_unified_importable():
-    """get_property_data and property_dashboard are importable."""
-    from property_app.dashboards.unified import get_property_data, property_dashboard
+    """property_dashboard is importable (get_property_data was replaced by full_property_analysis prompt)."""
+    from property_app.dashboards.unified import property_dashboard
 
-    assert get_property_data is not None
     assert property_dashboard is not None
