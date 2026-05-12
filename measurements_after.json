@@ -1,0 +1,225 @@
+{
+  "label": "after",
+  "timestamp": "2026-05-12T12:56:24.871883",
+  "inventory": {
+    "plain_mcp_tools": [
+      "company_search",
+      "planning_search",
+      "ppd_transactions",
+      "property_blocks",
+      "property_comps",
+      "property_epc",
+      "property_report",
+      "property_yield",
+      "rental_analysis",
+      "rightmove_listing",
+      "rightmove_search",
+      "stamp_duty"
+    ],
+    "mcp_app_tools": [
+      "company_search",
+      "component_test",
+      "comps_dashboard",
+      "epc_lookup",
+      "get_property_data",
+      "get_rental",
+      "get_yield",
+      "image_test",
+      "listings_dashboard",
+      "planning_search",
+      "ppd_transactions",
+      "property_blocks",
+      "property_dashboard",
+      "property_report",
+      "rental_dashboard",
+      "rightmove_search",
+      "search_comps",
+      "stamp_duty",
+      "yield_dashboard"
+    ],
+    "only_in_plain": [
+      "property_comps",
+      "property_epc",
+      "property_yield",
+      "rental_analysis",
+      "rightmove_listing"
+    ],
+    "only_in_mcp_app": [
+      "component_test",
+      "comps_dashboard",
+      "epc_lookup",
+      "get_property_data",
+      "get_rental",
+      "get_yield",
+      "image_test",
+      "listings_dashboard",
+      "property_dashboard",
+      "rental_dashboard",
+      "search_comps",
+      "yield_dashboard"
+    ],
+    "in_both": [
+      "company_search",
+      "planning_search",
+      "ppd_transactions",
+      "property_blocks",
+      "property_report",
+      "rightmove_search",
+      "stamp_duty"
+    ]
+  },
+  "property_comps": {
+    "tool": "property_comps (plain MCP)",
+    "cases": [
+      {
+        "case": "thin-sector-default-limit",
+        "params": {
+          "postcode": "NG1 2NS",
+          "search_level": "sector",
+          "limit": 30,
+          "enrich_epc": false
+        },
+        "elapsed_ms": 46671,
+        "bytes": 10917,
+        "tokens": 4224,
+        "null_fields": 0,
+        "total_fields": 432,
+        "null_ratio_pct": 0.0,
+        "txn_count": 30,
+        "tokens_per_txn": 140,
+        "median": 210000,
+        "mean": 230607
+      },
+      {
+        "case": "district-50",
+        "params": {
+          "postcode": "NG1 2NS",
+          "search_level": "district",
+          "limit": 50,
+          "enrich_epc": false
+        },
+        "elapsed_ms": 20235,
+        "bytes": 17971,
+        "tokens": 6956,
+        "null_fields": 0,
+        "total_fields": 708,
+        "null_ratio_pct": 0.0,
+        "txn_count": 50,
+        "tokens_per_txn": 139,
+        "median": 225000,
+        "mean": 249659
+      },
+      {
+        "case": "dense-sector-default-limit",
+        "params": {
+          "postcode": "E14 5",
+          "search_level": "sector",
+          "limit": 30,
+          "enrich_epc": false
+        },
+        "elapsed_ms": 16071,
+        "bytes": 6271,
+        "tokens": 2402,
+        "null_fields": 0,
+        "total_fields": 250,
+        "null_ratio_pct": 0.0,
+        "txn_count": 18,
+        "tokens_per_txn": 133,
+        "median": 637500,
+        "mean": 633056
+      }
+    ]
+  },
+  "property_yield": {
+    "tool": "property_yield (plain MCP)",
+    "signature_has_auto_escalate": true,
+    "docstring": "Gross rental yield for a UK postcode.\n\nCombines Land Registry sale comps (median sale price) with Rightmove rental\nlistings (median monthly rent) to produce a gross yield percentage.\n\nArgs:\n    postcode: UK postcode (e.g. \"NG1 2NS\").\n    months: PPD sale lookback period (default 24).\n    search_level: PPD search granularity — \"postcode\", \"sector\" (default),\n        or \"district\".\n    property_type: Filter sales by type. None (default) = residential set\n        (F+D+S+T). Pass \"F\"/\"D\"/\"S\"/\"T\"/\"O\" for one type, \"ALL\" for firehose.\n    auto_escalate: Widen the PPD search area on thin markets — postcode→\n        sector→district. Default True. Set False for strict-locality only.\n\nReturns:\n    median_sale_price, median_monthly_rent, gross_yield_pct, sale_count,\n    rental_count, thin_market. Yield fields are null when sample is too thin\n    or rental data is unavailable.",
+    "docstring_length_chars": 877,
+    "cases": [
+      {
+        "case": "thin-sector",
+        "params": {
+          "postcode": "NG1 2NS",
+          "search_level": "sector"
+        },
+        "tokens": 60,
+        "gross_yield_pct": 5.33,
+        "median_sale_price": 225000,
+        "median_monthly_rent": 1000,
+        "sale_count": 50,
+        "rental_count": 25,
+        "thin_market_handled": true
+      },
+      {
+        "case": "dense-sector",
+        "params": {
+          "postcode": "DE12 7DH",
+          "search_level": "sector"
+        },
+        "tokens": 59,
+        "gross_yield_pct": 4.17,
+        "median_sale_price": 257500,
+        "median_monthly_rent": 895,
+        "sale_count": 50,
+        "rental_count": 1,
+        "thin_market_handled": true
+      },
+      {
+        "case": "ng11-sector",
+        "params": {
+          "postcode": "NG11 9HD",
+          "search_level": "sector"
+        },
+        "tokens": 60,
+        "gross_yield_pct": 6.68,
+        "median_sale_price": 206500,
+        "median_monthly_rent": 1150,
+        "sale_count": 50,
+        "rental_count": 15,
+        "thin_market_handled": true
+      }
+    ]
+  },
+  "rental_analysis": {
+    "tool": "rental_analysis (plain MCP)",
+    "signature_has_auto_escalate": true,
+    "cases": [
+      {
+        "case": "thin-postcode",
+        "params": {
+          "postcode": "NG1 2NS"
+        },
+        "tokens": 112,
+        "median_monthly_rent": null,
+        "rental_count": null,
+        "escalated_from": null,
+        "escalated_to": null,
+        "thin_market": false
+      },
+      {
+        "case": "dense-postcode",
+        "params": {
+          "postcode": "DE12 7DH"
+        },
+        "tokens": 115,
+        "median_monthly_rent": null,
+        "rental_count": null,
+        "escalated_from": 0.5,
+        "escalated_to": 1.0,
+        "thin_market": true
+      },
+      {
+        "case": "ng11-postcode",
+        "params": {
+          "postcode": "NG11 9HD"
+        },
+        "tokens": 113,
+        "median_monthly_rent": null,
+        "rental_count": null,
+        "escalated_from": null,
+        "escalated_to": null,
+        "thin_market": false
+      }
+    ]
+  }
+}

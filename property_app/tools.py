@@ -543,3 +543,146 @@ def image_test():
         "Here is a Rightmove property photo:",
         McpImage(data=resp.content, format="jpeg"),
     ]
+
+
+# ---------------------------------------------------------------------------
+# 6. Property blocks — find buildings with multiple flat sales
+# ---------------------------------------------------------------------------
+
+
+def analyse_blocks(
+    postcode: str,
+    search_level: str = "sector",
+    months: int = 24,
+    limit: int = 50,
+    min_transactions: int = 2,
+) -> dict:
+    """Raw block analysis — returns dict. Used by the MCP tool and tests."""
+    from property_core import analyze_blocks
+
+    result = analyze_blocks(
+        postcode=postcode,
+        search_level=search_level,
+        months=months,
+        limit=limit,
+        min_transactions=min_transactions,
+    )
+    return _slim(result.model_dump(mode="json", exclude_none=True))
+
+
+@mcp.tool(
+    annotations={"readOnlyHint": True},
+    tags={"ppd", "blocks"},
+    timeout=60.0,
+)
+def property_blocks(
+    postcode: Annotated[str, Field(description="UK postcode (e.g. 'B1 1AA')")],
+    search_level: Annotated[
+        str, Field(description="postcode, sector, or district")
+    ] = "sector",
+    months: Annotated[int, Field(description="Sale lookback months", ge=1, le=120)] = 24,
+    limit: Annotated[int, Field(description="Target number of blocks to return", ge=1, le=200)] = 50,
+    min_transactions: Annotated[
+        int, Field(description="Minimum sales per building to qualify as a block", ge=2)
+    ] = 2,
+) -> dict:
+    """Identify buildings with multiple flat sales — block-buy opportunities.
+
+    Groups Land Registry transactions by building (PAON/street) and returns
+    blocks where at least min_transactions units sold in the lookback window.
+    Useful for spotting investor exits, new-build releases, or portfolio
+    bulk transfers.
+    """
+    return analyse_blocks(
+        postcode=postcode,
+        search_level=search_level,
+        months=months,
+        limit=limit,
+        min_transactions=min_transactions,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 7. Property report — multi-source aggregate for a specific address
+# ---------------------------------------------------------------------------
+
+
+async def fetch_property_report(address: str, postcode: str, months: int = 24) -> dict:
+    """Raw multi-source property report — returns dict. Used by the MCP tool and tests."""
+    from property_core.report_service import PropertyReportService
+
+    result = await PropertyReportService().generate_report(
+        address_query=f"{address}, {postcode}",
+        ppd_months=months,
+    )
+    return _slim(result.model_dump(mode="json", exclude_none=True))
+
+
+@mcp.tool(
+    annotations={"readOnlyHint": True, "openWorldHint": True},
+    tags={"report"},
+    timeout=120.0,
+)
+async def property_report(
+    address: Annotated[str, Field(description="Street address (e.g. '10 Downing Street')")],
+    postcode: Annotated[str, Field(description="UK postcode (e.g. 'SW1A 2AA')")],
+    months: Annotated[int, Field(description="Sale lookback months", ge=1, le=120)] = 24,
+) -> dict:
+    """Full property data pull for a specific address — comps + EPC + yield + market.
+
+    Combines Land Registry sale history, EPC certificate, comparable sales,
+    rental yield, and market context for one property. Requires a street
+    address and postcode (e.g. address='10 Downing Street', postcode='SW1A 2AA').
+    For postcode-only queries use property_comps and property_yield instead.
+    """
+    return await fetch_property_report(address=address, postcode=postcode, months=months)
+
+
+# ---------------------------------------------------------------------------
+# 8. PPD transactions — raw Land Registry transactions for a postcode
+# ---------------------------------------------------------------------------
+
+
+def search_ppd_transactions(
+    postcode: str,
+    limit: int = 10,
+    property_type: str | None = None,
+) -> dict:
+    """Raw PPD transaction search — returns dict. Used by the MCP tool and tests."""
+    from property_core import PPDService
+
+    result = PPDService().search_transactions(
+        postcode=postcode,
+        postcode_prefix=None,
+        limit=limit,
+        property_type=property_type,
+    )
+    return {
+        **{k: v for k, v in result.items() if k != "results"},
+        "results": [_slim(t.model_dump(mode="json", exclude_none=True)) for t in result["results"]],
+    }
+
+
+@mcp.tool(
+    annotations={"readOnlyHint": True},
+    tags={"ppd"},
+)
+def ppd_transactions(
+    postcode: Annotated[str, Field(description="UK postcode")],
+    limit: Annotated[int, Field(description="Max transactions to return", ge=1, le=200)] = 10,
+    property_type: Annotated[
+        str | None,
+        Field(description="Filter by type: F=flat, D=detached, S=semi, T=terraced, O=other. Default None = all"),
+    ] = None,
+) -> dict:
+    """Raw Land Registry Price Paid transactions for a postcode.
+
+    Returns every recorded transaction at the postcode, unfiltered (includes
+    category-B bulk transfers and commercial sales). For clean residential
+    comparable sales, use property_comps instead.
+    """
+    return search_ppd_transactions(
+        postcode=postcode,
+        limit=limit,
+        property_type=property_type,
+    )

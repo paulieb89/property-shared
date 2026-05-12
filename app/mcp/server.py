@@ -6,6 +6,7 @@ regardless of ext-apps / Prefab UI support.
 from __future__ import annotations
 
 from importlib.metadata import version as _pkg_version
+from typing import Any
 
 import asyncio
 
@@ -15,6 +16,21 @@ from fastmcp.server.http import create_streamable_http_app
 from fastmcp.tools import ToolResult
 from fastmcp.utilities.types import Image
 from mcp.types import TextContent
+
+
+def _slim(obj: Any) -> Any:
+    """Strip bulk fields (raw, images, floorplans, epc_match) recursively.
+
+    Used alongside Pydantic's exclude_none=True to halve token cost on tools
+    that return rich data with optional unpopulated fields (PPD transactions,
+    block analysis, full property reports).
+    """
+    if isinstance(obj, dict):
+        return {k: _slim(v) for k, v in obj.items()
+                if k not in ("raw", "images", "floorplans", "epc_match")}
+    if isinstance(obj, list):
+        return [_slim(item) for item in obj]
+    return obj
 
 mcp = FastMCP(
     "property-data",
@@ -85,7 +101,7 @@ async def property_comps(
         epc = EPCClient()
         await enrich_comps_with_epc(result.transactions, epc)
         compute_enriched_stats(result)
-    return result.model_dump()
+    return _slim(result.model_dump(mode="json", exclude_none=True))
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
@@ -94,15 +110,36 @@ async def property_yield(
     months: int = 24,
     search_level: str = "sector",
     property_type: str | None = None,
+    auto_escalate: bool = True,
 ) -> dict:
-    """Rental yield analysis for a postcode."""
+    """Gross rental yield for a UK postcode.
+
+    Combines Land Registry sale comps (median sale price) with Rightmove rental
+    listings (median monthly rent) to produce a gross yield percentage.
+
+    Args:
+        postcode: UK postcode (e.g. "NG1 2NS").
+        months: PPD sale lookback period (default 24).
+        search_level: PPD search granularity — "postcode", "sector" (default),
+            or "district".
+        property_type: Filter sales by type. None (default) = residential set
+            (F+D+S+T). Pass "F"/"D"/"S"/"T"/"O" for one type, "ALL" for firehose.
+        auto_escalate: Widen the PPD search area on thin markets — postcode→
+            sector→district. Default True. Set False for strict-locality only.
+
+    Returns:
+        median_sale_price, median_monthly_rent, gross_yield_pct, sale_count,
+        rental_count, thin_market. Yield fields are null when sample is too thin
+        or rental data is unavailable.
+    """
     from property_core import calculate_yield
     return (await calculate_yield(
         postcode=postcode,
         months=months,
         search_level=search_level,
         property_type=property_type,
-    )).model_dump()
+        auto_escalate=auto_escalate,
+    )).model_dump(mode="json", exclude_none=True)
 
 
 @mcp.tool(annotations={"readOnlyHint": True})

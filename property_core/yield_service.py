@@ -26,6 +26,7 @@ async def calculate_yield(
     property_type: Optional[str] = None,
     radius: float = 0.5,
     rightmove_delay: Optional[float] = None,
+    auto_escalate: bool = True,
 ) -> YieldAnalysis:
     """Calculate gross rental yield for a postcode.
 
@@ -42,6 +43,8 @@ async def calculate_yield(
         property_type: Filter comps by type: F=flat, D=detached, S=semi, T=terraced (default all).
         radius: Rightmove rental search radius in miles.
         rightmove_delay: Per-request delay in seconds (default from env or 0.6).
+        auto_escalate: Widen PPD search area on thin markets (postcode→sector→
+            district). Default True. Set False for strict-locality only.
 
     Returns:
         YieldAnalysis with combined sale/rental data and yield calculation.
@@ -58,6 +61,7 @@ async def calculate_yield(
         months=months,
         search_level=search_level,
         property_type=property_type,
+        auto_escalate=auto_escalate,
     )
 
     if not comps.median or comps.thin_market:
