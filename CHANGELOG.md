@@ -17,6 +17,11 @@
 ### Removed — dev utilities
 - `component_test` and `image_test` MCP tools removed from `propertydata.fly.dev/mcp`. These were internal dev artifacts that polluted the production tool selection surface.
 
+### Added — MCP Prompts (non-breaking)
+- `full_property_analysis` — replaces the removed `property_report` / `get_property_data` tools.
+- `area_comparison` — multi-postcode comparison workflow (compares 2-3 postcodes on price, yield, market depth).
+- `investment_analysis` — single-property buy-to-let evaluation (yield, SDLT, EPC compliance, key risks).
+
 ## v1.10.0 (2026-05-12)
 
 ### Breaking Changes
