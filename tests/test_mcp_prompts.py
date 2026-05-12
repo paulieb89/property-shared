@@ -66,3 +66,14 @@ async def test_property_report_tool_removed_from_mcp_app():
     tools = await mcp.list_tools()
     names = [t.name for t in tools]
     assert "property_report" not in names
+
+
+@pytest.mark.anyio
+async def test_full_property_analysis_registered_on_mcp_app():
+    import property_app.tools  # noqa: F401
+    import property_app.dashboards.unified  # noqa: F401
+    from property_app.server import mcp
+
+    prompts = await mcp.list_prompts()
+    names = [p.name for p in prompts]
+    assert "full_property_analysis" in names

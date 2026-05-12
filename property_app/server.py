@@ -28,6 +28,49 @@ mcp = FastMCP(
 )
 
 
+@mcp.prompt()
+def full_property_analysis(
+    address: str,
+    postcode: str,
+    months: str = "24",
+) -> str:
+    """Comprehensive UK property analysis — composes comps, yield, EPC, asking prices, then synthesises.
+
+    This is a workflow prompt, not a single API call. The LLM follows the
+    instructions below to call the four primitive tools and synthesise the
+    results explicitly, so every input is visible in the conversation.
+    """
+    return f"""Produce a comprehensive analysis of the property at {address}, {postcode}.
+
+Execute these tool calls in order and show your work — state which tool you are calling, summarise its response, then move to the next.
+
+1. **Sale history + area comparable sales**: call `search_comps(postcode='{postcode}', months={months}, address='{address}')`.
+   - The response's `subject_property` section (if present) has this property's sale history.
+   - The top-level fields (`median`, `mean`, `min`, `max`, `percentile_25`, `percentile_75`) describe the AREA, not this property.
+   - The area median is the best proxy for current value. Use it for yield calculation later — never use a historical `subject_property.last_sale.price`, especially if old.
+
+2. **Area gross rental yield**: call `get_yield(postcode='{postcode}', months={months})`.
+   - Returns the AREA's median yield (area median sale price vs area median rent).
+   - For a property-specific yield, recompute: `(median_monthly_rent × 12 / area_median_sale_price) × 100`. Use the area median from step 1, NOT this property's last sale price.
+
+3. **Energy certificate**: call `epc_lookup(postcode='{postcode}', address='{address}')`.
+   - With a specific address, returns the matched EPC certificate.
+   - Note: rating (A–G), score (0–100), floor area, total annual energy cost, potential improvements.
+
+4. **Current asking prices**: call `rightmove_search(postcode='{postcode}', property_type='sale')`.
+   - Asking prices for sale right now. Typically above sold prices — the gap signals seller optimism vs. transactional reality.
+
+Then synthesise (3–5 short paragraphs):
+- This property's sale history (years and prices, if found).
+- Where it sits relative to area median (above/below, by what percent — compare price to current area median, not historical).
+- EPC rating, what it means in £/year, and improvement potential.
+- A realistic gross yield using the current area median value.
+- The asking-vs-sold gap and what it signals.
+
+**Critical**: never quote a yield that divides current rent by an old sale price. Always cite which numbers came from which tool call.
+"""
+
+
 @mcp.custom_route("/health", methods=["GET"])
 async def health(request):  # noqa: ARG001
     from starlette.responses import JSONResponse
