@@ -1,6 +1,6 @@
 {
-  "label": "after",
-  "timestamp": "2026-05-12T12:56:24.871883",
+  "label": "after-fixed",
+  "timestamp": "2026-05-12T13:24:27.669888",
   "inventory": {
     "plain_mcp_tools": [
       "company_search",
@@ -79,7 +79,7 @@
           "limit": 30,
           "enrich_epc": false
         },
-        "elapsed_ms": 46671,
+        "elapsed_ms": 35813,
         "bytes": 10917,
         "tokens": 4224,
         "null_fields": 0,
@@ -98,7 +98,7 @@
           "limit": 50,
           "enrich_epc": false
         },
-        "elapsed_ms": 20235,
+        "elapsed_ms": 19066,
         "bytes": 17971,
         "tokens": 6956,
         "null_fields": 0,
@@ -117,7 +117,7 @@
           "limit": 30,
           "enrich_epc": false
         },
-        "elapsed_ms": 16071,
+        "elapsed_ms": 16335,
         "bytes": 6271,
         "tokens": 2402,
         "null_fields": 0,
@@ -189,9 +189,12 @@
         "params": {
           "postcode": "NG1 2NS"
         },
-        "tokens": 112,
-        "median_monthly_rent": null,
-        "rental_count": null,
+        "tokens": 111,
+        "median_rent_monthly": 950,
+        "average_rent_monthly": 1077,
+        "rental_listings_count": 25,
+        "rent_range_low": 671,
+        "rent_range_high": 1500,
         "escalated_from": null,
         "escalated_to": null,
         "thin_market": false
@@ -202,8 +205,11 @@
           "postcode": "DE12 7DH"
         },
         "tokens": 115,
-        "median_monthly_rent": null,
-        "rental_count": null,
+        "median_rent_monthly": 885,
+        "average_rent_monthly": 885,
+        "rental_listings_count": 2,
+        "rent_range_low": 875,
+        "rent_range_high": 895,
         "escalated_from": 0.5,
         "escalated_to": 1.0,
         "thin_market": true
@@ -214,8 +220,11 @@
           "postcode": "NG11 9HD"
         },
         "tokens": 113,
-        "median_monthly_rent": null,
-        "rental_count": null,
+        "median_rent_monthly": 1150,
+        "average_rent_monthly": 1192,
+        "rental_listings_count": 15,
+        "rent_range_low": 1000,
+        "rent_range_high": 1681,
         "escalated_from": null,
         "escalated_to": null,
         "thin_market": false

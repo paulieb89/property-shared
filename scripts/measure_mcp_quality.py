@@ -166,8 +166,14 @@ async def measure_rental_analysis() -> dict:
             "case": label,
             "params": case,
             "tokens": _tok(body),
-            "median_monthly_rent": result.get("median_monthly_rent"),
-            "rental_count": result.get("rental_count"),
+            # NOTE: RentalAnalysis uses "median_rent_monthly" and "rental_listings_count".
+            # YieldAnalysis uses "median_monthly_rent" and "rental_count". Same concept,
+            # different names — historical drift between the two models.
+            "median_rent_monthly": result.get("median_rent_monthly"),
+            "average_rent_monthly": result.get("average_rent_monthly"),
+            "rental_listings_count": result.get("rental_listings_count"),
+            "rent_range_low": result.get("rent_range_low"),
+            "rent_range_high": result.get("rent_range_high"),
             "escalated_from": result.get("escalated_from"),
             "escalated_to": result.get("escalated_to"),
             "thin_market": result.get("thin_market"),
@@ -282,8 +288,10 @@ async def main() -> None:
         if "error" in case:
             print(f"  {case['case']}: ERROR {case['error']}")
             continue
-        print(f"  {case['case']:18s}  rent=£{case['median_monthly_rent'] or 0:,}  "
-              f"n={case['rental_count']}  escalated={case['escalated_from']}→{case['escalated_to']}  "
+        print(f"  {case['case']:18s}  median_rent=£{case['median_rent_monthly'] or 0:,}/mo  "
+              f"n={case['rental_listings_count']}  "
+              f"range=£{case['rent_range_low'] or 0:,}–£{case['rent_range_high'] or 0:,}  "
+              f"escalated={case['escalated_from']}→{case['escalated_to']}  "
               f"thin={case['thin_market']}")
     print()
 
