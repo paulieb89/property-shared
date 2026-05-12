@@ -603,43 +603,7 @@ def property_blocks(
 
 
 # ---------------------------------------------------------------------------
-# 7. Property report — multi-source aggregate for a specific address
-# ---------------------------------------------------------------------------
-
-
-async def fetch_property_report(address: str, postcode: str, months: int = 24) -> dict:
-    """Raw multi-source property report — returns dict. Used by the MCP tool and tests."""
-    from property_core.report_service import PropertyReportService
-
-    result = await PropertyReportService().generate_report(
-        address_query=f"{address}, {postcode}",
-        ppd_months=months,
-    )
-    return _slim(result.model_dump(mode="json", exclude_none=True))
-
-
-@mcp.tool(
-    annotations={"readOnlyHint": True, "openWorldHint": True},
-    tags={"report"},
-    timeout=120.0,
-)
-async def property_report(
-    address: Annotated[str, Field(description="Street address (e.g. '10 Downing Street')")],
-    postcode: Annotated[str, Field(description="UK postcode (e.g. 'SW1A 2AA')")],
-    months: Annotated[int, Field(description="Sale lookback months", ge=1, le=120)] = 24,
-) -> dict:
-    """Full property data pull for a specific address — comps + EPC + yield + market.
-
-    Combines Land Registry sale history, EPC certificate, comparable sales,
-    rental yield, and market context for one property. Requires a street
-    address and postcode (e.g. address='10 Downing Street', postcode='SW1A 2AA').
-    For postcode-only queries use property_comps and property_yield instead.
-    """
-    return await fetch_property_report(address=address, postcode=postcode, months=months)
-
-
-# ---------------------------------------------------------------------------
-# 8. PPD transactions — raw Land Registry transactions for a postcode
+# 7. PPD transactions — raw Land Registry transactions for a postcode
 # ---------------------------------------------------------------------------
 
 
