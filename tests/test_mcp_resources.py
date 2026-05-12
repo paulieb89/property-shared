@@ -48,3 +48,16 @@ async def test_individual_council_resource():
     text = result.contents[0].content
     data = json.loads(text)
     assert data.get("code") == code or data.get("slug") == code
+
+
+@pytest.mark.anyio
+async def test_sdlt_bands_resource():
+    from app.mcp.server import mcp
+
+    result = await mcp.read_resource("sdlt-bands://current")
+    text = result.contents[0].content
+    data = json.loads(text)
+    assert "main_bands" in data
+    assert "effective_from" in data
+    body = json.dumps(data)
+    assert "additional" in body.lower() or "surcharge" in body.lower()

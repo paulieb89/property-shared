@@ -342,6 +342,43 @@ def councils_list_resource() -> str:
     return json.dumps(councils, ensure_ascii=False, indent=2)
 
 
+@mcp.resource("sdlt-bands://current")
+def sdlt_bands_resource() -> str:
+    """Return the current UK Stamp Duty Land Tax band schedule as JSON.
+
+    Static reference data matching `property_core/stamp_duty.py` exactly. Lets
+    an LLM cite the bands directly without calling the stamp_duty calculator.
+    """
+    import json
+
+    data = {
+        "version": "April 2025",
+        "effective_from": "2025-04-01",
+        "currency": "GBP",
+        "main_bands": [
+            {"threshold_above": 0, "threshold_up_to": 125000, "rate_pct": 0},
+            {"threshold_above": 125000, "threshold_up_to": 250000, "rate_pct": 2},
+            {"threshold_above": 250000, "threshold_up_to": 925000, "rate_pct": 5},
+            {"threshold_above": 925000, "threshold_up_to": 1500000, "rate_pct": 10},
+            {"threshold_above": 1500000, "threshold_up_to": None, "rate_pct": 12},
+        ],
+        "first_time_buyer_bands": [
+            {"threshold_above": 0, "threshold_up_to": 300000, "rate_pct": 0},
+            {"threshold_above": 300000, "threshold_up_to": 500000, "rate_pct": 5},
+        ],
+        "first_time_buyer_max_eligible_price": 500000,
+        "additional_property_surcharge_pct": 5,
+        "non_resident_surcharge_pct": 2,
+        "source": "https://www.gov.uk/stamp-duty-land-tax/residential-property-rates",
+        "notes": [
+            "Additional-property surcharge rose from 3% to 5% in October 2024.",
+            "Non-resident surcharge applies to buyers not resident in the UK in the 12 months before purchase.",
+            "First-time buyer relief is only available when buying a single residence at £500k or under.",
+        ],
+    }
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
 @mcp.resource("council://{code}")
 def council_resource(code: str) -> str:
     """Return a single council's record as JSON, keyed by its code/slug.
