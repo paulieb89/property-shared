@@ -89,3 +89,28 @@ async def test_dev_utility_tools_removed_from_mcp_app():
     names = [t.name for t in tools]
     assert "component_test" not in names
     assert "image_test" not in names
+
+
+@pytest.mark.anyio
+async def test_area_comparison_prompt_registered():
+    from app.mcp.server import mcp
+
+    prompts = await mcp.list_prompts()
+    names = [p.name for p in prompts]
+    assert "area_comparison" in names
+
+
+@pytest.mark.anyio
+async def test_area_comparison_prompt_renders():
+    from app.mcp.server import mcp
+
+    result = await mcp.render_prompt(
+        "area_comparison",
+        {"postcodes": "NG1 2NS, DE12 7DH, NG11 9HD", "months": "24"},
+    )
+    rendered = "\n".join(str(m) for m in result.messages)
+    assert "NG1 2NS" in rendered
+    assert "DE12 7DH" in rendered
+    assert "NG11 9HD" in rendered
+    assert "property_yield" in rendered
+    assert "property_comps" in rendered

@@ -124,6 +124,35 @@ def council_resource(code: str) -> str:
 
 
 @mcp.prompt()
+def area_comparison(
+    postcodes: str,
+    months: str = "24",
+) -> str:
+    """Compare 2-3 UK postcodes side-by-side for area-level investment evaluation."""
+    parsed = [p.strip() for p in postcodes.split(",") if p.strip()]
+    if len(parsed) < 2 or len(parsed) > 3:
+        return f"Area comparison needs 2 or 3 postcodes — got {len(parsed)}: {parsed}. Ask the user to clarify."
+
+    pc_list = ", ".join(repr(p) for p in parsed)
+    return f"""Compare these UK postcodes for area-level investment characteristics: {pc_list}.
+
+For each postcode, run two tool calls in parallel where possible:
+- `search_comps(postcode=<pc>, months={months})` — area median sale price, transaction count, price range
+- `get_yield(postcode=<pc>, months={months})` — area gross rental yield
+
+After all calls return, produce a comparison table with columns:
+- Postcode
+- Area median sale price
+- Sale count over {months} months (market depth)
+- Median monthly rent
+- Area gross yield %
+- Yield assessment (strong ≥6%, average 4-6%, weak <4%)
+
+Then write 2-3 sentences identifying which postcode looks strongest for a typical buy-to-let investor and why — citing specific numbers from your tool calls.
+"""
+
+
+@mcp.prompt()
 def full_property_analysis(
     address: str,
     postcode: str,

@@ -428,6 +428,38 @@ def council_resource(code: str) -> str:
 
 
 @mcp.prompt()
+def area_comparison(
+    postcodes: str,
+    months: str = "24",
+) -> str:
+    """Compare 2-3 UK postcodes side-by-side for area-level investment evaluation.
+
+    Postcodes passed as a comma-separated string (e.g. "NG1 2NS, DE12 7DH").
+    """
+    parsed = [p.strip() for p in postcodes.split(",") if p.strip()]
+    if len(parsed) < 2 or len(parsed) > 3:
+        return f"Area comparison needs 2 or 3 postcodes — got {len(parsed)}: {parsed}. Ask the user to clarify."
+
+    pc_list = ", ".join(repr(p) for p in parsed)
+    return f"""Compare these UK postcodes for area-level investment characteristics: {pc_list}.
+
+For each postcode, run two tool calls in parallel where possible:
+- `property_comps(postcode=<pc>, months={months})` — area median sale price, transaction count, price range
+- `property_yield(postcode=<pc>, months={months})` — area gross rental yield (median sale + median rent)
+
+After all calls return, produce a comparison table with columns:
+- Postcode
+- Area median sale price
+- Sale count over {months} months (market depth)
+- Median monthly rent
+- Area gross yield %
+- Yield assessment (strong ≥6%, average 4-6%, weak <4%)
+
+Then write 2-3 sentences identifying which postcode looks strongest for a typical buy-to-let investor and why — citing specific numbers from your tool calls. Be honest about thin-market or escalated flags. If any postcode escalated to a wider search area (`escalated_from`/`escalated_to` fields), call that out — the comparison may be apples-to-oranges.
+"""
+
+
+@mcp.prompt()
 def full_property_analysis(
     address: str,
     postcode: str,
