@@ -326,6 +326,22 @@ def ppd_transactions(
     }
 
 
+@mcp.resource("councils://list")
+def councils_list_resource() -> str:
+    """Return the 99-council UK planning portal registry as JSON.
+
+    Static reference data sourced from property_core/planning_councils.json.
+    Lets callers read the full registry once instead of calling planning_search
+    for individual lookups.
+    """
+    import json
+    from importlib.resources import files
+
+    raw = json.loads(files("property_core").joinpath("planning_councils.json").read_text())
+    councils = raw.get("councils", raw)  # support either wrapped or bare list
+    return json.dumps(councils, ensure_ascii=False, indent=2)
+
+
 @mcp.prompt()
 def full_property_analysis(
     address: str,
