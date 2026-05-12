@@ -168,10 +168,49 @@ async def rental_analysis(
 
 @mcp.tool(annotations={"readOnlyHint": True})
 async def property_epc(postcode: str, address: str | None = None) -> dict | None:
-    """EPC energy certificate lookup by postcode (+ optional address filter)."""
+    """Energy Performance Certificate data for a UK property or postcode area.
+
+    With address: returns the matched EPC certificate for that specific property.
+    Without address: returns an aggregated summary of every certificate at the
+    postcode — count, rating distribution, property-type breakdown, floor-area
+    range — plus a hint to call again with an address for single-property detail.
+
+    Returns None if no certificates exist for the postcode at all.
+    """
+    from collections import Counter
+
     from property_core import EPCClient
-    result = await EPCClient().search_by_postcode(postcode=postcode, address=address)
-    return result.model_dump() if result else None
+
+    client = EPCClient()
+
+    if address:
+        result = await client.search_by_postcode(postcode, address=address)
+        if result is None:
+            return None
+        return _slim(result.model_dump(mode="json", exclude_none=True))
+
+    # Area mode — aggregate all certs at this postcode rather than returning
+    # an arbitrary first row.
+    certs = await client.search_all_by_postcode(postcode)
+    if not certs:
+        return None
+
+    ratings = Counter(c.rating for c in certs if c.rating)
+    types = Counter(c.property_type for c in certs if c.property_type)
+    areas = [c.floor_area for c in certs if c.floor_area]
+
+    return _slim({
+        "postcode": postcode,
+        "summary": {
+            "count": len(certs),
+            "rating_distribution": dict(sorted(ratings.items())),
+            "property_type_breakdown": dict(sorted(types.items())),
+            "floor_area_min": min(areas) if areas else None,
+            "floor_area_max": max(areas) if areas else None,
+            "floor_area_avg": round(sum(areas) / len(areas), 1) if areas else None,
+        },
+        "note": "Call property_epc again with a specific address for individual property details.",
+    })
 
 
 @mcp.tool(annotations={"readOnlyHint": True})

@@ -87,6 +87,7 @@ class YieldAnalysis(BaseModel):
     sale_count: int = 0
     median_monthly_rent: Optional[int] = None
     rental_count: int = 0
+    rental_search_radius_miles: Optional[float] = None
     gross_yield_pct: Optional[float] = None
     yield_assessment: Optional[str] = None  # "strong", "average", "weak"
     data_quality: Optional[str] = None
