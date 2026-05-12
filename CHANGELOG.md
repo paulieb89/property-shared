@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.11.0 (2026-05-12)
+
+### Breaking Changes
+- Removed `property_report` MCP tool from `property-shared.fly.dev/mcp` and from `propertydata.fly.dev/mcp`. Also removed `get_property_data` from `propertydata.fly.dev/mcp`. Both were multi-source composition tools that hid which input produced which output and were prone to data-quality bugs (e.g. the v1.10.x yield calc was silently dividing current rent by a historical sale price).
+- Replaced by a `full_property_analysis` MCP **prompt** on both servers. The prompt instructs the LLM to call the underlying primitive tools (`property_comps`/`search_comps`, `property_yield`/`get_yield`, `property_epc`/`epc_lookup`, `rightmove_search`) explicitly and synthesise. Every input is now visible in the LLM's working text.
+- REST `POST /v1/property/report` and CLI `property-cli report generate` are unchanged — they call `PropertyReportService` directly without going through MCP.
+- Downstream consumers (`uk-property-mcp`, `property-descriptions-mcp`): if they exposed `property_report` as a tool, that registration needs to be removed on their next release.
+
 ## v1.10.0 (2026-05-12)
 
 ### Breaking Changes
