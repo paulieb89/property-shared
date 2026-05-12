@@ -8,6 +8,15 @@
 - REST `POST /v1/property/report` and CLI `property-cli report generate` are unchanged — they call `PropertyReportService` directly without going through MCP.
 - Downstream consumers (`uk-property-mcp`, `property-descriptions-mcp`): if they exposed `property_report` as a tool, that registration needs to be removed on their next release.
 
+### Added — MCP Resources (non-breaking)
+- `councils://list` — full UK planning portal registry (99 councils) as a queryable resource. LLMs can read this once instead of repeatedly calling `planning_search` for individual lookups.
+- `council://{code}` — single-council profile by code/slug.
+- `sdlt-bands://current` — April 2025 UK Stamp Duty Land Tax band schedule, including additional-property + non-resident surcharges and first-time buyer relief. LLMs can cite the bands directly without forcing a `stamp_duty` calculator call.
+- `epc-ratings://reference` — A–G EPC band definitions, SAP score ranges, and regulatory context (April 2025 rental minimum of band C). Grounds LLM EPC explanations in canonical data rather than training-data recall.
+
+### Removed — dev utilities
+- `component_test` and `image_test` MCP tools removed from `propertydata.fly.dev/mcp`. These were internal dev artifacts that polluted the production tool selection surface.
+
 ## v1.10.0 (2026-05-12)
 
 ### Breaking Changes

@@ -61,3 +61,19 @@ async def test_sdlt_bands_resource():
     assert "effective_from" in data
     body = json.dumps(data)
     assert "additional" in body.lower() or "surcharge" in body.lower()
+
+
+@pytest.mark.anyio
+async def test_epc_ratings_resource():
+    from app.mcp.server import mcp
+
+    result = await mcp.read_resource("epc-ratings://reference")
+    text = result.contents[0].content
+    data = json.loads(text)
+    assert "ratings" in data
+    letters = {r["band"] for r in data["ratings"]}
+    assert letters == {"A", "B", "C", "D", "E", "F", "G"}
+    for rating in data["ratings"]:
+        assert "score_min" in rating
+        assert "score_max" in rating
+        assert "description" in rating

@@ -379,6 +379,35 @@ def sdlt_bands_resource() -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
+@mcp.resource("epc-ratings://reference")
+def epc_ratings_resource() -> str:
+    """Return EPC band definitions and score ranges as JSON.
+
+    Canonical reference for UK domestic Energy Performance Certificate bands
+    (A best, G worst), with SAP score ranges and one-line meanings. Grounds
+    LLM explanations of EPC results in published reference data rather than
+    training-data recall.
+    """
+    import json
+
+    data = {
+        "scale": "UK domestic SAP 2012",
+        "ratings": [
+            {"band": "A", "score_min": 92, "score_max": 100, "description": "Most efficient — very low running costs (near-zero or new-build standard)."},
+            {"band": "B", "score_min": 81, "score_max": 91, "description": "Highly efficient — modern home with good insulation and heating."},
+            {"band": "C", "score_min": 69, "score_max": 80, "description": "Above average — typical for recent builds or well-improved older homes. Required minimum for new rentals from April 2025."},
+            {"band": "D", "score_min": 55, "score_max": 68, "description": "Average — typical UK home as-built. Improvement potential usually high."},
+            {"band": "E", "score_min": 39, "score_max": 54, "description": "Below average — minimum legal standard for rental properties until April 2025."},
+            {"band": "F", "score_min": 21, "score_max": 38, "description": "Poor — running costs significantly above average, often single-glazed or uninsulated."},
+            {"band": "G", "score_min": 1, "score_max": 20, "description": "Very poor — typically pre-1900 stock with no insulation upgrades."},
+        ],
+        "methodology": "Scores are calculated via the Standard Assessment Procedure (SAP 2012). Each property gets a current rating and a potential rating after recommended improvements.",
+        "regulation_note": "Since April 2025, new tenancies in England and Wales require EPC band C or above. Existing tenancies must comply by 2028 (proposed).",
+        "source": "https://www.gov.uk/government/collections/energy-performance-certificates",
+    }
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
 @mcp.resource("council://{code}")
 def council_resource(code: str) -> str:
     """Return a single council's record as JSON, keyed by its code/slug.
