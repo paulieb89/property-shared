@@ -124,6 +124,47 @@ def council_resource(code: str) -> str:
 
 
 @mcp.prompt()
+def investment_analysis(
+    address: str,
+    postcode: str,
+    purchase_price: str,
+    additional_property: str = "true",
+    first_time_buyer: str = "false",
+    non_resident: str = "false",
+) -> str:
+    """Evaluate a UK property as a buy-to-let investment."""
+    try:
+        price_int = int(purchase_price)
+        price_fmt = f"£{price_int:,}"
+    except ValueError:
+        price_fmt = f"£{purchase_price}"
+
+    return f"""Evaluate {address}, {postcode} as a buy-to-let investment with a purchase price of {price_fmt}.
+
+Run these tool calls in order:
+
+1. `search_comps(postcode='{postcode}', address='{address}', months=24)` — establish area median for sanity-checking the asking price, plus subject property sale history.
+
+2. `get_yield(postcode='{postcode}', months=24)` — area gross yield.
+
+3. `epc_lookup(postcode='{postcode}', address='{address}')` — energy rating. From April 2025, England + Wales rentals must reach EPC C.
+
+4. `stamp_duty(price={purchase_price}, additional_property={additional_property}, first_time_buyer={first_time_buyer}, non_resident={non_resident})` — calculate SDLT.
+
+Then produce an investment summary (5–7 paragraphs):
+- **Position vs market**: how {price_fmt} compares to area median.
+- **Recent sale history**: years and prices, capital growth implied.
+- **Gross yield**: median monthly rent × 12 / {price_fmt} × 100. Classify (strong ≥6%, average 4–6%, weak <4%).
+- **Net yield rough estimate**: subtract 25-30% from gross for costs.
+- **EPC compliance**: rating + regulatory note + rough cost of upgrades if needed.
+- **Tax cost**: SDLT total and effective rate.
+- **Key risks**: 2–3 specifics.
+
+Cite specific numbers from each tool call. Describe, don't recommend.
+"""
+
+
+@mcp.prompt()
 def area_comparison(
     postcodes: str,
     months: str = "24",

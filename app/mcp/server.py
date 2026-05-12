@@ -428,6 +428,51 @@ def council_resource(code: str) -> str:
 
 
 @mcp.prompt()
+def investment_analysis(
+    address: str,
+    postcode: str,
+    purchase_price: str,
+    additional_property: str = "true",
+    first_time_buyer: str = "false",
+    non_resident: str = "false",
+) -> str:
+    """Evaluate a UK property as a buy-to-let investment.
+
+    Calls comps + yield + EPC + stamp duty, then synthesises a yield + tax + risk
+    summary. Defaults assume an investor (additional_property=true).
+    """
+    try:
+        price_int = int(purchase_price)
+        price_fmt = f"£{price_int:,}"
+    except ValueError:
+        price_fmt = f"£{purchase_price}"
+
+    return f"""Evaluate {address}, {postcode} as a buy-to-let investment with a purchase price of {price_fmt}.
+
+Run these tool calls in order:
+
+1. `property_comps(postcode='{postcode}', address='{address}', months=24)` — establish area median for sanity-checking the asking price, plus subject property sale history.
+
+2. `property_yield(postcode='{postcode}', months=24)` — area gross yield from median sale and median rent.
+
+3. `property_epc(postcode='{postcode}', address='{address}')` — energy rating. Note: from April 2025, England + Wales rentals must reach EPC C. A property rated D-G needs works before letting.
+
+4. `stamp_duty(price={purchase_price}, additional_property={additional_property}, first_time_buyer={first_time_buyer}, non_resident={non_resident})` — calculate SDLT on this purchase including any surcharges.
+
+Then produce an investment summary (5–7 short paragraphs):
+- **Position vs market**: how {price_fmt} compares to area median (over/under by what %).
+- **Recent sale history**: years and prices, capital growth implied (if multiple sales exist).
+- **Gross yield estimate**: median monthly rent × 12 / {price_fmt} × 100 for a property-specific yield against THIS purchase price. Classify it (strong ≥6%, average 4–6%, weak <4%).
+- **Net yield rough estimate**: subtract a conservative 25-30% from gross for management fees, maintenance, voids, insurance. Acknowledge this is a rule-of-thumb, not tax-adjusted.
+- **EPC compliance**: rating, regulatory note (April 2025 minimum is C), and rough cost of upgrades if needed.
+- **Tax cost**: SDLT total and effective rate from the stamp_duty call.
+- **Key risks**: 2–3 — thin local market (if sale_count is low), historical price decline, EPC works needed, etc.
+
+Cite specific numbers from each tool call. Describe, don't recommend.
+"""
+
+
+@mcp.prompt()
 def area_comparison(
     postcodes: str,
     months: str = "24",

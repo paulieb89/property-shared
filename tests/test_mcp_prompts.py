@@ -114,3 +114,33 @@ async def test_area_comparison_prompt_renders():
     assert "NG11 9HD" in rendered
     assert "property_yield" in rendered
     assert "property_comps" in rendered
+
+
+@pytest.mark.anyio
+async def test_investment_analysis_prompt_registered():
+    from app.mcp.server import mcp
+
+    prompts = await mcp.list_prompts()
+    names = [p.name for p in prompts]
+    assert "investment_analysis" in names
+
+
+@pytest.mark.anyio
+async def test_investment_analysis_prompt_renders():
+    from app.mcp.server import mcp
+
+    result = await mcp.render_prompt(
+        "investment_analysis",
+        {
+            "address": "10 Downing Street",
+            "postcode": "SW1A 2AA",
+            "purchase_price": "1500000",
+            "additional_property": "true",
+        },
+    )
+    rendered = "\n".join(str(m) for m in result.messages)
+    assert "10 Downing Street" in rendered
+    assert "SW1A 2AA" in rendered
+    assert "1,500,000" in rendered or "1500000" in rendered
+    assert "stamp_duty" in rendered
+    assert "property_yield" in rendered
