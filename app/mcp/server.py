@@ -158,12 +158,13 @@ async def rental_analysis(
     fields when escalation occurs.
     """
     from property_core import analyze_rentals
-    return (await analyze_rentals(
+    result = await analyze_rentals(
         postcode=postcode,
         radius=radius,
         purchase_price=purchase_price,
         auto_escalate=auto_escalate,
-    )).model_dump()
+    )
+    return _slim(result.model_dump(mode="json", exclude_none=True))
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
@@ -222,12 +223,13 @@ def stamp_duty(
 ) -> dict:
     """UK Stamp Duty Land Tax (SDLT) calculation with full breakdown."""
     from property_core import calculate_stamp_duty
-    return calculate_stamp_duty(
+    result = calculate_stamp_duty(
         price=price,
         additional_property=additional_property,
         first_time_buyer=first_time_buyer,
         non_resident=non_resident,
-    ).model_dump()
+    )
+    return _slim(result.model_dump(mode="json", exclude_none=True))
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
@@ -327,7 +329,7 @@ async def property_blocks(
             months=months,
         )
     )
-    return result.model_dump()
+    return _slim(result.model_dump(mode="json", exclude_none=True))
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
@@ -335,7 +337,9 @@ def company_search(name: str) -> dict:
     """Search Companies House for a company by name."""
     from property_core import CompaniesHouseClient
     result = CompaniesHouseClient().search(name)
-    return result.model_dump() if result else {"items": []}
+    if not result:
+        return {"items": []}
+    return _slim(result.model_dump(mode="json", exclude_none=True))
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
@@ -359,10 +363,10 @@ def ppd_transactions(
         limit=limit,
         property_type=property_type,
     )
-    return {
+    return _slim({
         **{k: v for k, v in result.items() if k != "results"},
-        "results": [t.model_dump() for t in result["results"]],
-    }
+        "results": [t.model_dump(mode="json", exclude_none=True) for t in result["results"]],
+    })
 
 
 @mcp.resource("councils://list")
