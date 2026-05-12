@@ -28,3 +28,14 @@ async def test_full_property_analysis_returns_string_with_tool_names():
     assert "rightmove_search" in rendered
     assert "SW1A 2AA" in rendered
     assert "10 Downing Street" in rendered
+
+
+@pytest.mark.anyio
+async def test_property_report_tool_removed_from_plain_mcp():
+    from app.mcp.server import mcp
+
+    tools = await mcp.list_tools()
+    names = [t.name for t in tools]
+    assert "property_report" not in names, (
+        "property_report should be removed; use full_property_analysis prompt instead"
+    )

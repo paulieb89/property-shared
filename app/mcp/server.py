@@ -36,14 +36,16 @@ mcp = FastMCP(
     "property-data",
     version=_pkg_version("property-shared"),
     instructions=(
-        "UK property data tools. Use property_report for a full data pull when you "
-        "have a street address + postcode. For postcode-only queries use property_comps "
-        "and property_yield separately. ppd_transactions for specific property history, "
-        "rightmove_search to browse listings by postcode, rightmove_listing for full "
-        "detail on one listing, property_epc for energy certificates, rental_analysis "
-        "for rental market figures, stamp_duty for SDLT, property_blocks for block-buy "
-        "analysis, planning_search for council planning portals, company_search to find "
-        "a company by name."
+        "UK property data tools. For a comprehensive single-property analysis, "
+        "invoke the `full_property_analysis` prompt — it instructs you to call "
+        "property_comps, property_yield, property_epc and rightmove_search and "
+        "synthesise. For postcode-only data fetches use property_comps and "
+        "property_yield separately. ppd_transactions for specific property history, "
+        "rightmove_search to browse listings by postcode, rightmove_listing for "
+        "full detail on one listing, property_epc for energy certificates, "
+        "rental_analysis for rental market figures, stamp_duty for SDLT, "
+        "property_blocks for block-buy analysis, planning_search for council "
+        "planning portals, company_search to find a company by name."
     ),
 )
 
@@ -295,25 +297,6 @@ def company_search(name: str) -> dict:
     from property_core import CompaniesHouseClient
     result = CompaniesHouseClient().search(name)
     return result.model_dump() if result else {"items": []}
-
-
-@mcp.tool(annotations={"readOnlyHint": True})
-async def property_report(
-    address: str,
-    postcode: str,
-    months: int = 24,
-) -> dict:
-    """Full property data pull — comps + EPC + yield + market in one call.
-
-    Requires both a street address and postcode, e.g. address='10 Downing Street',
-    postcode='SW1A 2AA'.
-    """
-    from property_core.report_service import PropertyReportService
-    result = await PropertyReportService().generate_report(
-        address_query=f"{address}, {postcode}",
-        ppd_months=months,
-    )
-    return result.model_dump()
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
