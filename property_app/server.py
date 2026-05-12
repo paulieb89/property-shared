@@ -44,6 +44,23 @@ def councils_list_resource() -> str:
     return json.dumps(councils, ensure_ascii=False, indent=2)
 
 
+@mcp.resource("council://{code}")
+def council_resource(code: str) -> str:
+    """Return a single council's record as JSON, keyed by its code/slug.
+
+    Raises ValueError if the code is unknown.
+    """
+    import json
+    from importlib.resources import files
+
+    raw = json.loads(files("property_core").joinpath("planning_councils.json").read_text())
+    councils = raw.get("councils", raw)
+    for c in councils:
+        if c.get("code") == code or c.get("slug") == code:
+            return json.dumps(c, ensure_ascii=False, indent=2)
+    raise ValueError(f"Unknown council code: {code}")
+
+
 @mcp.prompt()
 def full_property_analysis(
     address: str,
