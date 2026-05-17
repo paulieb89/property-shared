@@ -146,6 +146,18 @@
 
 ---
 
+### Observation 12
+**Date:** 2026-05-17
+**Session context:** Adding Prometheus tool-call metrics to `app/mcp/server.py` — the plain MCP server had no `tool_calls_total` counter despite the Grafana dashboard querying for it.
+**Skill:** add-mcp-tool / audit-server
+**Type:** Fleet pattern — sync+async mixed MCP server instrumentation
+**Issue:** Most fleet servers are fully async so a simple `async def _wrapped` decorator covers all tools. `property-shared`'s plain MCP server (`app/mcp/server.py`) has a mix: ~10 async tools and 3 sync tools (`stamp_duty`, `company_search`, `planning_search`). A decorator that always returns `async def _wrapped` would silently change sync tools to coroutines, which FastMCP may or may not handle correctly depending on version.
+**Suggested improvement:** When adding a `_timed_tool` decorator to any MCP server, check with `asyncio.iscoroutinefunction(fn)` and branch to separate `async def _wrapped` / `def _wrapped` paths. Use `functools.wraps` on both so FastMCP's signature introspection (which follows `__wrapped__`) still sees the original parameter schema. The govuk-mcp reference only has async tools so it doesn't model this case.
+**Principle:** MCP tool decorators must preserve both the sync/async nature and the function signature of the wrapped tool. Use `asyncio.iscoroutinefunction` + `functools.wraps` to handle mixed-mode servers safely.
+**Status:** OPEN
+
+---
+
 ### Observation 11
 **Date:** 2026-05-17
 **Session context:** Pre-push code review of 3 unpushed commits — false-positive bug report due to large diff misread

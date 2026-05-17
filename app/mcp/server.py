@@ -5,10 +5,11 @@ regardless of ext-apps / Prefab UI support.
 """
 from __future__ import annotations
 
+import asyncio
+import functools
+import time
 from importlib.metadata import version as _pkg_version
 from typing import Any
-
-import asyncio
 
 import httpx
 from fastmcp import FastMCP
@@ -16,6 +17,40 @@ from fastmcp.server.http import create_streamable_http_app
 from fastmcp.tools import ToolResult
 from fastmcp.utilities.types import Image
 from mcp.types import TextContent
+
+from app.core.metrics import TOOL_CALLS_TOTAL, TOOL_DURATION_SECONDS
+
+
+def _timed_tool(fn):
+    tool_name = fn.__name__
+    if asyncio.iscoroutinefunction(fn):
+        @functools.wraps(fn)
+        async def _wrapped(*args, **kwargs):
+            t0 = time.perf_counter()
+            try:
+                result = await fn(*args, **kwargs)
+                TOOL_CALLS_TOTAL.labels(tool=tool_name, status="ok").inc()
+                return result
+            except BaseException:
+                TOOL_CALLS_TOTAL.labels(tool=tool_name, status="error").inc()
+                raise
+            finally:
+                TOOL_DURATION_SECONDS.labels(tool=tool_name).observe(time.perf_counter() - t0)
+        return _wrapped
+    else:
+        @functools.wraps(fn)
+        def _wrapped(*args, **kwargs):
+            t0 = time.perf_counter()
+            try:
+                result = fn(*args, **kwargs)
+                TOOL_CALLS_TOTAL.labels(tool=tool_name, status="ok").inc()
+                return result
+            except BaseException:
+                TOOL_CALLS_TOTAL.labels(tool=tool_name, status="error").inc()
+                raise
+            finally:
+                TOOL_DURATION_SECONDS.labels(tool=tool_name).observe(time.perf_counter() - t0)
+        return _wrapped
 
 
 def _slim(obj: Any) -> Any:
@@ -62,6 +97,7 @@ async def _fetch_rightmove_image(url: str) -> bytes | None:
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
+@_timed_tool
 async def property_comps(
     postcode: str,
     months: int = 24,
@@ -107,6 +143,7 @@ async def property_comps(
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
+@_timed_tool
 async def property_yield(
     postcode: str,
     months: int = 24,
@@ -145,6 +182,7 @@ async def property_yield(
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
+@_timed_tool
 async def rental_analysis(
     postcode: str,
     radius: float = 0.5,
@@ -168,6 +206,7 @@ async def rental_analysis(
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
+@_timed_tool
 async def property_epc(postcode: str, address: str | None = None) -> dict | None:
     """Energy Performance Certificate data for a UK property or postcode area.
 
@@ -215,6 +254,7 @@ async def property_epc(postcode: str, address: str | None = None) -> dict | None
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
+@_timed_tool
 async def property_epc_search(postcode: str) -> list[dict] | None:
     """Browse all EPC certificates at a postcode — use when you have no house number.
 
@@ -253,6 +293,7 @@ async def property_epc_search(postcode: str) -> list[dict] | None:
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
+@_timed_tool
 async def epc_certificate(lmk_key: str) -> dict | None:
     """Fetch a single EPC certificate by its lmk_key (certificate hash).
 
@@ -274,6 +315,7 @@ async def epc_certificate(lmk_key: str) -> dict | None:
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
+@_timed_tool
 def stamp_duty(
     price: int,
     additional_property: bool = False,
@@ -292,6 +334,7 @@ def stamp_duty(
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
+@_timed_tool
 async def rightmove_search(
     postcode: str,
     listing_type: str = "sale",
@@ -328,6 +371,7 @@ async def rightmove_search(
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
+@_timed_tool
 async def rightmove_listing(
     property_url_or_id: str,
     include_images: bool = False,
@@ -373,6 +417,7 @@ async def rightmove_listing(
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
+@_timed_tool
 async def property_blocks(
     postcode: str,
     search_level: str = "sector",
@@ -392,6 +437,7 @@ async def property_blocks(
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
+@_timed_tool
 def company_search(name: str) -> dict:
     """Search Companies House for a company by name."""
     from property_core import CompaniesHouseClient
@@ -402,6 +448,7 @@ def company_search(name: str) -> dict:
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
+@_timed_tool
 def planning_search(postcode: str) -> dict:
     """Find the council planning portal URL for a postcode."""
     from property_core import PlanningService
@@ -409,6 +456,7 @@ def planning_search(postcode: str) -> dict:
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
+@_timed_tool
 def ppd_transactions(
     postcode: str,
     limit: int = 10,

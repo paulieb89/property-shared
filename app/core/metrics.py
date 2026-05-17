@@ -9,6 +9,19 @@ from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+TOOL_CALLS_TOTAL = Counter(
+    "property_shared_tool_calls_total",
+    "Count of MCP tool invocations for property-shared.",
+    labelnames=("tool", "status"),
+)
+
+TOOL_DURATION_SECONDS = Histogram(
+    "property_shared_tool_duration_seconds",
+    "MCP tool invocation latency in seconds for property-shared.",
+    labelnames=("tool",),
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0),
+)
+
 HTTP_REQUESTS_TOTAL = Counter(
     "property_shared_http_requests_total",
     "Total HTTP requests handled by property-shared.",
