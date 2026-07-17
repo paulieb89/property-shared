@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import logging
+import os
 import time
 from importlib.metadata import version as _pkg_version
 from typing import Any
@@ -14,11 +16,53 @@ from typing import Any
 import httpx
 from fastmcp import FastMCP
 from fastmcp.server.http import create_streamable_http_app
+from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.tools import ToolResult
 from fastmcp.utilities.types import Image
 from mcp.types import TextContent
 
-from app.core.metrics import TOOL_CALLS_TOTAL, TOOL_DURATION_SECONDS
+from app.core.metrics import (
+    CLIENT_CONNECTIONS_TOTAL,
+    TOOL_CALLS_TOTAL,
+    TOOL_DURATION_SECONDS,
+)
+
+TRANSPORT = os.getenv("FASTMCP_TRANSPORT", "http")
+REGION = os.getenv("FLY_REGION", "local")
+
+_client_log = logging.getLogger("fastmcp.property_shared.clients")
+
+
+class ClientTrackingMiddleware(Middleware):
+    """Log clientInfo and increment connection counter on every initialize.
+
+    This server is open and unauthenticated, so the initialize handshake's clientInfo
+    is the ONLY identity a caller offers. It matters here more than most: uk-business-mcp
+    ("Ledgerhall") proxies this server as `prop_*`, and a fleet sweep on 2026-07-17 found
+    real third-party consumers (agent-tools.cloud, codex-mcp-client, ai-sdk-mcp-client)
+    invisible on every server missing this counter.
+
+    Counts handshakes, not tool calls: a client label on TOOL_CALLS_TOTAL would multiply
+    cardinality by every client ever seen. Note stateless_http=True below, so each
+    request is its own session sending its own initialize — connection counts, not user
+    counts.
+
+    Ported from uk-legal-mcp/src/gateway.py.
+    """
+
+    async def on_request(self, context: MiddlewareContext, call_next):
+        result = await call_next(context)
+        if context.method == "initialize":
+            params = context.message.params
+            info = getattr(params, "clientInfo", None)
+            client_name = getattr(info, "name", "unknown") or "unknown"
+            client_version = getattr(info, "version", "unknown") or "unknown"
+            _client_log.info(
+                "client_connected client=%s version=%s transport=%s region=%s",
+                client_name, client_version, TRANSPORT, REGION)
+            CLIENT_CONNECTIONS_TOTAL.labels(
+                client_name, client_version, TRANSPORT, REGION).inc()
+        return result
 
 
 def _timed_tool(fn):
@@ -696,6 +740,10 @@ Then synthesise (3–5 short paragraphs):
 **Critical**: never quote a yield that divides current rent by an old sale price. Always cite which numbers came from which tool call.
 """
 
+
+# Must be registered BEFORE create_streamable_http_app below — that call builds the
+# served ASGI app, and middleware added afterwards would never reach a request.
+mcp.add_middleware(ClientTrackingMiddleware())
 
 _http_app = create_streamable_http_app(
     mcp,

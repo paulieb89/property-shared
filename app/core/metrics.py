@@ -22,6 +22,17 @@ TOOL_DURATION_SECONDS = Histogram(
     buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0),
 )
 
+# Deliberately carries transport/region even though nothing else here does: this
+# metric's whole purpose is fleet-wide aggregation, and the identical counter now
+# exists on uk-legal, uk-due-diligence, govuk, uk-property and whatdotheyknow. One
+# shape across every server is what lets a single sweep of the public /metrics
+# endpoints answer "who calls the fleet?".
+CLIENT_CONNECTIONS_TOTAL = Counter(
+    "property_shared_client_connections_total",
+    "Count of MCP client initialize handshakes for property-shared.",
+    labelnames=("client_name", "client_version", "transport", "region"),
+)
+
 HTTP_REQUESTS_TOTAL = Counter(
     "property_shared_http_requests_total",
     "Total HTTP requests handled by property-shared.",
