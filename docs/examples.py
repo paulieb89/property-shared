@@ -599,7 +599,7 @@ def example_api():
         curl "http://localhost:8000/api/v1/rightmove/search-url?postcode=NG1+1GF&property_type=sale&radius=0.5"
 
     Rightmove Listings:
-        curl "http://localhost:8000/api/v1/rightmove/listings?search_url=https://www.rightmove.co.uk/property-for-sale/find.html?locationIdentifier=POSTCODE%255E1694339&radius=0.5"
+        curl "http://localhost:8000/api/v1/rightmove/listings?postcode=NG1+1GF&property_type=sale&radius=0.5&max_pages=1"
 
     EPC Search:
         curl "http://localhost:8000/api/v1/epc/search?q=10+Downing+Street,+SW1A+2AA"

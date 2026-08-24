@@ -98,24 +98,24 @@ def test_property_epc_search_filters_to_keep_fields_only():
 
 
 # ---------------------------------------------------------------------------
-# get_epc_certificate
+# epc_certificate
 # ---------------------------------------------------------------------------
 
 
-def test_get_epc_certificate_returns_none_when_not_found():
-    """get_epc_certificate returns None when the lmk_key is not recognised."""
-    from app.mcp.server import get_epc_certificate
+def test_epc_certificate_returns_none_when_not_found():
+    """epc_certificate returns None when the lmk_key is not recognised."""
+    from app.mcp.server import epc_certificate
 
     with patch("property_core.EPCClient") as mock_cls:
         mock_cls.return_value.get_certificate = AsyncMock(return_value=None)
-        result = asyncio.run(get_epc_certificate("nonexistent-key"))
+        result = asyncio.run(epc_certificate("nonexistent-key"))
         assert result is None
         mock_cls.return_value.get_certificate.assert_awaited_once_with("nonexistent-key")
 
 
-def test_get_epc_certificate_returns_full_slim_cert():
-    """get_epc_certificate returns a slimmed full cert dict with raw stripped."""
-    from app.mcp.server import get_epc_certificate
+def test_epc_certificate_returns_full_slim_cert():
+    """epc_certificate returns a slimmed full cert dict with raw stripped."""
+    from app.mcp.server import epc_certificate
 
     mock_epc = MagicMock()
     mock_epc.model_dump.return_value = {
@@ -129,7 +129,7 @@ def test_get_epc_certificate_returns_full_slim_cert():
 
     with patch("property_core.EPCClient") as mock_cls:
         mock_cls.return_value.get_certificate = AsyncMock(return_value=mock_epc)
-        result = asyncio.run(get_epc_certificate("abc123"))
+        result = asyncio.run(epc_certificate("abc123"))
 
     assert isinstance(result, dict)
     assert result["lmk_key"] == "abc123"

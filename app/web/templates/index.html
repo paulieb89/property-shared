@@ -81,10 +81,19 @@
       <button type="submit">Get search URL</button>
       <pre></pre>
     </form>
-    <p>Step 2: fetch listings for a search URL.</p>
+    <p>Step 2: fetch listings for a postcode (the search URL is built server-side).</p>
     <form onsubmit="event.preventDefault(); callApi(this, '/v1/rightmove/listings')">
-      <label>Search URL
-        <input name="search_url" placeholder="paste search URL from step 1" required>
+      <label>Postcode
+        <input name="postcode" placeholder="e.g. SW1A 1AA" required>
+      </label>
+      <label>Type
+        <select name="property_type">
+          <option value="sale">sale</option>
+          <option value="rent">rent</option>
+        </select>
+      </label>
+      <label>Radius (miles)
+        <input name="radius" type="number" step="0.25" value="0.25">
       </label>
       <label>Max pages
         <input name="max_pages" type="number" value="1">

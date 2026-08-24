@@ -542,17 +542,42 @@ def rightmove_search_url(
 
 @rightmove.command("listings")
 def rightmove_listings(
-    search_url: str = typer.Argument(...),
+    postcode: list[str] = typer.Argument(..., help="Postcode or outcode, e.g. 'NG1 1AA'"),
+    property_type: str = typer.Option("sale", help="sale or rent"),
+    building_type: Optional[str] = typer.Option(None, help="F=flat, D=detached, S=semi, T=terraced"),
+    min_price: Optional[int] = typer.Option(None, help="Minimum price"),
+    max_price: Optional[int] = typer.Option(None, help="Maximum price"),
+    min_bedrooms: Optional[int] = typer.Option(None, help="Minimum bedrooms"),
+    max_bedrooms: Optional[int] = typer.Option(None, help="Maximum bedrooms"),
+    radius: Optional[float] = typer.Option(None, help="Search radius in miles"),
+    sort_by: Optional[str] = typer.Option(
+        None, help="newest|oldest|price_low|price_high|most_reduced"
+    ),
     max_pages: Optional[int] = typer.Option(1),
     rate_limit_seconds: float = typer.Option(0.6, help="Delay between pages"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
+    """Fetch Rightmove listings for a postcode.
+
+    The search URL is built from these filters. Raw search URLs are no longer
+    accepted (they were fetched server-side, an SSRF vector).
+    """
+    postcode_value = _join_tokens(postcode)
+    filters = {
+        "property_type": property_type,
+        "building_type": building_type,
+        "min_price": min_price,
+        "max_price": max_price,
+        "min_bedrooms": min_bedrooms,
+        "max_bedrooms": max_bedrooms,
+        "radius": radius,
+        "sort_by": sort_by,
+    }
     http = _maybe_http_client(api_url)
     if http:
-        data = http.get(
-            "/v1/rightmove/listings",
-            params={"search_url": search_url, "max_pages": max_pages},
-        )
+        params = {"postcode": postcode_value, "max_pages": max_pages}
+        params.update({k: v for k, v in filters.items() if v is not None})
+        data = http.get("/v1/rightmove/listings", params=params)
         listings = [
             typer.SimpleNamespace(
                 price=item.get("price"),
@@ -562,6 +587,10 @@ def rightmove_listings(
             for item in data.get("results", [])
         ]
     else:
+        search_url = RightmoveLocationAPI().build_search_url(
+            postcode_value,
+            **{k: v for k, v in filters.items() if v is not None},
+        )
         listings = fetch_listings(
             search_url,
             max_pages=max_pages,
@@ -584,26 +613,41 @@ def rightmove_listings(
 
 @rightmove.command("listing")
 def rightmove_listing(
-    url_or_id: str = typer.Argument(..., help="Rightmove property URL or numeric ID"),
+    property_id: str = typer.Argument(..., help="Numeric Rightmove property ID (max 12 digits)"),
     include_raw: bool = typer.Option(False, "--include-raw", help="Include raw PAGE_MODEL data"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
-    """Fetch full details for an individual Rightmove listing."""
+    """Fetch full details for an individual Rightmove listing.
+
+    Takes the numeric property ID only — full URLs are not accepted.
+    """
     http = _maybe_http_client(api_url)
     if http:
-        # Extract property ID from URL if needed
-        prop_id = url_or_id.strip().rstrip("/").split("/")[-1] if "/" in url_or_id else url_or_id
         data = http.get(
-            f"/v1/rightmove/listing/{prop_id}",
+            f"/v1/rightmove/listing/{property_id}",
             params={"include_raw": include_raw},
         )
         detail = data.get("result", {})
     else:
-        result = fetch_listing(url_or_id, include_raw=include_raw)
+        # CLI surface is numeric-ID-only, matching the REST and MCP contracts.
+        import re as _re
+
+        if not _re.fullmatch(r"[0-9]{1,12}", property_id.strip()):
+            typer.echo(
+                f"property_id must be a numeric Rightmove property ID (1-12 digits), got {property_id!r}"
+            )
+            raise typer.Exit(code=1)
+        try:
+            result = fetch_listing(property_id.strip())
+        except ValueError as exc:
+            typer.echo(str(exc))
+            raise typer.Exit(code=1) from exc
         detail = result.model_dump()
+        if not include_raw:
+            detail.pop("raw", None)
 
     # Display structured output
-    table = Table(title=f"Listing: {detail.get('address', url_or_id)}")
+    table = Table(title=f"Listing: {detail.get('address', property_id)}")
     table.add_column("Field", style="bold")
     table.add_column("Value")
 

@@ -38,12 +38,13 @@ uv run --extra cli property-cli analysis rental "NG1 1AA"
 # CLI targeting running API (add --api-url)
 uv run --extra cli property-cli ppd comps "SW1A 1AA" --api-url http://localhost:8000
 
-# Tests
-uv run --extra dev --extra apps pytest                        # unit tests (mocked)
-RUN_LIVE_TESTS=1 uv run --extra dev --extra apps pytest       # live network tests
+# Tests — all four extras are required: `api` provides fastapi (test_http_metrics,
+# test_mcp_server), `apps` provides fastmcp[apps], `cli` provides typer.
+uv run --extra dev --extra api --extra apps --extra cli pytest                  # unit tests (mocked)
+RUN_LIVE_TESTS=1 uv run --extra dev --extra api --extra apps --extra cli pytest # live network tests
 
 # Single test
-uv run --extra dev --extra apps pytest tests/test_ppd_service_live.py -v
+uv run --extra dev --extra api --extra apps --extra cli pytest tests/test_ppd_service_live.py -v
 ```
 
 ## Fly.io Deployment — Two Apps, One Repo

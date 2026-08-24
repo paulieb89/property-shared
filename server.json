@@ -3,7 +3,7 @@
   "name": "io.github.paulieb89/property-shared",
   "title": "UK Property Data",
   "description": "UK property data — Land Registry comps, EPC, Rightmove, rental yields, stamp duty, Companies House",
-  "version": "1.7.3",
+  "version": "1.13.0",
   "websiteUrl": "https://bouch.dev/products/property-report",
   "repository": {
     "url": "https://github.com/paulieb89/property-shared",
@@ -16,7 +16,7 @@
     {
       "registryType": "pypi",
       "identifier": "property-shared",
-      "version": "1.7.3",
+      "version": "1.13.0",
       "runtimeHint": "uvx",
       "transport": { "type": "stdio" }
     }

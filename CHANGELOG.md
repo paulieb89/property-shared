@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.13.0 (2026-08-24) — security hotfix
+
+### Security
+- **Server-Side Request Forgery (SSRF) in the Rightmove fetch paths — fixed.** `fetch_listing()` passed any string beginning with `http` straight to the HTTP client with no host or scheme validation, and `fetch_listings()` accepted an arbitrary search URL. Both were reachable from unauthenticated surfaces (the `rightmove_listing` MCP tool, `GET /v1/rightmove/listings`, and `GET /v1/rightmove/listing/{id}`), giving an unauthenticated caller a server-side fetch primitive against internal addresses (verified against cloud-metadata, localhost, and userinfo-trick targets). URLs are now validated against an exact host allowlist (`property_core/url_safety.py`): https only, no userinfo, default port only, no suffix or substring host matching. Redirects are resolved and re-validated per hop instead of being followed automatically, and responses are size-capped.
+- **`/img` proxy host check bypass (MCP app) — fixed.** The proxy validated with `url.startswith("https://media.rightmove.co.uk")`, which lookalike hosts (`…co.uk.evil.example`) and userinfo tricks (`…co.uk@evil.example`) both defeat. It now validates with httpx's own URL parser — the same parser that issues the request, so the two cannot disagree about the host — and follows redirects manually with per-hop re-validation. The response is streamed with a running byte cap (a buffered `get()` materialises the whole body before any size check, so the cap would not have protected the 512MB VM), non-image `Content-Type`s are refused rather than echoed back on our own origin, and `X-Content-Type-Options: nosniff` is set.
+
+### Breaking Changes
+- **REST** — `GET /v1/rightmove/listings` no longer accepts `search_url`. It now takes the same structured filters as `/v1/rightmove/search-url` (`postcode`, `property_type`, `building_type`, `min_price`, `max_price`, `min_bedrooms`, `max_bedrooms`, `radius`, `sort_by`) and builds the Rightmove URL server-side. `postcode` is required.
+- **REST** — `GET /v1/rightmove/listing/{property_id}` now constrains `property_id` to 1–12 digits at the routing layer; non-numeric values return 422 instead of being fetched.
+- **MCP** — the `rightmove_listing` tool parameter is renamed `property_url_or_id` → `property_id` and accepts the numeric Rightmove ID only.
+- **CLI** — `property-cli rightmove listings` now takes a postcode plus filters instead of a raw search URL (e.g. `property-cli rightmove listings "SW1A 1AA" --property-type sale --radius 0.25`). `property-cli rightmove listing` takes the numeric ID only.
+- **Library (source-compatible)** — `fetch_listing()` still accepts both a numeric ID **and** a canonical Rightmove listing URL (`https://www.rightmove.co.uk/properties/<id>`), and keeps its original parameter name `property_url_or_id`, so both positional and keyword callers (`fetch_listing(property_url_or_id=...)`) are unaffected. The difference is that a URL is now used *only* to extract the numeric ID: it is host/scheme-validated, the ID is parsed out, and the fetched URL is rebuilt internally — the caller's URL is never requested. Anything else (another host, a userinfo or lookalike-host trick, a non-listing path such as `/redirect?to=…`, a non-https scheme or non-default port) raises `ValueError`/`UnsafeURLError` before any request. New helper `extract_property_id()` is exported for callers that want to normalise a reference themselves.
+- **Library** — `fetch_listings(search_url)` still takes a URL but validates it against the Rightmove host allowlist, raising `UnsafeURLError`. Build search URLs with `RightmoveLocationAPI.build_search_url()`.
+
+**Upgrade note for downstream servers** (`property-descriptions-mcp`, `uk-property-mcp`): no code change is required to keep working on this release — a Rightmove listing URL passed to `fetch_listing()` is still accepted. Only non-Rightmove or non-listing URLs, which previously would have been fetched server-side, now raise.
+
+### Fixed
+- `property-cli rightmove listing` passed `include_raw=` to `fetch_listing()`, which has never accepted that parameter — the core-mode branch raised `TypeError` on every invocation. `--include-raw` now works as documented.
+- `tests/test_mcp_server_epc.py` still imported `get_epc_certificate`, renamed to `epc_certificate` in v1.12.0 — two tests had been failing since that rename.
+- **Incorrect EPC/MEES regulatory guidance.** Both MCP servers stated, in the `epc-ratings://reference` resource *and* in the `investment_analysis` prompt, that EPC band C has been required for new tenancies since April 2025 and that existing tenancies must comply by 2028. Verified against gov.uk: the current legal minimum for privately rented domestic property in England and Wales is band **E** (since 1 April 2020, subject to exemptions), and the proposed band C standard has a single compliance date of **1 October 2030** for all tenancies — an earlier date for new tenancies was explicitly ruled out, and the standard is not yet in force. Because this text reached users through a resource and a prompt, it could distort an analysis with no tool call involved.
+- `PPDService.search_transactions(record_status=...)` / `PricePaidDataClient.sparql_search(record_status=...)` raised `AttributeError` on the first returned row. SPARQL search returns `PPDTransaction`, which has no `record_status` field — that field belongs to `PPDTransactionRecord`, built only by the Linked Data `get_transaction_record()` lookup. The parameter now raises `UnsupportedRecordStatusFilterError` (a `ValueError`) immediately, before any query is issued, pointing callers at `transaction_record()`. `GET /v1/ppd/transactions?record_status=...` returns 422 instead of a misleading 502. Real SPARQL-level record-status filtering is deliberately deferred until the triple shape is verified against the live Land Registry ontology.
+
+### Developer Experience
+- `pyproject.toml` now sets `testpaths = ["tests"]`, and `scripts/epc_token_test.py` is renamed to `scripts/measure_epc_tokens.py`. Pytest's default `*_test.py` glob was matching that script, so a bare `pytest` from the repo root would import and execute a live-network measurement script during collection.
+- Documented test commands in `CLAUDE.md` and `GUIDELINES.md` were missing `--extra api`, so they could not collect `test_http_metrics.py` or `test_mcp_server.py`. All four extras (`dev`, `api`, `apps`, `cli`) are now documented.
+
 ## v1.12.0 (2026-05-17)
 
 ### Added
@@ -24,7 +50,7 @@
 - `councils://list` — full UK planning portal registry (99 councils) as a queryable resource. LLMs can read this once instead of repeatedly calling `planning_search` for individual lookups.
 - `council://{code}` — single-council profile by code/slug.
 - `sdlt-bands://current` — April 2025 UK Stamp Duty Land Tax band schedule, including additional-property + non-resident surcharges and first-time buyer relief. LLMs can cite the bands directly without forcing a `stamp_duty` calculator call.
-- `epc-ratings://reference` — A–G EPC band definitions, SAP score ranges, and regulatory context (April 2025 rental minimum of band C). Grounds LLM EPC explanations in canonical data rather than training-data recall.
+- `epc-ratings://reference` — A–G EPC band definitions, SAP score ranges, and regulatory context (April 2025 rental minimum of band C). Grounds LLM EPC explanations in canonical data rather than training-data recall. **⚠️ Correction: the regulatory claim shipped in this release was wrong — the current minimum is band E, and band C is proposed for 1 October 2030. Fixed in v1.13.0 above; this line is left as-published for history.**
 
 ### Removed — dev utilities
 - `component_test` and `image_test` MCP tools removed from `propertydata.fly.dev/mcp`. These were internal dev artifacts that polluted the production tool selection surface.

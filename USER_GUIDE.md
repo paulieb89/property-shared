@@ -68,12 +68,13 @@ property-cli rightmove search-url "SW1A 1AA" --property-type sale --radius 0.25
 # Build a search URL for rentals
 property-cli rightmove search-url "SW1A 1AA" --property-type rent --radius 0.25
 
-# Fetch listings from a search URL
-property-cli rightmove listings "<search_url>" --max-pages 1
+# Fetch listings for a postcode (the search URL is built for you)
+property-cli rightmove listings "SW1A 1AA" --property-type sale --radius 0.25 --max-pages 1
 
 # Fetch full details for a single listing (tenure, service charge, ground rent, etc.)
+# Takes the numeric property ID only — full URLs are not accepted.
 property-cli rightmove listing 161151632
-property-cli rightmove listing "https://www.rightmove.co.uk/properties/161151632" --include-raw
+property-cli rightmove listing 161151632 --include-raw
 ```
 
 **All listings** include: `listing_status` (e.g., "SOLD_STC", "UNDER_OFFER"), `tags` (all status tags as list), `latitude`/`longitude` (direct access).
@@ -208,8 +209,8 @@ Results include `locality` and `district` fields from the Land Registry address 
 ### Rightmove
 - `GET /v1/rightmove/search-url?postcode=SW1A%201AA&property_type=sale&radius=0.25` — Sales
 - `GET /v1/rightmove/search-url?postcode=SW1A%201AA&property_type=rent&radius=0.25` — Rentals
-- `GET /v1/rightmove/listings?search_url=<url>&max_pages=1`
-- `GET /v1/rightmove/listing/{property_id}` — Full listing detail (tenure, costs, floorplans)
+- `GET /v1/rightmove/listings?postcode=SW1A%201AA&property_type=sale&radius=0.25&max_pages=1` — takes the same filters as `search-url`; the Rightmove URL is built server-side
+- `GET /v1/rightmove/listing/{property_id}` — Full listing detail (tenure, costs, floorplans). `property_id` must be the numeric Rightmove ID.
 
 All listing results include `raw` with the full `__NEXT_DATA__` property object.
 Listing detail results include `raw` with the full `PAGE_MODEL.propertyData` dict.
