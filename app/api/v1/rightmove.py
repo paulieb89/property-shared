@@ -6,7 +6,7 @@ from functools import partial
 from typing import Literal, Optional
 
 import anyio
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 
 from app.schemas.rightmove import (
     RightmoveListingDetailResponse,
@@ -54,12 +54,39 @@ async def search_url(
 
 @router.get("/listings", response_model=RightmoveListingsResponse)
 async def listings(
-    search_url: str = Query(..., min_length=10),
+    postcode: str = Query(..., min_length=2),
+    property_type: Literal["sale", "rent"] = "sale",
+    building_type: Optional[str] = Query(None, description="F=flat, D=detached, S=semi, T=terraced"),
+    min_price: Optional[int] = Query(None, ge=0),
+    max_price: Optional[int] = Query(None, ge=0),
+    min_bedrooms: Optional[int] = Query(None, ge=0),
+    max_bedrooms: Optional[int] = Query(None, ge=0),
+    radius: Optional[float] = Query(None, ge=0),
+    sort_by: Optional[str] = Query(None, description="newest|oldest|price_low|price_high|most_reduced"),
     max_pages: Optional[int] = Query(None, ge=1, le=20),
     include_raw: bool = Query(False, description="Ignored (raw is always included in v2)"),
 ) -> RightmoveListingsResponse:
-    """Fetch listing results from a Rightmove search URL."""
+    """Fetch listing results for a postcode.
+
+    Takes the same structured filters as ``/search-url`` and builds the Rightmove
+    URL server-side. This endpoint previously accepted an arbitrary ``search_url``
+    and fetched it, which was an SSRF vector; raw URLs are no longer accepted.
+    """
     try:
+        search_url = await anyio.to_thread.run_sync(
+            partial(
+                RightmoveLocationAPI().build_search_url,
+                postcode,
+                property_type=property_type,
+                building_type=building_type,
+                min_price=min_price,
+                max_price=max_price,
+                min_bedrooms=min_bedrooms,
+                max_bedrooms=max_bedrooms,
+                radius=radius,
+                sort_by=sort_by,
+            )
+        )
         results = await anyio.to_thread.run_sync(
             partial(fetch_listings, search_url, max_pages=max_pages)
         )
@@ -70,14 +97,24 @@ async def listings(
 
 @router.get("/listing/{property_id}", response_model=RightmoveListingDetailResponse)
 async def listing_detail(
-    property_id: str,
+    property_id: str = Path(
+        ..., pattern=r"^[0-9]{1,12}$", description="Numeric Rightmove property ID"
+    ),
     include_raw: bool = Query(False, description="Ignored (raw is always included in v2)"),
 ) -> RightmoveListingDetailResponse:
-    """Fetch full details for an individual Rightmove property listing."""
+    """Fetch full details for an individual Rightmove property listing.
+
+    ``property_id`` must be the numeric Rightmove ID. Full URLs are rejected at
+    the routing layer (422) — they were previously fetched server-side.
+    """
     try:
         result = await anyio.to_thread.run_sync(
             partial(fetch_listing, property_id)
         )
         return RightmoveListingDetailResponse(result=result)
+    # No `except ValueError -> 422` here: the Path regex above is the only ID
+    # gate needed, and pydantic's ValidationError subclasses ValueError, so
+    # catching it would report an upstream page-shape change as caller error
+    # (and leak internal field names) instead of paging on a 502.
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Rightmove listing detail failed: {exc}") from exc

@@ -93,14 +93,14 @@ def epc_ratings_resource() -> str:
         "ratings": [
             {"band": "A", "score_min": 92, "score_max": 100, "description": "Most efficient — very low running costs (near-zero or new-build standard)."},
             {"band": "B", "score_min": 81, "score_max": 91, "description": "Highly efficient — modern home with good insulation and heating."},
-            {"band": "C", "score_min": 69, "score_max": 80, "description": "Above average — typical for recent builds or well-improved older homes. Required minimum for new rentals from April 2025."},
+            {"band": "C", "score_min": 69, "score_max": 80, "description": "Above average — typical for recent builds or well-improved older homes. Proposed future minimum for rented homes (band C by 1 October 2030); not yet in force."},
             {"band": "D", "score_min": 55, "score_max": 68, "description": "Average — typical UK home as-built. Improvement potential usually high."},
-            {"band": "E", "score_min": 39, "score_max": 54, "description": "Below average — minimum legal standard for rental properties until April 2025."},
+            {"band": "E", "score_min": 39, "score_max": 54, "description": "Below average — the current legal minimum standard for rented homes in England and Wales (since 1 April 2020), subject to exemptions."},
             {"band": "F", "score_min": 21, "score_max": 38, "description": "Poor — running costs significantly above average, often single-glazed or uninsulated."},
             {"band": "G", "score_min": 1, "score_max": 20, "description": "Very poor — typically pre-1900 stock with no insulation upgrades."},
         ],
         "methodology": "Scores are calculated via the Standard Assessment Procedure (SAP 2012). Each property gets a current rating and a potential rating after recommended improvements.",
-        "regulation_note": "Since April 2025, new tenancies in England and Wales require EPC band C or above. Existing tenancies must comply by 2028 (proposed).",
+        "regulation_note": "The current legal minimum for privately rented domestic property in England and Wales is EPC band E (since 1 April 2020), subject to registered exemptions. The government has proposed raising this to band C, with a single compliance date of 1 October 2030 applying to all tenancies — an earlier date for new tenancies was explicitly ruled out. The band C standard is not yet in force.",
         "source": "https://www.gov.uk/government/collections/energy-performance-certificates",
     }
     return json.dumps(data, ensure_ascii=False, indent=2)
@@ -147,7 +147,7 @@ Run these tool calls in order:
 
 2. `get_yield(postcode='{postcode}', months=24)` — area gross yield.
 
-3. `epc_lookup(postcode='{postcode}', address='{address}')` — energy rating. From April 2025, England + Wales rentals must reach EPC C.
+3. `epc_lookup(postcode='{postcode}', address='{address}')` — energy rating. The current legal minimum for England + Wales rentals is EPC band E; a band C minimum is proposed for 1 October 2030 but is not yet in force.
 
 4. `stamp_duty(price={purchase_price}, additional_property={additional_property}, first_time_buyer={first_time_buyer}, non_resident={non_resident})` — calculate SDLT.
 
@@ -260,24 +260,117 @@ async def smithery_server_card(request):
     return JSONResponse({"serverInfo": {"name": "property-app", "version": _pkg_version("property-shared")}})
 
 
+_IMG_ALLOWED_HOSTS = frozenset({"media.rightmove.co.uk"})
+_IMG_MAX_BYTES = 10 * 1024 * 1024
+_IMG_MAX_REDIRECTS = 5
+_IMG_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+# NB: a raw space is NOT disallowed here. Starlette decodes "+" in a query
+# string to " ", and Rightmove media paths legitimately contain "+", so
+# rejecting spaces would silently break image fetching. Host confusion is
+# already prevented by parsing with httpx below; backslashes and control
+# characters remain rejected.
+_IMG_DISALLOWED_CHARS = frozenset("\\\t\n\r\x00\x7f")
+_IMG_ALLOWED_CONTENT_TYPES = ("image/",)
+
+
+def _validated_img_url(raw: str):
+    """Validate an image URL using httpx's own parser and return an httpx.URL.
+
+    Deliberately does NOT use urllib.parse: this request is issued by httpx, so
+    validating with a different parser could let the two disagree about the host
+    (the exact bypass class this check exists to prevent). Returns None if unsafe.
+    """
+    import httpx
+
+    if not raw or _IMG_DISALLOWED_CHARS & set(raw):
+        return None
+    try:
+        url = httpx.URL(raw)
+    except httpx.InvalidURL:
+        return None
+    if url.scheme != "https":
+        return None
+    if url.userinfo:
+        return None
+    if url.port not in (None, 443):
+        return None
+    if (url.host or "").lower() not in _IMG_ALLOWED_HOSTS:
+        return None
+    return url
+
+
 @mcp.custom_route("/img", methods=["GET"])
 async def proxy_image(request):
-    """Proxy external images through our domain to avoid CSP blocks."""
+    """Proxy Rightmove images through our domain to avoid CSP blocks.
+
+    Only allowlisted hosts are fetched, and redirects are followed manually so
+    each hop is re-validated — an allowlisted host must not be able to bounce
+    this server to an arbitrary internal address.
+    """
     import httpx
     from starlette.responses import Response
 
-    url = request.query_params.get("url", "")
-    if not url or not url.startswith("https://media.rightmove.co.uk"):
+    url = _validated_img_url(request.query_params.get("url", ""))
+    if url is None:
         return Response(status_code=400, content=b"Invalid URL")
 
     async with httpx.AsyncClient() as client:
-        resp = await client.get(url, follow_redirects=True, timeout=10.0)
+        for _ in range(_IMG_MAX_REDIRECTS + 1):
+            # Stream rather than buffer: a non-streaming get() materialises the
+            # whole body in memory before any size check, so the cap would only
+            # stop us forwarding it — not stop a 2GB body OOMing a 512MB VM.
+            async with client.stream(
+                "GET", url, follow_redirects=False, timeout=10.0
+            ) as resp:
+                if resp.status_code in _IMG_REDIRECT_STATUSES:
+                    location = resp.headers.get("Location")
+                    if not location:
+                        return Response(status_code=502, content=b"Bad redirect")
+                    try:
+                        # httpx.URL.join — the same parser that issues the next
+                        # request. join() itself can raise on hostile values
+                        # (e.g. "////evil.example"), so it is inside the try.
+                        joined = str(url.join(location))
+                    except httpx.InvalidURL:
+                        return Response(status_code=400, content=b"Invalid redirect target")
+                    nxt = _validated_img_url(joined)
+                    if nxt is None:
+                        return Response(status_code=400, content=b"Invalid redirect target")
+                    url = nxt
+                    continue
 
-    return Response(
-        content=resp.content,
-        media_type=resp.headers.get("content-type", "image/jpeg"),
-        headers={"Cache-Control": "public, max-age=86400"},
-    )
+                if resp.status_code >= 400:
+                    return Response(status_code=502, content=b"Upstream error")
+
+                content_type = resp.headers.get("content-type", "image/jpeg")
+                # Only ever re-serve images. media.rightmove.co.uk carries
+                # third-party-supplied files; echoing an arbitrary Content-Type
+                # would let one be served as HTML on this app's own origin.
+                if not content_type.lower().startswith(_IMG_ALLOWED_CONTENT_TYPES):
+                    return Response(status_code=502, content=b"Unsupported content type")
+
+                declared = resp.headers.get("Content-Length")
+                if declared and declared.isdigit() and int(declared) > _IMG_MAX_BYTES:
+                    return Response(status_code=502, content=b"Image too large")
+
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > _IMG_MAX_BYTES:
+                        return Response(status_code=502, content=b"Image too large")
+                    chunks.append(chunk)
+
+                return Response(
+                    content=b"".join(chunks),
+                    media_type=content_type,
+                    headers={
+                        "Cache-Control": "public, max-age=86400",
+                        "X-Content-Type-Options": "nosniff",
+                    },
+                )
+
+    return Response(status_code=502, content=b"Too many redirects")
 
 
 class _AcceptNormalizer:

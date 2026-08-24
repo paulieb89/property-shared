@@ -67,6 +67,21 @@ RECORD_STATUS_URIS: Dict[str, str] = {
     "D": "http://landregistry.data.gov.uk/def/ppi/delete",
 }
 
+
+class UnsupportedRecordStatusFilterError(ValueError):
+    """Raised when record_status filtering is requested on the SPARQL search path.
+
+    SPARQL search returns PPDTransaction rows, which have no record_status field
+    (it lives on PPDTransactionRecord, from the Linked Data endpoint). Filtering
+    previously dereferenced the missing attribute and crashed with AttributeError
+    on the first returned row.
+
+    Implementing this properly needs the record-status triple shape verified
+    against the live Land Registry ontology first — the URIs in
+    RECORD_STATUS_URIS look like rdf:type nodes rather than a literal predicate,
+    so it is deliberately rejected rather than guessed at.
+    """
+
 # The Land Registry site currently splits some recent years into two files.
 YEARS_WITH_PARTS = {2018, 2019, 2020, 2021, 2022, 2023}
 
@@ -149,7 +164,7 @@ class PricePaidDataClient:
         property_type: Optional[str] = None,
         estate_type: Optional[str] = None,
         transaction_category: Optional[str] = None,
-        record_status: Optional[str] = None,
+        record_status: Optional[str] = None,  # deprecated: raises if not None
         new_build: Optional[bool] = None,
         limit: int = 20,
         offset: int = 0,
@@ -162,7 +177,26 @@ class PricePaidDataClient:
         matching (CONTAINS/LCASE), and URI-based filters (applied client-side
         to avoid 503 timeouts). Core transaction fields use required bindings
         (semicolon chain) — OPTIONAL bindings cause full table scans.
+
+        Args:
+            record_status: **Not supported here.** Passing a value raises
+                UnsupportedRecordStatusFilterError. This search returns
+                PPDTransaction rows, which carry no record status — that field
+                exists only on PPDTransactionRecord, from the Linked Data
+                endpoint. The parameter is kept so callers get this explanation
+                rather than an opaque TypeError.
+
+        Raises:
+            UnsupportedRecordStatusFilterError: If record_status is not None.
         """
+        if record_status is not None:
+            raise UnsupportedRecordStatusFilterError(
+                "record_status filtering is not supported on SPARQL search: results are "
+                "PPDTransaction rows, which do not carry a record status. Use "
+                "PricePaidDataClient.get_transaction_record(transaction_id) / "
+                "PPDService.transaction_record() to read record_status for a known transaction."
+            )
+
         values_clauses = []
         filters = []
 
@@ -211,7 +245,7 @@ class PricePaidDataClient:
         # --- Client-side filters (URI-based — cause 503 in SPARQL) ---
         has_client_filters = any([
             property_type, estate_type, transaction_category,
-            record_status, new_build is not None,
+            new_build is not None,
         ])
         fetch_limit = limit * 3 if has_client_filters else limit
 
@@ -275,9 +309,9 @@ class PricePaidDataClient:
         if transaction_category:
             tc = transaction_category.upper()
             results = [t for t in results if t.transaction_category == tc]
-        if record_status:
-            rs = record_status.upper()
-            results = [t for t in results if t.record_status == rs]
+        # record_status is rejected up front (see the guard at the top of this
+        # method) — PPDTransaction has no such field, so there is nothing to
+        # filter on here.
         if new_build is not None:
             results = [t for t in results if t.new_build == new_build]
 

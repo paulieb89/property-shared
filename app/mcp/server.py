@@ -417,19 +417,33 @@ async def rightmove_search(
 @mcp.tool(annotations={"readOnlyHint": True})
 @_timed_tool
 async def rightmove_listing(
-    property_url_or_id: str,
+    property_id: str,
     include_images: bool = False,
     max_images: int = 3,
 ) -> dict | ToolResult:
-    """Full detail for a single Rightmove listing (URL or numeric ID).
+    """Full detail for a single Rightmove listing.
 
+    property_id is the numeric Rightmove property ID (the digits at the end of a
+    rightmove.co.uk/properties/... URL), max 12 digits. Full URLs are not accepted.
     include_images fetches and embeds photos and floorplans as MCP image content.
     max_images caps the number of property photos (default 3); floorplans always included.
     """
+    import re
+
     import anyio
     from property_core import fetch_listing
 
-    result = await anyio.to_thread.run_sync(lambda: fetch_listing(property_url_or_id))
+    # This surface is numeric-ID-only by design. The library still accepts a
+    # canonical listing URL for downstream compatibility, but the public MCP
+    # tool deliberately does not widen its input.
+    pid = (property_id or "").strip()
+    if not re.fullmatch(r"[0-9]{1,12}", pid):
+        raise ValueError(
+            f"property_id must be a numeric Rightmove property ID (1-12 digits), got {property_id!r}. "
+            "Use the digits at the end of a rightmove.co.uk/properties/... URL."
+        )
+
+    result = await anyio.to_thread.run_sync(lambda: fetch_listing(pid))
 
     if not include_images:
         return result.model_dump(exclude={"images", "floorplans"})
@@ -589,14 +603,14 @@ def epc_ratings_resource() -> str:
         "ratings": [
             {"band": "A", "score_min": 92, "score_max": 100, "description": "Most efficient — very low running costs (near-zero or new-build standard)."},
             {"band": "B", "score_min": 81, "score_max": 91, "description": "Highly efficient — modern home with good insulation and heating."},
-            {"band": "C", "score_min": 69, "score_max": 80, "description": "Above average — typical for recent builds or well-improved older homes. Required minimum for new rentals from April 2025."},
+            {"band": "C", "score_min": 69, "score_max": 80, "description": "Above average — typical for recent builds or well-improved older homes. Proposed future minimum for rented homes (band C by 1 October 2030); not yet in force."},
             {"band": "D", "score_min": 55, "score_max": 68, "description": "Average — typical UK home as-built. Improvement potential usually high."},
-            {"band": "E", "score_min": 39, "score_max": 54, "description": "Below average — minimum legal standard for rental properties until April 2025."},
+            {"band": "E", "score_min": 39, "score_max": 54, "description": "Below average — the current legal minimum standard for rented homes in England and Wales (since 1 April 2020), subject to exemptions."},
             {"band": "F", "score_min": 21, "score_max": 38, "description": "Poor — running costs significantly above average, often single-glazed or uninsulated."},
             {"band": "G", "score_min": 1, "score_max": 20, "description": "Very poor — typically pre-1900 stock with no insulation upgrades."},
         ],
         "methodology": "Scores are calculated via the Standard Assessment Procedure (SAP 2012). Each property gets a current rating and a potential rating after recommended improvements.",
-        "regulation_note": "Since April 2025, new tenancies in England and Wales require EPC band C or above. Existing tenancies must comply by 2028 (proposed).",
+        "regulation_note": "The current legal minimum for privately rented domestic property in England and Wales is EPC band E (since 1 April 2020), subject to registered exemptions. The government has proposed raising this to band C, with a single compliance date of 1 October 2030 applying to all tenancies — an earlier date for new tenancies was explicitly ruled out. The band C standard is not yet in force.",
         "source": "https://www.gov.uk/government/collections/energy-performance-certificates",
     }
     return json.dumps(data, ensure_ascii=False, indent=2)
@@ -649,7 +663,7 @@ Run these tool calls in order:
 
 2. `property_yield(postcode='{postcode}', months=24)` — area gross yield from median sale and median rent.
 
-3. `property_epc(postcode='{postcode}', address='{address}')` — energy rating. Note: from April 2025, England + Wales rentals must reach EPC C. A property rated D-G needs works before letting.
+3. `property_epc(postcode='{postcode}', address='{address}')` — energy rating. Note: the current legal minimum for England + Wales rentals is EPC band E; a band C minimum is proposed for 1 October 2030 but is not yet in force. A property rated F-G cannot be let today without a registered exemption.
 
 4. `stamp_duty(price={purchase_price}, additional_property={additional_property}, first_time_buyer={first_time_buyer}, non_resident={non_resident})` — calculate SDLT on this purchase including any surcharges.
 
@@ -658,7 +672,7 @@ Then produce an investment summary (5–7 short paragraphs):
 - **Recent sale history**: years and prices, capital growth implied (if multiple sales exist).
 - **Gross yield estimate**: median monthly rent × 12 / {price_fmt} × 100 for a property-specific yield against THIS purchase price. Classify it (strong ≥6%, average 4–6%, weak <4%).
 - **Net yield rough estimate**: subtract a conservative 25-30% from gross for management fees, maintenance, voids, insurance. Acknowledge this is a rule-of-thumb, not tax-adjusted.
-- **EPC compliance**: rating, regulatory note (April 2025 minimum is C), and rough cost of upgrades if needed.
+- **EPC compliance**: rating, regulatory note (current minimum is band E; band C proposed for 1 October 2030, not yet in force), and rough cost of upgrades if needed.
 - **Tax cost**: SDLT total and effective rate from the stamp_duty call.
 - **Key risks**: 2–3 — thin local market (if sale_count is low), historical price decline, EPC works needed, etc.
 

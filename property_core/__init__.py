@@ -32,9 +32,20 @@ from property_core.report_service import PropertyReportService
 from property_core.stamp_duty import StampDutyResult, calculate_stamp_duty
 from property_core.yield_service import calculate_yield
 from property_core.rightmove_location import RightmoveLocationAPI
-from property_core.rightmove_scraper import fetch_listing, fetch_listings
+from property_core.rightmove_scraper import (
+    extract_property_id,
+    fetch_listing,
+    fetch_listings,
+)
+from property_core.ppd_client import UnsupportedRecordStatusFilterError
+from property_core.url_safety import UnsafeURLError, validate_allowed_url
 
 __all__ = [
+    # URL safety
+    "UnsafeURLError",
+    "validate_allowed_url",
+    # Errors
+    "UnsupportedRecordStatusFilterError",
     # Services
     "CompaniesHouseClient",
     "EPCClient",
@@ -55,6 +66,7 @@ __all__ = [
     "compute_enriched_stats",
     "enrich_comps_with_epc",
     "estimate_value_range",
+    "extract_property_id",
     "fetch_listing",
     "fetch_listings",
     "generate_insights",

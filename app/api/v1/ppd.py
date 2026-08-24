@@ -14,6 +14,7 @@ from app.schemas.ppd import (
 )
 from property_core.block_service import analyze_blocks
 from property_core.models.block import BlockAnalysisResponse
+from property_core.ppd_client import UnsupportedRecordStatusFilterError
 from property_core.ppd_service import PPDService
 
 router = APIRouter(prefix="/ppd", tags=["ppd"])
@@ -46,7 +47,13 @@ def transactions(
     property_type: Optional[str] = Query(None, description="D/S/T/F/O"),
     estate_type: Optional[str] = Query(None, description="F/L"),
     transaction_category: Optional[str] = Query(None, description="A/B"),
-    record_status: Optional[str] = Query(None, description="A/C/D"),
+    record_status: Optional[str] = Query(
+        None,
+        description=(
+            "Unsupported on this endpoint — any value returns 422. Record status is "
+            "only available per-transaction via GET /ppd/transaction/{transaction_id}."
+        ),
+    ),
     new_build: Optional[bool] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -79,6 +86,11 @@ def transactions(
             include_raw=include_raw,
         )
         return PPDSearchResponse(**result)
+    except UnsupportedRecordStatusFilterError as exc:
+        # Caller error, not an upstream failure — deliberately narrow so that
+        # other ValueErrors (internal bugs) keep surfacing as 502 rather than
+        # being misreported as bad input.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"PPD search failed: {exc}") from exc
 
