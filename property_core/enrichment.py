@@ -8,12 +8,15 @@ derived price-per-sqft metrics.
 from __future__ import annotations
 
 import asyncio
+import logging
 from statistics import median
 from typing import Dict, List, Optional
 
 from property_core.epc_client import EPCClient
 from property_core.models.epc import EPCData
 from property_core.models.ppd import PPDCompsResponse, PPDTransaction
+
+_log = logging.getLogger(__name__)
 
 # Conversion factor
 _SQM_TO_SQFT = 10.7639
@@ -78,9 +81,27 @@ async def enrich_comps_with_epc(
             certs = await epc_client.search_all_by_postcode(postcode)
             postcode_certs[postcode] = certs
 
-    await asyncio.gather(
-        *[_fetch_postcode(pc) for pc in postcode_groups.keys()]
+    # return_exceptions=True is load-bearing: EPC lookups now raise on upstream
+    # failure, and enrichment is a best-effort augmentation of comps. Without
+    # this, one failing postcode would discard every successfully-fetched
+    # postcode in the batch AND propagate out of the comps request entirely.
+    # Failed postcodes are simply left un-enriched.
+    results = await asyncio.gather(
+        *[_fetch_postcode(pc) for pc in postcode_groups.keys()],
+        return_exceptions=True,
     )
+    failed = [
+        (pc, exc)
+        for pc, exc in zip(postcode_groups.keys(), results)
+        if isinstance(exc, BaseException)
+    ]
+    if failed:
+        _log.warning(
+            "EPC enrichment degraded: %d of %d postcodes could not be fetched (%s)",
+            len(failed),
+            len(postcode_groups),
+            "; ".join(f"{pc}: {type(exc).__name__}" for pc, exc in failed[:3]),
+        )
 
     # Match each comp against its postcode's certs
     for postcode, indices in postcode_groups.items():

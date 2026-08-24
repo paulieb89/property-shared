@@ -259,7 +259,7 @@ async def property_epc(postcode: str, address: str | None = None) -> dict | None
     postcode — count, rating distribution, property-type breakdown, floor-area
     range — plus a hint to call again with an address for single-property detail.
 
-    Returns None if no certificates exist for the postcode at all.
+    Returns null only when no certificates are lodged for the postcode. A null result means no such certificate is lodged. If the EPC service cannot be reached the tool raises an error instead — never treat an error as evidence that a property has no certificate.
     """
     from collections import Counter
 
@@ -318,7 +318,7 @@ async def property_epc_search(postcode: str) -> list[dict] | None:
          If floor_area is unavailable on the listing, filter by property_type only
          and return all candidates.
 
-    Returns None if no certificates exist for the postcode.
+    Returns null only when no certificates are lodged for the postcode. A null result means no such certificate is lodged. If the EPC service cannot be reached the tool raises an error instead — never treat an error as evidence that a property has no certificate.
     """
     from property_core import EPCClient
 
@@ -347,7 +347,7 @@ async def epc_certificate(lmk_key: str) -> dict | None:
 
     lmk_key is returned in every property_epc_search result.
 
-    Returns the full EPC certificate or None if not found.
+    Returns the full EPC certificate, or null only when no such certificate is lodged. A null result means no such certificate is lodged. If the EPC service cannot be reached the tool raises an error instead — never treat an error as evidence that a property has no certificate.
     """
     from property_core import EPCClient
 
