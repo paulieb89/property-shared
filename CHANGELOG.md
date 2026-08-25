@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.13.1 (2026-08-24) — EPC honest-failure hotfix
+
+### Fixed
+- **EPC lookups reported service outages as "no certificate exists".** The API host hardcoded in `EPCClient.BASE_URL` (`epc.opendatacommunities.org`) has been retired and now 301-redirects. Because every failure was caught by a broad `except (httpx.HTTPError, KeyError, ValueError)` and converted to `None`/`[]`, the deployed product answered `404 "No EPC certificate found"` for **every postcode in England and Wales**, and `/v1/epc/search-area` returned **HTTP 200 with `count: 0`** — an outage rendered as valid data. MCP tools returned `null` with `isError: false` alongside docstrings telling the model "Returns None if no certificates exist", so an LLM would state that a property has no EPC.
+
+  EPC lookups now raise `EPCUpstreamError` when the service cannot be consulted — non-success status (redirects included), transport failure, unparseable body, an unrecognised response envelope, or missing credentials. A reachable upstream holding no certificate still returns `None`/`[]`, so genuine absence is unchanged. REST maps the error to **503** (never 404, never an empty 200); MCP tools surface it as a tool error rather than a null result; tool docstrings no longer instruct consumers to infer absence.
+
+  This is a stop-the-bleeding fix: it stops the system asserting a falsehood. **It does not restore EPC data** — the replacement GOV.UK API uses different auth, envelope, field casing and identifiers, and migrating to it is tracked separately.
+- `enrich_comps_with_epc()` used `asyncio.gather` without `return_exceptions=True`. With EPC lookups now raising, a single failing postcode would have discarded every successfully-fetched postcode in the batch and propagated out of the whole comps request. Failed postcodes are now left un-enriched and logged; successful ones survive.
+
 ## v1.13.0 (2026-08-24) — security hotfix
 
 ### Security

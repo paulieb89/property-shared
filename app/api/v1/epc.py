@@ -9,11 +9,20 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas.epc import EPCAreaResponse, EPCAreaSummary, EPCRecordResponse
 from property_core.address_matching import parse_address
-from property_core.epc_client import EPCClient
+from property_core.epc_client import EPCClient, EPCUpstreamError
 from property_core.models.epc import EPCData
 
 router = APIRouter(prefix="/epc", tags=["epc"])
 _client = EPCClient()
+
+
+def _upstream_unavailable(exc: EPCUpstreamError) -> HTTPException:
+    """Map an EPC outage to 503, never to 404 or an empty 200.
+
+    Reporting an outage as "not found" (or as a zero-count area summary) states
+    a falsehood about the property, which is worse than failing.
+    """
+    return HTTPException(status_code=503, detail=f"EPC service unavailable: {exc}")
 
 
 def _build_area_summary(certs: list[EPCData]) -> EPCAreaSummary:
@@ -41,7 +50,10 @@ async def get_certificate(
     if not _client.is_configured():
         raise HTTPException(status_code=501, detail="EPC client not configured")
 
-    result = await _client.get_certificate(certificate_hash)
+    try:
+        result = await _client.get_certificate(certificate_hash)
+    except EPCUpstreamError as exc:
+        raise _upstream_unavailable(exc) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="No EPC certificate found")
     return EPCRecordResponse(record=result, raw=result.raw if include_raw else None)
@@ -77,7 +89,10 @@ async def search(
     if not postcode:
         raise HTTPException(status_code=422, detail="postcode or q parameter required")
 
-    result = await _client.search_by_postcode(postcode, address=address)
+    try:
+        result = await _client.search_by_postcode(postcode, address=address)
+    except EPCUpstreamError as exc:
+        raise _upstream_unavailable(exc) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="No EPC certificate found")
     return EPCRecordResponse(record=result, raw=result.raw if include_raw else None)
@@ -96,7 +111,12 @@ async def search_area(
     if not _client.is_configured():
         raise HTTPException(status_code=501, detail="EPC client not configured")
 
-    certs = await _client.search_all_by_postcode(postcode)
+    try:
+        certs = await _client.search_all_by_postcode(postcode)
+    except EPCUpstreamError as exc:
+        # Never return a zero-count summary for an outage: it is indistinguishable
+        # from a postcode that genuinely has no certificates.
+        raise _upstream_unavailable(exc) from exc
     return EPCAreaResponse(
         postcode=postcode,
         summary=_build_area_summary(certs),

@@ -316,7 +316,7 @@ async def epc_search(
          If floor_area is unavailable on the listing, filter by property_type only
          and return all candidates.
 
-    Returns None if no certificates exist for the postcode.
+    Returns null only when no certificates are lodged for the postcode. A null result means no such certificate is lodged. If the EPC service cannot be reached the tool raises an error instead — never treat an error as evidence that a property has no certificate.
     """
     return await browse_epc_certs(postcode)
 
@@ -348,7 +348,7 @@ async def epc_certificate(
 
     lmk_key is returned in every epc_search result.
 
-    Returns the full EPC certificate or None if not found.
+    Returns the full EPC certificate, or null only when no such certificate is lodged. A null result means no such certificate is lodged. If the EPC service cannot be reached the tool raises an error instead — never treat an error as evidence that a property has no certificate.
     """
     return await fetch_epc_certificate(lmk_key)
 
