@@ -1,8 +1,8 @@
 """Comp enrichment: attach EPC floor-area data to PPD transactions.
 
-Groups comparables by postcode, fetches EPC certificates in batch (one API call
-per unique postcode), then fuzzy-matches addresses to attach floor_area and
-derived price-per-sqft metrics.
+One summary search per distinct postcode, then a single certificate fetch for
+each comp whose address uniquely identifies a candidate. Ambiguous comps are
+left un-enriched rather than attached to a neighbouring property's certificate.
 """
 
 from __future__ import annotations
@@ -10,8 +10,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from statistics import median
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
+from property_core.epc.errors import EPCAmbiguousMatchError
+from property_core.epc.selection import select_candidate
 from property_core.epc_client import EPCClient
 from property_core.models.epc import EPCData
 from property_core.models.ppd import PPDCompsResponse, PPDTransaction
@@ -44,17 +46,20 @@ async def enrich_comps_with_epc(
     """Enrich PPD comparables with EPC data (floor area, rating, age).
 
     Groups comps by postcode, fetches all EPC certs per unique postcode
-    (one API call each), then fuzzy-matches each comp's address to attach:
+    (one summary search each), selects a unique candidate per comp, then
+    fetches only that certificate to attach:
       - epc_floor_area_sqm / epc_floor_area_sqft
       - price_per_sqm / price_per_sqft
       - epc_rating / epc_score / epc_construction_age / epc_built_form
       - epc_match (full normalized cert dict)
-      - epc_match_score (fuzzy confidence 0-100)
+      - epc_match_score / epc_match_method (100 only for UPRN or exact address)
 
     Args:
         comps: List of PPDTransaction objects.
         epc_client: Configured EPCClient instance. If None, creates one internally.
-        min_score: Minimum fuzzy-match score to accept an EPC match.
+        min_score: Retained for signature compatibility only; it has no effect.
+            Selection accepts identity evidence alone (exact UPRN or exact
+            normalized address), so there is no score to threshold.
         max_concurrent: Max concurrent EPC API calls (rate limiting).
 
     Returns:
@@ -72,14 +77,14 @@ async def enrich_comps_with_epc(
         if pc:
             postcode_groups.setdefault(pc, []).append(idx)
 
-    # Fetch EPC certs per postcode with concurrency limit
+    # One summary search per DISTINCT postcode. No certificate fan-out here:
+    # details are fetched later, only for a uniquely selected candidate.
     semaphore = asyncio.Semaphore(max_concurrent)
-    postcode_certs: Dict[str, List[EPCData]] = {}
+    postcode_pages: Dict[str, Any] = {}
 
     async def _fetch_postcode(postcode: str) -> None:
         async with semaphore:
-            certs = await epc_client.search_all_by_postcode(postcode)
-            postcode_certs[postcode] = certs
+            postcode_pages[postcode] = await epc_client.search_summaries(postcode)
 
     # return_exceptions=True is load-bearing: EPC lookups now raise on upstream
     # failure, and enrichment is a best-effort augmentation of comps. Without
@@ -103,10 +108,16 @@ async def enrich_comps_with_epc(
             "; ".join(f"{pc}: {type(exc).__name__}" for pc, exc in failed[:3]),
         )
 
-    # Match each comp against its postcode's certs
+    # Select a unique candidate per comp from the summaries, then fetch ONLY
+    # that certificate. Ambiguity leaves the comp un-enriched rather than
+    # attaching a neighbouring property's EPC.
+    cert_cache: Dict[str, Any] = {}
+    ambiguous = 0
+
     for postcode, indices in postcode_groups.items():
-        certs = postcode_certs.get(postcode, [])
-        if not certs:
+        page = postcode_pages.get(postcode)
+        rows = getattr(page, "results", None) or []
+        if not rows:
             continue
 
         for idx in indices:
@@ -115,9 +126,26 @@ async def enrich_comps_with_epc(
             if not address:
                 continue
 
-            result = epc_client.match_address(certs, address, min_score=min_score)
-            if result:
-                match, match_score = result
+            try:
+                selected = select_candidate(rows, address=address)
+            except EPCAmbiguousMatchError:
+                ambiguous += 1
+                continue
+
+            cert_no = selected.row.certificate_number
+            if cert_no not in cert_cache:
+                try:
+                    cert_cache[cert_no] = await epc_client.get_certificate(cert_no)
+                except Exception as exc:  # noqa: BLE001 - best-effort augmentation
+                    _log.warning("EPC certificate %s unavailable: %s", cert_no, exc)
+                    cert_cache[cert_no] = None
+            match = cert_cache[cert_no]
+            if match is not None:
+                # Always 100: selection accepts nothing but identity evidence.
+                # Kept as a field read rather than a literal so a future
+                # confidence tier cannot silently be reported as certainty.
+                match_score = selected.confidence
+                comp.epc_match_method = selected.method
                 floor_sqm = match.floor_area
                 price = comp.price
 

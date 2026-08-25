@@ -207,7 +207,9 @@ async def lookup_epc(postcode: str, address: str | None = None) -> dict:
     """Raw EPC lookup — returns dict. Used by the MCP tool and tests.
 
     With address: returns the matched certificate.
-    Without address: returns all certificates at the postcode with area summary.
+    Without address: returns area statistics derivable from summaries — the
+    record count and, when the bounded response is complete, the rating
+    distribution. Individual certificates are NOT returned.
     """
     from collections import Counter
 
@@ -221,22 +223,28 @@ async def lookup_epc(postcode: str, address: str | None = None) -> dict:
             return {"error": "No EPC data"}
         return _slim(result.model_dump(mode="json"))
 
-    # Area mode
-    certs = await client.search_all_by_postcode(postcode)
-    if not certs:
+    # Area mode — derived from summaries only. Property-type and floor-area
+    # statistics exist only on full certificates; computing them would need one
+    # upstream request per certificate, so they are reported unavailable (None)
+    # rather than as empty dicts, which would assert that none exist.
+    area = await client.area_summary(postcode)
+    # 0 means the postcode genuinely holds no certificates. None means the
+    # upstream did not tell us how many exist — an unknown count must not be
+    # reported as an absence.
+    if area.get("total_records") == 0:
         return {"error": "No EPC data"}
 
-    ratings = Counter(c.rating for c in certs if c.rating)
-    types = Counter(c.property_type for c in certs if c.property_type)
-    areas = [c.floor_area for c in certs if c.floor_area]
-
     summary = {
-        "count": len(certs),
-        "rating_distribution": dict(sorted(ratings.items())),
-        "property_type_breakdown": dict(sorted(types.items())),
-        "floor_area_min": min(areas) if areas else None,
-        "floor_area_max": max(areas) if areas else None,
-        "floor_area_avg": round(sum(areas) / len(areas), 1) if areas else None,
+        "count": area["total_records"],
+        "rating_distribution": area["rating_distribution"],
+        "rating_distribution_sample": area["rating_distribution_sample"],
+        "rating_distribution_sample_size": area["rating_distribution_sample_size"],
+        "property_type_breakdown": None,
+        "floor_area_min": None,
+        "floor_area_max": None,
+        "floor_area_avg": None,
+        "complete": area["complete"],
+        "warnings": area["warnings"],
     }
     # Return only the summary — skip the full 25-cert list to save tokens in
     # the LLM context (data tools return dicts that the MCP framework puts in
@@ -264,30 +272,44 @@ async def epc_lookup(
     """Energy Performance Certificate data for a UK property or postcode area.
 
     With address: returns the matched certificate for that specific property.
-    Without address: returns all certificates at the postcode with area
-    aggregation — rating distribution, floor area range, property type
-    breakdown. Use the area mode for postcode-level views rather than
-    a single-property lookup.
+    Without address: returns the record count and, when the bounded response
+    contains every matching summary, the rating distribution. Property-type
+    breakdown and floor-area statistics are NOT available — the EPC service
+    exposes them only on individual certificates.
     """
     return await lookup_epc(postcode, address=address)
 
 
-async def browse_epc_certs(postcode: str) -> list[dict] | None:
-    """Raw EPC cert browse — returns slim list. Used by the MCP tool and tests."""
+async def browse_epc_certs(postcode: str, page: int = 1) -> dict:
+    """EPC summary browse for candidate selection. Makes no certificate requests.
+
+    Returns only what the EPC search exposes. Energy score, floor area and
+    property type are NOT available here — they exist solely on a full
+    certificate, so fetch the chosen one with epc_certificate().
+    """
     from property_core import EPCClient
 
-    client = EPCClient()
-    certs = await client.search_all_by_postcode(postcode)
-    if not certs:
-        return None
-
-    keep = {"address", "rating", "score", "floor_area", "property_type",
-            "floor_level", "habitable_rooms", "inspection_date", "lmk_key"}
-
-    return _slim([
-        {k: v for k, v in c.model_dump(mode="json", exclude_none=True).items() if k in keep}
-        for c in certs
-    ])
+    page_obj = await EPCClient().search_summaries(postcode, current_page=page)
+    return {
+        "postcode": postcode,
+        "results": [
+            {
+                "certificate_number": r.certificate_number,
+                "address": r.address,
+                "uprn": r.uprn,
+                "energy_band": r.current_energy_efficiency_band,
+                "registration_date": r.registration_date,
+                "schema_type": r.schema_type,
+            }
+            for r in page_obj.results
+        ],
+        "total_records": page_obj.pagination.total_records,
+        "returned_distinct_count": page_obj.returned_distinct_count,
+        "duplicates_removed": page_obj.duplicates_removed,
+        "unusable_rows": page_obj.unusable_rows,
+        "complete": page_obj.complete,
+        "warnings": page_obj.warnings,
+    }
 
 
 @mcp.tool(
@@ -297,28 +319,32 @@ async def browse_epc_certs(postcode: str) -> list[dict] | None:
 )
 async def epc_search(
     postcode: Annotated[str, Field(description="UK postcode to browse EPC certificates for")],
-) -> list[dict] | None:
-    """Browse all EPC certificates at a postcode — use when you have no house number.
+    page: Annotated[int, Field(description="Page number (default 1)")] = 1,
+) -> dict:
+    """List EPC certificate summaries at a postcode — for candidate selection.
 
-    Returns a slim list of every certificate at the postcode. Each entry contains:
-      address, rating, score, floor_area (sqm), property_type, floor_level,
-      habitable_rooms, inspection_date, lmk_key.
+    Returns one bounded page. Each entry contains only what the EPC search
+    exposes: certificate_number, address, uprn (often absent), energy band,
+    registration_date and schema_type. Energy score, floor area and property
+    type are NOT available here — they exist only on a full certificate.
 
-    Workflow for Rightmove listings where the house number is not shown:
-      1. Call rightmove_listing to obtain floor_area_sqm, property_type, and
-         any floor-level signals in the description (e.g. "top floor", "ground floor").
-      2. Call epc_search(postcode) to retrieve the full cert list.
-      3. You MUST cross-reference each cert's floor_area against the listing's
-         floor_area_sqm (accept within ±5 sqm) AND property_type must match.
-         Also use floor_level and habitable_rooms where available.
-      4. If a single cert matches, call epc_certificate(lmk_key) for the full detail.
-      5. If multiple certs match equally, present all candidates — do not guess.
-         If floor_area is unavailable on the listing, filter by property_type only
-         and return all candidates.
+    Workflow when a Rightmove listing has no house number:
+      1. epc_search(postcode) to list candidates.
+      2. Narrow by address text and, where present, uprn.
+      3. epc_certificate(lmk_key=<certificate_number>) for the chosen one, then
+         cross-check its floor_area against the listing (within ±5 sqm).
+      4. If several candidates remain equally plausible, present them all — do
+         not guess. Choosing arbitrarily attaches another property's data.
 
-    Returns null only when no certificates are lodged for the postcode. A null result means no such certificate is lodged. If the EPC service cannot be reached the tool raises an error instead — never treat an error as evidence that a property has no certificate.
+    `complete` is false when the postcode holds more records than this page
+    returns; upstream page traversal is not snapshot-stable, so a multi-page
+    result is a bounded sample rather than a guaranteed-complete set.
+
+    An empty `results` list means no certificates are lodged. If the EPC service
+    cannot be reached the tool raises an error instead — never treat an error as
+    evidence that a property has no certificate.
     """
-    return await browse_epc_certs(postcode)
+    return await browse_epc_certs(postcode, page=page)
 
 
 async def fetch_epc_certificate(lmk_key: str) -> dict | None:
@@ -338,7 +364,7 @@ async def fetch_epc_certificate(lmk_key: str) -> dict | None:
     timeout=30.0,
 )
 async def epc_certificate(
-    lmk_key: Annotated[str, Field(description="EPC certificate hash (lmk_key) from epc_search results")],
+    lmk_key: Annotated[str, Field(description="EPC certificate number (accepted as lmk_key for compatibility)")],
 ) -> dict | None:
     """Fetch a single EPC certificate by its lmk_key (certificate hash).
 
@@ -346,7 +372,7 @@ async def epc_certificate(
     than epc_lookup(postcode, address) as it makes a direct lookup with no
     fuzzy matching or postcode re-fetch.
 
-    lmk_key is returned in every epc_search result.
+    lmk_key accepts the certificate_number returned by the summary search (the parameter name is retained for compatibility).
 
     Returns the full EPC certificate, or null only when no such certificate is lodged. A null result means no such certificate is lodged. If the EPC service cannot be reached the tool raises an error instead — never treat an error as evidence that a property has no certificate.
     """

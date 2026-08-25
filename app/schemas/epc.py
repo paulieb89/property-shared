@@ -22,19 +22,33 @@ class EPCRecordResponse(BaseModel):
 
 
 class EPCAreaSummary(BaseModel):
-    """Aggregated statistics for EPC certificates in a postcode area."""
+    """Aggregated statistics for EPC certificates in a postcode area.
 
-    count: int
-    rating_distribution: dict[str, int] = Field(default_factory=dict)
+    `None` means "not available from this source" — deliberately distinct from
+    `{}` or `0`, which assert that the area genuinely has none. Floor-area and
+    property-type statistics exist only on full certificates, so producing them
+    would require one upstream request per certificate.
+    """
+
+    count: int | None = None  # None = unknown (missing upstream metadata), never 0
+    rating_distribution: dict[str, int] | None = None
+    rating_distribution_sample: dict[str, int] | None = None
+    rating_distribution_sample_size: int | None = None
     floor_area_min: float | None = None
     floor_area_max: float | None = None
     floor_area_avg: float | None = None
-    property_type_breakdown: dict[str, int] = Field(default_factory=dict)
+    property_type_breakdown: dict[str, int] | None = None
 
 
 class EPCAreaResponse(BaseModel):
-    """EPC area search results with summary statistics."""
+    """EPC area search results with summary statistics.
+
+    `certificates` is `None` when per-certificate detail is unavailable from a
+    summary search — never `[]`, which would assert the area holds none.
+    """
 
     postcode: str
     summary: EPCAreaSummary
-    certificates: list[EPCData]
+    certificates: list[EPCData] | None = None
+    complete: bool = False
+    warnings: list[str] = Field(default_factory=list)

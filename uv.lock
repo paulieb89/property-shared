@@ -1175,7 +1175,7 @@ wheels = [
 
 [[package]]
 name = "property-shared"
-version = "1.13.1"
+version = "1.14.0"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },

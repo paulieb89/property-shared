@@ -13,7 +13,7 @@ Use it as a **Python library**, **CLI**, **HTTP API**, or **MCP server**.
 | Data Source | What It Returns |
 |-------------|-----------------|
 | **Land Registry PPD** | Sold prices, dates, property types, area comps with median/percentiles |
-| **EPC Register** | Energy ratings, floor area, construction age, heating costs |
+| **EPC (GOV.UK)** | Energy ratings, floor area, heating costs. England & Wales only. Certificate lookup and summary search — see EPC notes below |
 | **Rightmove** | Current listings (sale + rent), prices, agents, listing details |
 | **Yield Analysis** | Gross yield from PPD sales + Rightmove rentals combined |
 | **Stamp Duty** | SDLT calculation with April 2025 bands, BTL surcharge, FTB relief |
@@ -136,14 +136,51 @@ Key endpoints:
 
 Full endpoint list in [USER_GUIDE.md](USER_GUIDE.md).
 
+## EPC notes (v1.14.0)
+
+The EPC service moved to a GOV.UK Bearer API. Set `EPC_API_TOKEN`; the old
+`EPC_API_EMAIL`/`EPC_API_KEY` pair authenticated against a retired host and is
+not a supported fallback.
+
+What the new upstream supports, and what it does not:
+
+- **Certificate lookup** by certificate number — full detail, one request.
+- **Summary search** by postcode — returns address, UPRN (often absent), energy
+  band, registration date and schema type. It does **not** return energy score,
+  floor area or property type; those exist only on a full certificate.
+- **Area statistics** are limited to the record count and, when the bounded
+  response contains every matching summary, the rating distribution.
+  Property-type breakdown and floor-area statistics are reported as `None` —
+  unavailable, not zero — because producing them would mean one request per
+  certificate.
+- **Coverage is England and Wales.** Scotland, Northern Ireland and the Channel
+  Islands return "no certificates found": a coverage boundary, not a statement
+  about a property.
+- **Pagination is not a stable snapshot.** Responses carry `complete`,
+  `duplicates_removed` and `unusable_rows`; no operation claims a complete
+  harvest of an area.
+- **Ambiguous address matches are refused** rather than resolved to an arbitrary
+  neighbouring certificate.
+
+`search_all_by_postcode()` is unsupported — use `search_summaries()` for
+candidate discovery, then `get_certificate()` for the one you need.
+
 ## Environment Variables
 
-Copy `.env.example` to `.env`. Key variables:
+Create a `.env` file in the repo root (it is gitignored) with the variables you need.
+
+> **Leave optional variables out entirely rather than assigning them empty.**
+> `KEY=` sets an empty string, which is not the same as unset: `os.getenv("KEY",
+> "default")` returns `""`, so the default never applies. This bit the EPC live
+> tests, which sent an empty postcode upstream.
+
+Key variables:
 
 | Variable | Required For | Description |
 |----------|-------------|-------------|
-| `EPC_API_EMAIL` | EPC lookups | Free key from [EPC Register](https://epc.opendatacommunities.org/) |
-| `EPC_API_KEY` | EPC lookups | Paired with email above |
+| `EPC_API_TOKEN` | EPC lookups | Bearer token from [GOV.UK EPC data](https://get-energy-performance-data.communities.gov.uk/) |
+| `EPC_API_EMAIL` | *(deprecated)* | Retired service; parsed only to raise a configuration error |
+| `EPC_API_KEY` | *(deprecated)* | Retired service; not a supported fallback |
 | `COMPANIES_HOUSE_API_KEY` | Company search | Free key from [Companies House](https://developer.company-information.service.gov.uk/) |
 | `RIGHTMOVE_DELAY_SECONDS` | No (default 0.6s) | Rate limit delay for Rightmove scraping |
 | `OPENAI_API_KEY` | Planning scraper | Vision-guided planning portal scraper |

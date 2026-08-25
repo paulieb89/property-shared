@@ -18,8 +18,9 @@ class Settings(BaseSettings):
 
     # External services
     openai_api_key: Optional[str] = None
-    epc_api_email: Optional[str] = None
-    epc_api_key: Optional[str] = None
+    epc_api_token: Optional[str] = None  # GOV.UK Bearer token (required for EPC)
+    epc_api_email: Optional[str] = None  # deprecated: retired service
+    epc_api_key: Optional[str] = None  # deprecated: retired service
     companies_house_api_key: Optional[str] = None
     companies_house_sandbox: bool = False
 

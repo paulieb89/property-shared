@@ -417,7 +417,7 @@ def epc_search(
 
     client = EPCClient()
     if not client.is_configured():
-        typer.echo("EPC not configured (set EPC_API_EMAIL/EPC_API_KEY)")
+        typer.echo("EPC not configured (set EPC_API_TOKEN)")
         raise typer.Exit(code=1)
     import asyncio
 
@@ -431,43 +431,47 @@ def epc_search(
         _echo_json(output)
         return
 
-    # Area mode — no address
-    certs = asyncio.run(client.search_all_by_postcode(postcode_value))
-    if not certs:
+    # Area mode — derived from summaries only. The EPC service no longer
+    # returns per-certificate detail in a search, so property-type and
+    # floor-area statistics are unavailable rather than zero.
+    area = asyncio.run(client.area_summary(postcode_value))
+    total = area.get("total_records")
+    # 0 means the postcode genuinely holds no certificates. None means the
+    # upstream did not report a count — unknown must not read as absence.
+    if total == 0:
         typer.echo("No EPC certificates found")
         raise typer.Exit(code=1)
+    if total is None:
+        rprint(
+            "[yellow]The EPC service did not report how many certificates exist here — "
+            "the count is unknown, not zero.[/yellow]"
+        )
 
-    from collections import Counter
-    ratings = Counter(c.rating for c in certs if c.rating)
-    types = Counter(c.property_type for c in certs if c.property_type)
-    areas = [c.floor_area for c in certs if c.floor_area]
+    shown = total if total is not None else "unknown"
+    rprint(f"\n[bold]EPC Area Summary — {postcode_value}[/bold]  ({shown} certificates)")
+    if not area.get("complete"):
+        rprint("[yellow]Bounded page — this is a sample, not the whole area.[/yellow]")
 
-    rprint(f"\n[bold]EPC Area Summary — {postcode_value}[/bold]  ({len(certs)} certificates)")
-
-    if ratings:
-        rating_table = Table(title="Rating Distribution")
+    dist = area.get("rating_distribution") or area.get("rating_distribution_sample")
+    if dist:
+        label = "Rating Distribution" if area.get("rating_distribution") else (
+            f"Rating Distribution (sample of {area.get('rating_distribution_sample_size')})")
+        rating_table = Table(title=label)
         rating_table.add_column("Rating")
         rating_table.add_column("Count", justify="right")
-        for r, n in sorted(ratings.items()):
+        for r, n in sorted(dist.items()):
             rating_table.add_row(r, str(n))
         rprint(rating_table)
 
-    if areas:
-        rprint(
-            f"[bold]Floor area:[/bold] {int(min(areas))}–{int(max(areas))} sqm "
-            f"(avg {round(sum(areas) / len(areas))}) — {len(areas)}/{len(certs)} have area data"
-        )
-
-    if types:
-        type_table = Table(title="Property Types")
-        type_table.add_column("Type")
-        type_table.add_column("Count", justify="right")
-        for t, n in sorted(types.items()):
-            type_table.add_row(t, str(n))
-        rprint(type_table)
+    rprint(
+        "[dim]Floor-area and property-type statistics are unavailable: the EPC service "
+        "exposes them only on individual certificates.[/dim]"
+    )
+    for w in area.get("warnings") or []:
+        rprint(f"[dim]note: {w}[/dim]")
 
     if include_raw:
-        _echo_json([c.model_dump() for c in certs])
+        _echo_json(area)
 
 
 @epc.command("certificate")
@@ -488,7 +492,7 @@ def epc_certificate(
 
     client = EPCClient()
     if not client.is_configured():
-        typer.echo("EPC not configured (set EPC_API_EMAIL/EPC_API_KEY)")
+        typer.echo("EPC not configured (set EPC_API_TOKEN)")
         raise typer.Exit(code=1)
     import asyncio
 
