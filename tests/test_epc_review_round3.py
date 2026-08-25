@@ -294,14 +294,24 @@ class TestBuildingAndUnitComparedIndependently:
             select_candidate(rows, address="Flat 2, 24 Alexandra Road")
         assert "unit" in str(exc.value).lower()
 
-    def test_same_building_and_unit_but_different_wording_is_now_refused(self):
-        """"Apartment 2" vs "Flat 2" used to be accepted at confidence 80.
+    def test_same_building_and_unit_selects_via_designator_normalization(self):
+        """"Apartment 2" vs "Flat 2" was once accepted at confidence 80.
 
-        v1.14 removed the structured acceptance path entirely — see
-        tests/test_epc_selection_invariants.py. Only an exact address or a UPRN
-        selects.
+        v1.14 removed the structured acceptance path (see
+        tests/test_epc_selection_invariants.py) and then re-admitted exactly this
+        case as one bounded normalization, measured against live register data —
+        see tests/test_epc_designator_normalization.py. Confidence is 100 because
+        every token but the designator matches literally, in order.
         """
         rows = [_row("1", "Apartment 2", "24 Alexandra Road")]
+        got = select_candidate(rows, address="Flat 2, 24 Alexandra Road")
+        assert got.row.certificate_number == "1"
+        assert got.method == "address_designator_normalized"
+        assert got.confidence == 100
+
+    def test_designator_normalization_does_not_relax_the_building(self):
+        """The round-4 defect must not return through the designator rule."""
+        rows = [_row("1", "Apartment 2", "99 Alexandra Road")]
         with pytest.raises(EPCAmbiguousMatchError):
             select_candidate(rows, address="Flat 2, 24 Alexandra Road")
 

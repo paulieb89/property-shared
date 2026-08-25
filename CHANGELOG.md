@@ -75,7 +75,19 @@ Measured on 12 live EPC summary searches over the 12 most-populated postcodes of
 
 Every one of the 58 lost matches differs by exactly one token — PPD writes `FLAT n` where EPC writes `Apartment n` — with all numeric components identical, and none of them had a designator-swapped rival certificate in the same postcode. This is a real and large reduction in enrichment coverage, and it is not hidden: an un-enriched comp reports no EPC fields rather than another property's certificate.
 
-Folding `flat`/`apartment`/`apt` into one normalized token would recover all 58 (66/210, 31.4%) and, on this corpus, merges no two distinct EPC addresses. It is deliberately **not** shipped in v1.14 — whether a designator is formatting or identity is a contract decision, and unlike the structured matcher it would fail safe (a merge becomes a duplicate, which the ambiguity rule already refuses). Corpus caveat: 12 city-centre postcodes dominated by apartment blocks are not a national sample.
+### One bounded normalization, added on that evidence
+A **leading** `Flat <n>` / `Apartment <n>` designator is canonicalized to a single token, and nothing else changes: every remaining token, its order, and the unit identifier must still match exactly. Matches found this way report `epc_match_method: "address_designator_normalized"`, distinct from literal `exact_address`.
+
+Deliberate limits, each pinned by a test:
+- `Flat 2` ↔ `Apartment 2` matches; `Flat 2` ↔ `Apartment 3` does not, and neither does `Flat 2` ↔ `Apartment 2a`.
+- A shared unit cannot excuse a different building, street, or an added/reordered component.
+- `apt` is **not** a synonym — it has not been observed in the register, and unobserved synonyms are guesses.
+- The rewrite is anchored: `"Apartment Road"`, `"The Apartment, 24 High Street"` and `"24 Apartment 2 Road"` are untouched, because no unit follows or the designator is not leading.
+- Abbreviations are still not equated (`Rd` ≠ `Road`).
+
+It fails **safe**, which is the property the structured matcher never had: canonicalization can only make two addresses *collide*, and a collision is refused as ambiguous rather than tie-broken. Candidates are gathered on the canonical form first for exactly this reason — selecting on literal equality first would let one row win while a designator-variant duplicate sat unexamined beside it. Two tests cover that ordering; both failed against the first implementation, which had the passes the other way round.
+
+Measured against the same cached corpus, zero network calls: **66/210 (31.4%)**, restoring the full structured-matcher rate, with all 66 selecting the *same certificate* the structured matcher had chosen — 8 via literal equality, 58 via the designator rule, 0 divergences, 0 canonical collisions. Corpus caveat: 12 city-centre postcodes dominated by apartment blocks are not a national sample.
 
 ### Compatibility
 - v1 `EPCData` fields, types and meanings are unchanged; `lmk_key`/`certificate_hash` carry the certificate number; the MCP `epc_certificate` tool still accepts `lmk_key`.

@@ -86,8 +86,10 @@ class PPDTransaction(BaseModel):
     # EPC enrichment fields (populated when enrich_epc=True on comps endpoint)
     epc_match: Optional[dict[str, Any]] = None
     epc_match_score: Optional[int] = None
-    # How the certificate was identified: "uprn" | "exact_address". These are
-    # the only two accepted forms of evidence, so the score is always 100.
+    # How the certificate was identified: "uprn" | "exact_address" |
+    # "address_designator_normalized" (exact but for a leading Flat/Apartment
+    # designator). These are the only accepted forms of evidence, so the score
+    # is always 100; the method is what distinguishes them.
     epc_match_method: Optional[str] = None
     epc_floor_area_sqm: Optional[float] = None
     epc_floor_area_sqft: Optional[int] = None

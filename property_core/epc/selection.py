@@ -1,9 +1,11 @@
 """Safe candidate selection.
 
-v1.14 contract — deliberately only two ways to select a certificate:
+v1.14 contract — deliberately only three ways to select a certificate:
 
-  1. exact UPRN match (exactly one candidate carries it), or
-  2. exact normalized full-address equality,
+  1. exact UPRN match (exactly one candidate carries it),
+  2. exact normalized full-address equality, or
+  3. the same, after canonicalizing a LEADING "Flat <n>" / "Apartment <n>"
+     designator to one token (see _canon),
 
 and otherwise EPCAmbiguousMatchError.
 
@@ -27,8 +29,21 @@ recoverable — the caller browses summaries and picks a certificate number —
 whereas attaching another property's EPC silently corrupts floor area, rating and
 every price-per-sqft derived from them.
 
-Normalization is limited to case and punctuation. Nothing is inferred: no
-abbreviation expansion, no component reordering, no dropped components.
+Normalization is limited to case, punctuation and the leading flat designator.
+Nothing else is inferred: no abbreviation expansion, no component reordering, no
+dropped components.
+
+The designator rule is measured, not assumed. Over 210 PPD cases against 1,063
+live EPC rows, exact-address equality matched 8 (3.8%) where the removed
+structured matcher had matched 66 (31.4%). Every one of the 58 lost matches
+differed by exactly one token — PPD writes "FLAT n", the EPC register writes
+"Apartment n" — with all numeric components identical, 29 in each direction, and
+no designator-swapped rival certificate in any of the 12 postcodes. Folding the
+two recovers all 58 and merges no two distinct EPC addresses in that corpus.
+
+Unlike the structured matcher, this fails SAFE: canonicalization can only ever
+make two addresses collide, and a collision is a duplicate, which the ambiguity
+rule already refuses. It cannot invent a winner from partial evidence.
 """
 
 from __future__ import annotations
@@ -53,17 +68,36 @@ def _norm(s: Optional[str]) -> str:
     return " ".join(_WORD_RE.findall((s or "").lower()))
 
 
+# Anchored at the start and requiring a numeric unit immediately after, so this
+# rewrites a genuine leading designator and nothing else. "apartment road" has no
+# unit token and is untouched; "24 apartment road" is not leading and is
+# untouched. "apt" is deliberately absent — it has not been observed in the
+# register, and unobserved synonyms are guesses.
+_DESIGNATOR_RE = re.compile(r"^(?:flat|apartment)\s+(\d+[a-z]?)(?=\s|$)")
+
+
+def _canon(s: Optional[str]) -> str:
+    """``_norm`` plus one canonical spelling of a LEADING flat designator.
+
+    Only the designator word is rewritten. The unit identifier is preserved
+    verbatim, as is every other token and the order of all of them — so this can
+    never make two addresses agree that differ anywhere else.
+    """
+    return _DESIGNATOR_RE.sub(r"flat \1", _norm(s), count=1)
+
+
 @dataclass(frozen=True)
 class SelectionResult:
     """The selected row and the identity evidence that selected it.
 
     ``confidence`` is always 100: the only accepted evidence is identity. It is
     retained so callers that record a score keep a stable field, not because
-    there is a spectrum.
+    there is a spectrum. ``method`` distinguishes literal equality from
+    designator-canonicalized equality so a consumer can treat them differently.
     """
 
     row: EPCSearchRow
-    method: str          # "uprn" | "exact_address"
+    method: str          # "uprn" | "exact_address" | "address_designator_normalized"
     confidence: int      # always 100
 
 
@@ -102,18 +136,37 @@ def select_candidate(
             f"{len(rows)} candidate(s) but no address or UPRN supplied; there is no "
             "evidence to identify a specific property", rows)
 
+    # Candidates are gathered on the CANONICAL form first, deliberately. Literal
+    # equality implies canonical equality, so the canonical set is a superset of
+    # the exact set — collecting it first is what makes a collision impossible to
+    # miss. Selecting on the exact set first would let a literal match win while
+    # a designator-variant duplicate sat unexamined beside it, which is precisely
+    # the "one survivor is identity" mistake this module exists to refuse.
+    # Only the leading flat designator is canonicalized; every other token, and
+    # the order of all of them, still has to match exactly.
     target = _norm(address)
-    exact = [r for r in rows if _norm(r.address) == target]
-    if len(exact) == 1:
-        return SelectionResult(exact[0], "exact_address", 100)
-    if len(exact) > 1:
+    canon_target = _canon(address)
+    canon = [r for r in rows if _canon(r.address) == canon_target]
+
+    if len(canon) == 1:
+        row = canon[0]
+        method = "exact_address" if _norm(row.address) == target \
+            else "address_designator_normalized"
+        return SelectionResult(row, method, 100)
+
+    if len(canon) > 1:
+        if all(_norm(r.address) == target for r in canon):
+            raise EPCAmbiguousMatchError(
+                f"{len(canon)} certificates share the address text {address!r}; "
+                "cannot select one", canon)
         raise EPCAmbiguousMatchError(
-            f"{len(exact)} certificates share the address text {address!r}; cannot "
-            "select one", exact)
+            f"{len(canon)} certificates share the address text {address!r} once the "
+            "leading flat designator is canonicalized; cannot select one", canon)
 
     raise EPCAmbiguousMatchError(
         f"no candidate's address exactly matches {address!r}. Selection requires a "
-        "UPRN or an exact address match — partial agreement on street, building or "
+        "UPRN, or an exact address match up to case, punctuation and the leading "
+        "flat designator — partial agreement on street, building or "
         "unit is not accepted, because it has repeatedly selected a different "
         f"property. Candidate addresses: "
         f"{sorted(r.address for r in rows if r.address)[:5]}",

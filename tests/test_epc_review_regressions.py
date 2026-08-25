@@ -85,17 +85,25 @@ class TestSuppliedUprnMismatch:
 
 
 class TestMatchScoreHonesty:
-    def test_structured_narrowing_no_longer_selects_at_all(self):
-        """Same unit and street, different wording ("Apartment" vs "Flat").
+    def test_designator_difference_selects_but_names_its_evidence(self):
+        """"Apartment 2" vs "Flat 2" — everything else identical.
 
-        This used to select at confidence 80. The structured acceptance path is
-        gone in v1.14: partial agreement repeatedly selected a different
-        property, so only identity evidence is accepted now. Refusing is
-        recoverable — the caller browses summaries — whereas attaching another
-        property's certificate is not.
+        The structured acceptance path that once handled this (at confidence 80)
+        is gone. This now selects through the one measured normalization instead:
+        every other token and its position matches exactly, only the leading
+        designator differs. The method names that so a consumer can tell it from
+        literal equality. See tests/test_epc_designator_normalization.py.
         """
         rows = [_row("0002", "Flat 2", "24 Alexandra Road"),
                 _row("0007", "Flat 7", "24 Alexandra Road")]
+        got = select_candidate(rows, address="Apartment 2, 24 Alexandra Road")
+        assert got.row.certificate_number == "0002"
+        assert got.method == "address_designator_normalized"
+
+    def test_narrowing_on_anything_but_the_designator_still_refuses(self):
+        """The designator rule must not become a general fuzzy path."""
+        rows = [_row("0002", "Flat 2", "24 Alexandra Rd"),
+                _row("0007", "Flat 7", "24 Alexandra Rd")]
         with pytest.raises(EPCAmbiguousMatchError):
             select_candidate(rows, address="Apartment 2, 24 Alexandra Road")
 
