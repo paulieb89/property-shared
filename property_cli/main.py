@@ -482,8 +482,14 @@ def epc_certificate(
 ) -> None:
     """Get an EPC certificate by its GOV.UK certificate number.
 
+    An optional shortcut for a number already in hand — from the GOV.UK EPC
+    register or an MCP summary-listing tool. Area mode (``epc search`` with a
+    postcode only) reports aggregate statistics and does NOT supply certificate
+    numbers. Without a number, use ``epc search --address`` instead: it returns
+    the full certificate directly.
+
     The argument is named ``certificate_hash`` for backward compatibility; the
-    value to pass is the certificate number returned by an area search.
+    value to pass is the certificate number.
     """
     http = _maybe_http_client(api_url)
     if http:

@@ -53,11 +53,9 @@ A postcode identifies an *area*, not a property, so `epc search` has two distinc
 modes:
 
 ```bash
-# AREA MODE — postcode only. Returns a summary OF THE POSTCODE (certificate count
-# and rating distribution). It does not return any single property's certificate.
-property-cli epc search "SW1A 1AA"
-
-# PROPERTY MODE — requires identity evidence. --address names the property.
+# PROPERTY MODE — the normal way to get a certificate. --address names the
+# property, and the full certificate is returned directly. You do NOT need a
+# certificate number to get here.
 property-cli epc search "SW1A 1AA" --address "10 Downing Street" --include-raw
 
 # Combined query (the postcode is parsed off the end). This reaches property mode
@@ -65,18 +63,36 @@ property-cli epc search "SW1A 1AA" --address "10 Downing Street" --include-raw
 # carries no address and falls back to area mode.
 property-cli epc search --q "10 Downing Street, SW1A 2AA"
 
-# Direct lookup by GOV.UK certificate number
+# AREA MODE — postcode only. AGGREGATE STATISTICS ONLY: certificate count and
+# rating distribution for the postcode. It does not list individual properties
+# and does not return certificate numbers.
+property-cli epc search "SW1A 1AA"
+
+# Optional shortcut, if you ALREADY have a certificate number (see below).
 property-cli epc certificate <certificate_number>
 ```
+
+**Area mode gives you statistics, not a way in.** It reports how many
+certificates a postcode holds and how their ratings are distributed. It does not
+enumerate the properties behind those numbers, and it does not expose their
+certificate numbers — so it is not a step on the way to fetching one. To get a
+certificate over REST or the CLI, go straight to property mode with an exact
+address; it returns the whole certificate in one call.
+
+**Where a certificate number comes from.** `epc certificate` is an optional
+shortcut for a number you already hold — from the
+[GOV.UK EPC register](https://www.gov.uk/find-energy-certificate) directly, from
+a previous result, or from an MCP summary-listing tool (`property_epc_summaries`
+on the plain MCP server, `epc_search` on the MCP app), which do enumerate
+candidates. Neither the REST API nor the CLI exposes such a listing surface in
+v1.14.0. If you do not have a number, use property mode — you do not need one.
 
 **Ambiguous matches are refused, not guessed.** In property mode the supplied
 address must match a certificate exactly — allowing only for case, punctuation,
 and a leading `Flat`/`Apartment` designator, so `Flat 2` and `Apartment 2` are the
 same property but `Flat 2` and `Flat 3` are not. If no candidate matches exactly,
 or more than one does, the command reports the ambiguity and fetches nothing
-rather than returning a neighbouring property's certificate. Use area mode to see
-what is at the postcode, then `epc certificate <certificate_number>` for the one
-you want.
+rather than returning a neighbouring property's certificate.
 
 ### Rightmove
 
@@ -223,26 +239,42 @@ Results include `locality` and `district` fields from the Land Registry address 
 ### EPC
 
 Three distinct surfaces. Picking the wrong one is the most common EPC mistake —
-`search` is for one property, `search-area` is for a postcode.
+`search` is for one property, `search-area` is for a postcode's statistics.
 
-- `GET /v1/epc/search-area?postcode=SW1A%201AA` — **postcode area summary.**
-  Certificate count and rating distribution for the postcode. Returns no single
-  property's certificate. `count: null` means the upstream did not report a
-  total — unknown, not zero.
 - `GET /v1/epc/search?postcode=SW1A%201AA&address=10%20Downing%20Street` —
-  **specific property lookup, requires identity evidence.** The address must
-  match a certificate exactly (case, punctuation and a leading `Flat`/`Apartment`
-  designator aside). A postcode with no address, an address matching nothing, or
-  an address matching several candidates all return **409 Conflict** — the
-  service refuses rather than guessing.
+  **specific property lookup, and the normal way to obtain a certificate.**
+  Returns the full certificate, so no certificate number is needed to get one.
+  The address must match a certificate exactly (case, punctuation and a leading
+  `Flat`/`Apartment` designator aside).
 - `GET /v1/epc/search?q=10%20Downing%20Street,%20SW1A%202AA` — same as above via
   a combined query; the postcode is parsed off the end.
-- `GET /v1/epc/certificate/{certificate_hash}` — **direct lookup by the GOV.UK
-  certificate number**, skipping matching entirely. The `{certificate_hash}` path
-  segment is a compatibility alias: pass the certificate number returned by
-  `search-area`.
+- `GET /v1/epc/search-area?postcode=SW1A%201AA` — **postcode aggregate statistics
+  only.** Certificate count and rating distribution. It does not list individual
+  properties, and `certificates` is always `null` — per-certificate detail is not
+  returned by a summary search, so this endpoint cannot supply certificate
+  numbers and is not a step towards fetching one. `count: null` means the
+  upstream did not report a total — unknown, not zero.
+- `GET /v1/epc/certificate/{certificate_hash}` — **optional shortcut for a
+  certificate number you already hold**, skipping address matching entirely.
+  Sources for that number are the [GOV.UK EPC
+  register](https://www.gov.uk/find-energy-certificate) or an MCP summary-listing
+  tool (`property_epc_summaries` / `epc_search`); REST does not expose a listing
+  surface in v1.14.0. The `{certificate_hash}` path segment is a compatibility
+  alias — pass the certificate number. Without a number, use `/search` instead.
 
-All three require `EPC_API_TOKEN`.
+Status codes on `/search`:
+
+| Status | Meaning |
+|---|---|
+| `200` | one certificate identified |
+| `404` | the postcode holds no certificates at all — genuine absence |
+| `409` | candidates exist, but none or several matched: no address supplied, no exact match, or an ambiguous match. The service refuses rather than guessing |
+| `501` / `502` / `503` / `429` | not configured / upstream auth failure / upstream outage / rate limited |
+
+`404` and `409` are distinct on purpose: `404` says the area has nothing, `409`
+says the area has candidates but your evidence did not single one out.
+
+All three surfaces require `EPC_API_TOKEN`.
 
 ### Rightmove
 - `GET /v1/rightmove/search-url?postcode=SW1A%201AA&property_type=sale&radius=0.25` — Sales
