@@ -260,55 +260,67 @@ uv run uvicorn app.main:app --reload        # dev mode
 ### PPD Comps
 
 ```bash
-curl "http://localhost:8000/api/v1/ppd/comps?postcode=NG1+1GF&months=24&limit=5"
+curl "http://localhost:8000/v1/ppd/comps?postcode=NG1+1GF&months=24&limit=5"
 ```
 
 ### PPD Comps with Address Match
 
 ```bash
-curl "http://localhost:8000/api/v1/ppd/comps?postcode=NG1+1GF&address=3+Broadway&months=24"
+curl "http://localhost:8000/v1/ppd/comps?postcode=NG1+1GF&address=3+Broadway&months=24"
 ```
 
 ### PPD Comps with EPC Enrichment
 
 ```bash
-curl "http://localhost:8000/api/v1/ppd/comps?postcode=NG1+1GF&enrich_epc=true"
+curl "http://localhost:8000/v1/ppd/comps?postcode=NG1+1GF&enrich_epc=true"
 ```
 
 ### PPD Transactions
 
 ```bash
-curl "http://localhost:8000/api/v1/ppd/transactions?postcode=NG1+1GF&limit=5"
+curl "http://localhost:8000/v1/ppd/transactions?postcode=NG1+1GF&limit=5"
 ```
 
 ### Rightmove Search URL
 
 ```bash
-curl "http://localhost:8000/api/v1/rightmove/search-url?postcode=NG1+1GF&property_type=sale&radius=0.5"
+curl "http://localhost:8000/v1/rightmove/search-url?postcode=NG1+1GF&property_type=sale&radius=0.5"
 ```
 
 ### EPC Search (combined address query)
 
 ```bash
-curl "http://localhost:8000/api/v1/epc/search?q=10+Downing+Street,+SW1A+2AA"
+curl "http://localhost:8000/v1/epc/search?q=10+Downing+Street,+SW1A+2AA"
 ```
 
 ### EPC Certificate by Certificate Number
 
 ```bash
-curl "http://localhost:8000/api/v1/epc/certificate/{certificate_number}"
+curl "http://localhost:8000/v1/epc/certificate/{certificate_number}"
 ```
 
-### Planning Council
+### Planning Council — not available over HTTP
+
+The planning router is **not mounted** by `property-api` (see `app/api/routes.py`):
+scraping council portals requires a UK residential IP, so the endpoint is
+disabled rather than shipped as a route that fails. There is no
+`/v1/planning/...` endpoint to call.
+
+Use the CLI or the library instead:
 
 ```bash
-curl "http://localhost:8000/api/v1/planning/council-for-postcode?postcode=NG1+1GF"
+property-cli planning council "NG1 1GF"
+```
+
+```python
+from property_core import PlanningService
+PlanningService().council_for_postcode("NG1 1GF")
 ```
 
 ### Property Report (full multi-source)
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/property/report" \
+curl -X POST "http://localhost:8000/v1/property/report" \
   -H "Content-Type: application/json" \
   -d '{"address": "3 Broadway, NG1 1GF"}'
 ```
@@ -316,5 +328,5 @@ curl -X POST "http://localhost:8000/api/v1/property/report" \
 ### Health Check
 
 ```bash
-curl "http://localhost:8000/api/v1/health"
+curl "http://localhost:8000/v1/health"
 ```

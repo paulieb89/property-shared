@@ -267,12 +267,16 @@ Status codes on `/search`:
 | Status | Meaning |
 |---|---|
 | `200` | one certificate identified |
+| `422` | **local validation failure** — neither `postcode` nor `q` supplied, a `q` whose postcode could not be parsed, or a FastAPI query-validation error. Nothing was sent upstream |
+| `400` | **the upstream EPC service rejected the query** — the request was well-formed locally but the register refused it |
 | `404` | the postcode holds no certificates at all — genuine absence |
 | `409` | candidates exist, but none or several matched: no address supplied, no exact match, or an ambiguous match. The service refuses rather than guessing |
 | `501` / `502` / `503` / `429` | not configured / upstream auth failure / upstream outage / rate limited |
 
-`404` and `409` are distinct on purpose: `404` says the area has nothing, `409`
-says the area has candidates but your evidence did not single one out.
+Three of these are easy to conflate, so they are kept deliberately distinct:
+`422` is *your request was malformed* (caught locally, no upstream call), `400`
+is *upstream rejected it*, and `404` versus `409` is *the area has nothing* versus
+*the area has candidates but your evidence did not single one out*.
 
 All three surfaces require `EPC_API_TOKEN`.
 

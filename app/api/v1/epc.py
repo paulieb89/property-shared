@@ -111,9 +111,16 @@ async def search(
     The address must match a certificate exactly, allowing only for case,
     punctuation and a leading Flat/Apartment designator.
 
-    404 = the postcode holds no certificates at all. 409 = candidates exist but
-    none or several matched; the service refuses rather than guessing. For a
-    postcode's aggregate statistics use /search-area instead.
+    Status outcomes:
+      422 - local validation failure: neither postcode nor q supplied, a q whose
+            postcode could not be parsed, or FastAPI query validation. Nothing
+            is sent upstream.
+      400 - the upstream EPC service rejected the query.
+      404 - the postcode holds no certificates at all (genuine absence).
+      409 - candidates exist but none or several matched; the service refuses
+            rather than guessing.
+
+    For a postcode's aggregate statistics use /search-area instead.
     """
     if not _client.is_configured():
         raise HTTPException(status_code=501, detail="EPC client not configured")

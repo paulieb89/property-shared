@@ -571,7 +571,7 @@ def example_api():
         uv run uvicorn app.main:app --reload        # dev mode
 
     PPD Comps:
-        curl "http://localhost:8000/api/v1/ppd/comps?postcode=NG1+1GF&months=24&limit=5"
+        curl "http://localhost:8000/v1/ppd/comps?postcode=NG1+1GF&months=24&limit=5"
 
         {
           "query": {"postcode": "NG1 1GF", "months": 24, "limit": 5},
@@ -587,55 +587,57 @@ def example_api():
         }
 
     PPD Comps with Address Match:
-        curl "http://localhost:8000/api/v1/ppd/comps?postcode=NG1+1GF&address=3+Broadway&months=24"
+        curl "http://localhost:8000/v1/ppd/comps?postcode=NG1+1GF&address=3+Broadway&months=24"
 
     PPD Comps with EPC Enrichment:
-        curl "http://localhost:8000/api/v1/ppd/comps?postcode=NG1+1GF&enrich_epc=true"
+        curl "http://localhost:8000/v1/ppd/comps?postcode=NG1+1GF&enrich_epc=true"
 
     PPD Transactions:
-        curl "http://localhost:8000/api/v1/ppd/transactions?postcode=NG1+1GF&limit=5"
+        curl "http://localhost:8000/v1/ppd/transactions?postcode=NG1+1GF&limit=5"
 
     Rightmove Search URL:
-        curl "http://localhost:8000/api/v1/rightmove/search-url?postcode=NG1+1GF&property_type=sale&radius=0.5"
+        curl "http://localhost:8000/v1/rightmove/search-url?postcode=NG1+1GF&property_type=sale&radius=0.5"
 
     Rightmove Listings:
-        curl "http://localhost:8000/api/v1/rightmove/listings?postcode=NG1+1GF&property_type=sale&radius=0.5&max_pages=1"
+        curl "http://localhost:8000/v1/rightmove/listings?postcode=NG1+1GF&property_type=sale&radius=0.5&max_pages=1"
 
     EPC Search (one property; needs an address, refuses ambiguity):
-        curl "http://localhost:8000/api/v1/epc/search?q=10+Downing+Street,+SW1A+2AA"
+        curl "http://localhost:8000/v1/epc/search?q=10+Downing+Street,+SW1A+2AA"
 
     EPC Area Summary (a postcode, not a property):
-        curl "http://localhost:8000/api/v1/epc/search-area?postcode=SW1A+1AA"
+        curl "http://localhost:8000/v1/epc/search-area?postcode=SW1A+1AA"
 
     EPC Certificate (by GOV.UK certificate number):
-        curl "http://localhost:8000/api/v1/epc/certificate/{certificate_number}"
+        curl "http://localhost:8000/v1/epc/certificate/{certificate_number}"
 
-    Planning Council:
-        curl "http://localhost:8000/api/v1/planning/council-for-postcode?postcode=NG1+1GF"
+    Planning Council — NOT AVAILABLE over HTTP:
+        The planning router is not mounted by property-api (app/api/routes.py):
+        scraping council portals needs a UK residential IP. Use the CLI instead:
+            property-cli planning council "NG1 1GF"
 
     Property Report (full multi-source):
-        curl -X POST "http://localhost:8000/api/v1/property/report" \\
+        curl -X POST "http://localhost:8000/v1/property/report" \\
           -H "Content-Type: application/json" \\
           -d '{"address": "3 Broadway, NG1 1GF"}'
 
     Health Check:
-        curl "http://localhost:8000/api/v1/health"
+        curl "http://localhost:8000/v1/health"
     """
     print("=== HTTP API Examples ===")
     print("Start the server:")
     print("  uv run property-api")
     print()
     print("PPD Comps:")
-    print('  curl "http://localhost:8000/api/v1/ppd/comps?postcode=NG1+1GF&months=24&limit=5"')
+    print('  curl "http://localhost:8000/v1/ppd/comps?postcode=NG1+1GF&months=24&limit=5"')
     print()
     print("Rightmove Listings:")
-    print('  curl "http://localhost:8000/api/v1/rightmove/search-url?postcode=NG1+1GF&property_type=sale"')
+    print('  curl "http://localhost:8000/v1/rightmove/search-url?postcode=NG1+1GF&property_type=sale"')
     print()
     print("EPC Search:")
-    print('  curl "http://localhost:8000/api/v1/epc/search?q=10+Downing+Street,+SW1A+2AA"')
+    print('  curl "http://localhost:8000/v1/epc/search?q=10+Downing+Street,+SW1A+2AA"')
     print()
     print("Property Report:")
-    print('  curl -X POST "http://localhost:8000/api/v1/property/report" \\')
+    print('  curl -X POST "http://localhost:8000/v1/property/report" \\')
     print('    -H "Content-Type: application/json" \\')
     print('    -d \'{"address": "3 Broadway, NG1 1GF"}\'')
     print()
