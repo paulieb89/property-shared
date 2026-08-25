@@ -22,6 +22,9 @@ sufficient:
     read as the building number
   * "10 1st Avenue" matched "10 2nd Avenue" — digit-leading tokens were dropped
     from the street, collapsing both to {"avenue"}
+  * a whitespace- or punctuation-only address ("   ", "---") matched a candidate
+    carrying no address at all — both normalized to "", so absence of evidence
+    compared equal to absence of evidence and selected at confidence 100
 
 Each fix was correct and each left another gap, because UK address text does not
 decompose reliably by pattern. The asymmetry decides it: refusing a real match is
@@ -136,6 +139,28 @@ def select_candidate(
             f"{len(rows)} candidate(s) but no address or UPRN supplied; there is no "
             "evidence to identify a specific property", rows)
 
+    # Emptiness is ALSO tested after normalization. The guard above only catches
+    # None and "": a whitespace- or punctuation-only address ("   ", "---") is
+    # truthy but normalizes to "", and an addressless candidate row normalizes to
+    # "" as well — so the two compared equal and absence of evidence was selected
+    # as `exact_address` at confidence 100.
+    target = _norm(address)
+    if not target:
+        raise EPCAmbiguousMatchError(
+            f"{len(rows)} candidate(s) but the supplied address {address!r} carries no "
+            "address text once normalized; there is no evidence to identify a specific "
+            "property", rows)
+
+    # Rows carrying no address text cannot participate in address matching, for
+    # the same reason. A UPRN can still select such a row — that is independent
+    # identity evidence — which is why this filter lives here and not in the
+    # `usable` filter above.
+    rows = [r for r in rows if _norm(r.address)]
+    if not rows:
+        raise EPCAmbiguousMatchError(
+            "no candidate carries address text to match against; a certificate "
+            "without an address can only be selected by UPRN", [])
+
     # Candidates are gathered on the CANONICAL form first, deliberately. Literal
     # equality implies canonical equality, so the canonical set is a superset of
     # the exact set — collecting it first is what makes a collision impossible to
@@ -144,7 +169,6 @@ def select_candidate(
     # the "one survivor is identity" mistake this module exists to refuse.
     # Only the leading flat designator is canonicalized; every other token, and
     # the order of all of them, still has to match exactly.
-    target = _norm(address)
     canon_target = _canon(address)
     canon = [r for r in rows if _canon(r.address) == canon_target]
 
