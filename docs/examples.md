@@ -293,10 +293,10 @@ curl "http://localhost:8000/api/v1/rightmove/search-url?postcode=NG1+1GF&propert
 curl "http://localhost:8000/api/v1/epc/search?q=10+Downing+Street,+SW1A+2AA"
 ```
 
-### EPC Certificate by Key
+### EPC Certificate by Certificate Number
 
 ```bash
-curl "http://localhost:8000/api/v1/epc/certificate/{lmk_key}"
+curl "http://localhost:8000/api/v1/epc/certificate/{certificate_number}"
 ```
 
 ### Planning Council

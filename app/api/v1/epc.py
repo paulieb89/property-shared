@@ -69,7 +69,12 @@ async def get_certificate(
     certificate_hash: str,
     include_raw: bool = Query(False, description="Include raw EPC API JSON"),
 ) -> EPCRecordResponse:
-    """Get EPC certificate by lmk-key (certificate hash)."""
+    """Get an EPC certificate by its GOV.UK certificate number.
+
+    The `{certificate_hash}` path parameter is a compatibility alias kept from
+    the retired API; the value to pass is the certificate number returned by
+    `/search-area`.
+    """
     if not _client.is_configured():
         raise HTTPException(status_code=501, detail="EPC client not configured")
 

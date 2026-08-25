@@ -379,13 +379,14 @@ async def property_epc_summaries(postcode: str, page: int = 1) -> dict:
 @mcp.tool(annotations={"readOnlyHint": True})
 @_timed_tool
 async def epc_certificate(lmk_key: str) -> dict | None:
-    """Fetch a single EPC certificate by its lmk_key (certificate hash).
+    """Fetch a single EPC certificate by its GOV.UK certificate number.
 
     Use after property_epc_search has identified the correct cert — this is
     faster than property_epc(postcode, address) as it makes a direct lookup
-    with no fuzzy matching or postcode re-fetch.
+    with no address matching or postcode re-fetch.
 
-    lmk_key is returned in every property_epc_search result.
+    The parameter is named lmk_key as a compatibility alias; pass the
+    certificate number, which is returned in every property_epc_search result.
 
     Returns the full EPC certificate, or null only when no such certificate is lodged. A null result means no such certificate is lodged. If the EPC service cannot be reached the tool raises an error instead — never treat an error as evidence that a property has no certificate.
     """

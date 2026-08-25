@@ -601,11 +601,14 @@ def example_api():
     Rightmove Listings:
         curl "http://localhost:8000/api/v1/rightmove/listings?postcode=NG1+1GF&property_type=sale&radius=0.5&max_pages=1"
 
-    EPC Search:
+    EPC Search (one property; needs an address, refuses ambiguity):
         curl "http://localhost:8000/api/v1/epc/search?q=10+Downing+Street,+SW1A+2AA"
 
-    EPC Certificate:
-        curl "http://localhost:8000/api/v1/epc/certificate/{lmk_key}"
+    EPC Area Summary (a postcode, not a property):
+        curl "http://localhost:8000/api/v1/epc/search-area?postcode=SW1A+1AA"
+
+    EPC Certificate (by GOV.UK certificate number):
+        curl "http://localhost:8000/api/v1/epc/certificate/{certificate_number}"
 
     Planning Council:
         curl "http://localhost:8000/api/v1/planning/council-for-postcode?postcode=NG1+1GF"

@@ -148,6 +148,11 @@ What the new upstream supports, and what it does not:
 - **Summary search** by postcode — returns address, UPRN (often absent), energy
   band, registration date and schema type. It does **not** return energy score,
   floor area or property type; those exist only on a full certificate.
+- **A postcode selects an area, never a property.** Identifying one property
+  needs a UPRN or an address matching a certificate exactly (case, punctuation
+  and a leading `Flat`/`Apartment` designator aside). Anything less — no address,
+  no match, or several matches — is refused rather than resolved to a best guess.
+  See [USER_GUIDE.md](USER_GUIDE.md) for the CLI and REST surfaces.
 - **Area statistics** are limited to the record count and, when the bounded
   response contains every matching summary, the rating distribution.
   Property-type breakdown and floor-area statistics are reported as `None` —

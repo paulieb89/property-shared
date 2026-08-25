@@ -49,17 +49,34 @@ property-cli ppd download-url --kind monthly           # Latest monthly update
 
 Requires `EPC_API_TOKEN` in `.env`. Area mode returns the record count and, when the bounded response is complete, the rating distribution; property-type and floor-area statistics are unavailable because the EPC service exposes them only on individual certificates. England & Wales only.
 
+A postcode identifies an *area*, not a property, so `epc search` has two distinct
+modes:
+
 ```bash
-# Search by postcode (returns first/best match)
+# AREA MODE — postcode only. Returns a summary OF THE POSTCODE (certificate count
+# and rating distribution). It does not return any single property's certificate.
 property-cli epc search "SW1A 1AA"
+
+# PROPERTY MODE — requires identity evidence. --address names the property.
 property-cli epc search "SW1A 1AA" --address "10 Downing Street" --include-raw
 
-# Combined address query (parses postcode from end)
+# Combined query (the postcode is parsed off the end). This reaches property mode
+# only when the text before the postcode names a property; --q "SW1A 2AA" alone
+# carries no address and falls back to area mode.
 property-cli epc search --q "10 Downing Street, SW1A 2AA"
 
-# Direct lookup by certificate hash (lmk-key)
-property-cli epc certificate <certificate_hash>
+# Direct lookup by GOV.UK certificate number
+property-cli epc certificate <certificate_number>
 ```
+
+**Ambiguous matches are refused, not guessed.** In property mode the supplied
+address must match a certificate exactly — allowing only for case, punctuation,
+and a leading `Flat`/`Apartment` designator, so `Flat 2` and `Apartment 2` are the
+same property but `Flat 2` and `Flat 3` are not. If no candidate matches exactly,
+or more than one does, the command reports the ambiguity and fetches nothing
+rather than returning a neighbouring property's certificate. Use area mode to see
+what is at the postcode, then `epc certificate <certificate_number>` for the one
+you want.
 
 ### Rightmove
 
@@ -204,9 +221,28 @@ property-cli report generate "SW1A 2AA" --api-url http://localhost:8000
 Results include `locality` and `district` fields from the Land Registry address data.
 
 ### EPC
-- `GET /v1/epc/search?postcode=SW1A%201AA&address=10%20Downing%20Street` (requires creds)
-- `GET /v1/epc/search?q=10%20Downing%20Street,%20SW1A%202AA` (combined address query)
-- `GET /v1/epc/certificate/{certificate_hash}` (direct lookup by lmk-key)
+
+Three distinct surfaces. Picking the wrong one is the most common EPC mistake —
+`search` is for one property, `search-area` is for a postcode.
+
+- `GET /v1/epc/search-area?postcode=SW1A%201AA` — **postcode area summary.**
+  Certificate count and rating distribution for the postcode. Returns no single
+  property's certificate. `count: null` means the upstream did not report a
+  total — unknown, not zero.
+- `GET /v1/epc/search?postcode=SW1A%201AA&address=10%20Downing%20Street` —
+  **specific property lookup, requires identity evidence.** The address must
+  match a certificate exactly (case, punctuation and a leading `Flat`/`Apartment`
+  designator aside). A postcode with no address, an address matching nothing, or
+  an address matching several candidates all return **409 Conflict** — the
+  service refuses rather than guessing.
+- `GET /v1/epc/search?q=10%20Downing%20Street,%20SW1A%202AA` — same as above via
+  a combined query; the postcode is parsed off the end.
+- `GET /v1/epc/certificate/{certificate_hash}` — **direct lookup by the GOV.UK
+  certificate number**, skipping matching entirely. The `{certificate_hash}` path
+  segment is a compatibility alias: pass the certificate number returned by
+  `search-area`.
+
+All three require `EPC_API_TOKEN`.
 
 ### Rightmove
 - `GET /v1/rightmove/search-url?postcode=SW1A%201AA&property_type=sale&radius=0.25` — Sales
