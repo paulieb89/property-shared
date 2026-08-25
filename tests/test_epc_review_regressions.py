@@ -85,18 +85,24 @@ class TestSuppliedUprnMismatch:
 
 
 class TestMatchScoreHonesty:
-    def test_structured_narrowing_is_not_reported_as_certainty(self):
+    def test_structured_narrowing_no_longer_selects_at_all(self):
         """Same unit and street, different wording ("Apartment" vs "Flat").
 
-        Structurally unambiguous, but not an identity match — so it must not
-        claim the confidence reserved for UPRN or exact-address evidence.
+        This used to select at confidence 80. The structured acceptance path is
+        gone in v1.14: partial agreement repeatedly selected a different
+        property, so only identity evidence is accepted now. Refusing is
+        recoverable — the caller browses summaries — whereas attaching another
+        property's certificate is not.
         """
         rows = [_row("0002", "Flat 2", "24 Alexandra Road"),
                 _row("0007", "Flat 7", "24 Alexandra Road")]
-        got = select_candidate(rows, address="Apartment 2, 24 Alexandra Road")
-        assert got.row.certificate_number == "0002"
-        assert got.method == "street_number_unit"
-        assert got.confidence < 100, "only identity evidence may claim 100"
+        with pytest.raises(EPCAmbiguousMatchError):
+            select_candidate(rows, address="Apartment 2, 24 Alexandra Road")
+
+    def test_selection_only_ever_reports_identity_confidence(self):
+        rows = [_row("0002", "Flat 2", "24 Alexandra Road")]
+        got = select_candidate(rows, address="Flat 2, 24 Alexandra Road")
+        assert got.method == "exact_address" and got.confidence == 100
 
     def test_enrichment_records_the_match_method(self):
         from property_core.enrichment import enrich_comps_with_epc

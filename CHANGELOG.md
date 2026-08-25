@@ -37,7 +37,7 @@ per-certificate fan-out.
 ### Fixed after adversarial review
 - **Unit agreement is enforced even when one candidate remains.** A lone `Flat 3` was returned for a `Flat 2` query — narrowing to a single row said nothing about whether that row was the right property.
 - **A supplied UPRN that matches nothing no longer falls back to address text.** A UPRN miss is evidence of a miss, not licence to guess.
-- **`epc_match_score` is no longer 100 for a unique selection.** 100 is reserved for identity evidence (UPRN or exact address); structured narrowing reports 80 and the new `epc_match_method` field names the evidence.
+- **`epc_match_score` is no longer 100 for a unique selection.** 100 is reserved for identity evidence (UPRN or exact address); structured narrowing reported 80 and the new `epc_match_method` field named the evidence. (Superseded in round 5: the structured path was removed, so the only scores now emitted are 100.)
 - **Complete REST failure taxonomy.** Upstream 403 surfaced as HTTP 500; upstream 400 would have surfaced as 503. Now: configuration 501, authentication 502, rate limit 429, invalid query 400, ambiguity 409, unsupported operation 410, outage 503, absence 404.
 - **Unknown record counts are `null`, never `0`.** Missing `totalRecords` produced HTTP 200 with `count: 0`.
 - **Codebook lookups are async.** A synchronous request inside the async certificate path blocked the event loop on every cold code.
@@ -57,6 +57,25 @@ per-certificate fan-out.
 - **Building and unit identifiers are parsed and compared independently.** A pooled set of all numbers let a shared unit mask a conflicting building: "Flat 2, 24 Alexandra Road" selected "Flat 2, 99 Alexandra Road" because both contained "2". A matching unit can no longer compensate for a mismatched building, and vice versa.
 - **Codebook fetches are single-flighted per `(code, schemaVersion)`.** Four concurrent cold certificates issued twelve requests — four each for `built_form`, `property_type` and `tenure`. Concurrent callers now share one in-flight fetch, protected with `asyncio.shield` so a caller hitting the warm budget cannot tear down the fetch others are awaiting. The regression test asserts exactly one request per table rather than elapsed time, which duplicate concurrent requests would have satisfied.
 - Corrected stale descriptions in `CLAUDE.md` and `property_app/tools.py` that still described EPC enrichment as fetching every certificate per postcode in one call and fuzzy-matching, and area mode as returning all certificates.
+
+### Fixed after review round 5 — the structured matcher is removed, not repaired
+Four rounds each repaired a specific way partial evidence could look sufficient, and each round a new one appeared: a shared street token, a shared unit masking a different building, a block number read as a building number, an ordinal street name reduced to its street type. Round 5 reproduced two more on `6f8fd3b` — `"Flat 2, Block 3, 24 Alexandra Road"` selected `"Flat 2, Block 3, 99 Alexandra Road"`, and `"10 1st Avenue"` selected `"10 2nd Avenue"`, both at confidence 80. Enumerating counter-examples was not converging, so the acceptance path itself is gone.
+
+- **Selection accepts identity evidence only.** Exactly two rules: an exact UPRN match, or exact normalized full-address equality. Everything else raises `EPCAmbiguousMatchError`. Normalization covers case, punctuation and whitespace only — it preserves component order and never equates abbreviations, because that is an inference rather than a formatting difference. The helpers that produced every defect above (`_building`, `_unit`, `_street_words`, `_numbers`) are deleted, and a test pins their absence so the path cannot be reintroduced piecemeal.
+- **Confidence is invariant-tested, not example-tested.** `tests/test_epc_selection_invariants.py` asserts the property rather than a list of known-bad addresses: mutating *any* component of a four-part address (unit, block, building number, ordinal street, street type, street name) must refuse; dropping, reordering or adding a component must refuse; case and punctuation differences must still match. This is what the previous rounds' example-by-example tests could not do — each passed while the next counter-example was still live.
+- **One codebook attempt is one failure.** Four concurrent waiters shared a single failed HTTP request, but each waiter incremented the failure counter, so one upstream attempt recorded four failures and tripped the breaker. Fetch, cache write and failure accounting now all live in the shared loader task; waiters only consume its result. A cancelled waiter can neither tear down the shared fetch nor double-count, and a loader that fails after every waiter has gone no longer surfaces an unretrieved task exception.
+
+#### Measured cost of the stricter selector
+Measured on 12 live EPC summary searches over the 12 most-populated postcodes of a cached 400-transaction PPD capture (Birmingham B1) — 210 PPD cases against 1,063 real EPC rows, no upstream failures and no empty results:
+
+| Selector | Matches | Rate |
+|---|---|---|
+| Structured (pre-round-5) | 66 / 210 | 31.4% |
+| Identity-only (shipped) | 8 / 210 | 3.8% |
+
+Every one of the 58 lost matches differs by exactly one token — PPD writes `FLAT n` where EPC writes `Apartment n` — with all numeric components identical, and none of them had a designator-swapped rival certificate in the same postcode. This is a real and large reduction in enrichment coverage, and it is not hidden: an un-enriched comp reports no EPC fields rather than another property's certificate.
+
+Folding `flat`/`apartment`/`apt` into one normalized token would recover all 58 (66/210, 31.4%) and, on this corpus, merges no two distinct EPC addresses. It is deliberately **not** shipped in v1.14 — whether a designator is formatting or identity is a contract decision, and unlike the structured matcher it would fail safe (a merge becomes a duplicate, which the ambiguity rule already refuses). Corpus caveat: 12 city-centre postcodes dominated by apartment blocks are not a national sample.
 
 ### Compatibility
 - v1 `EPCData` fields, types and meanings are unchanged; `lmk_key`/`certificate_hash` carry the certificate number; the MCP `epc_certificate` tool still accepts `lmk_key`.

@@ -57,8 +57,9 @@ async def enrich_comps_with_epc(
     Args:
         comps: List of PPDTransaction objects.
         epc_client: Configured EPCClient instance. If None, creates one internally.
-        min_score: Retained for signature compatibility; selection is now
-            structured (building/street/unit) rather than fuzzy-scored.
+        min_score: Retained for signature compatibility only; it has no effect.
+            Selection accepts identity evidence alone (exact UPRN or exact
+            normalized address), so there is no score to threshold.
         max_concurrent: Max concurrent EPC API calls (rate limiting).
 
     Returns:
@@ -140,9 +141,9 @@ async def enrich_comps_with_epc(
                     cert_cache[cert_no] = None
             match = cert_cache[cert_no]
             if match is not None:
-                # Not 100 unless the evidence is identity (UPRN or exact
-                # address). A unique survivor of structured narrowing is strong,
-                # but claiming certainty would overstate it.
+                # Always 100: selection accepts nothing but identity evidence.
+                # Kept as a field read rather than a literal so a future
+                # confidence tier cannot silently be reported as certainty.
                 match_score = selected.confidence
                 comp.epc_match_method = selected.method
                 floor_sqm = match.floor_area

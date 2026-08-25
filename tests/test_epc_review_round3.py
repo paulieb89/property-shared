@@ -294,11 +294,21 @@ class TestBuildingAndUnitComparedIndependently:
             select_candidate(rows, address="Flat 2, 24 Alexandra Road")
         assert "unit" in str(exc.value).lower()
 
-    def test_same_building_and_unit_is_accepted(self):
+    def test_same_building_and_unit_but_different_wording_is_now_refused(self):
+        """"Apartment 2" vs "Flat 2" used to be accepted at confidence 80.
+
+        v1.14 removed the structured acceptance path entirely — see
+        tests/test_epc_selection_invariants.py. Only an exact address or a UPRN
+        selects.
+        """
         rows = [_row("1", "Apartment 2", "24 Alexandra Road")]
+        with pytest.raises(EPCAmbiguousMatchError):
+            select_candidate(rows, address="Flat 2, 24 Alexandra Road")
+
+    def test_identical_address_is_accepted(self):
+        rows = [_row("1", "Flat 2", "24 Alexandra Road")]
         got = select_candidate(rows, address="Flat 2, 24 Alexandra Road")
-        assert got.row.certificate_number == "1"
-        assert got.confidence < 100
+        assert got.row.certificate_number == "1" and got.confidence == 100
 
     def test_unitless_house_number_mismatch_is_refused(self):
         rows = [_row("1", "99 Alexandra Road")]

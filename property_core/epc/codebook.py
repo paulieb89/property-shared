@@ -52,7 +52,7 @@ class EPCCodebook:
         # schemaVersion) share one in-flight fetch instead of each issuing a
         # request. Without this, four concurrent cold certificates produced
         # twelve requests for three tables.
-        self._inflight: dict[tuple[str, str | None], "asyncio.Task[dict[int, str]]"] = {}
+        self._inflight: dict[tuple[str, str | None], "asyncio.Task[None]"] = {}
         self._failures = 0
         self._tripped = False
 
@@ -100,32 +100,59 @@ class EPCCodebook:
         if cache_key not in self._tables:
             if self._tripped:
                 return None
-
-            task = self._inflight.get(cache_key)
-            if task is None:
-                task = asyncio.ensure_future(self._fetch_table(code, schema_version))
-                self._inflight[cache_key] = task
-
             try:
                 # shield: if THIS caller is cancelled (e.g. the warm budget
-                # expires), the shared fetch keeps running for everyone else
+                # expires), the shared loader keeps running for everyone else
                 # rather than being torn down mid-flight.
-                table = await asyncio.shield(task)
+                await asyncio.shield(self._loader(cache_key))
             except asyncio.CancelledError:
                 raise
+            except Exception:  # noqa: BLE001 - the loader already accounted for it
+                return None
+        return self._tables.get(cache_key, {}).get(key)
+
+    def _loader(self, cache_key: tuple[str, str | None]) -> "asyncio.Task[None]":
+        """The single shared task that fetches, caches and accounts for one table.
+
+        Fetch, cache write and failure accounting all live HERE rather than in
+        each waiter. Previously every waiter incremented the failure counter, so
+        four waiters sharing ONE failed request recorded four failures and
+        tripped the breaker on a single upstream attempt. One attempt is now one
+        failure, however many callers were waiting on it.
+        """
+        task = self._inflight.get(cache_key)
+        if task is not None:
+            return task
+
+        code, schema_version = cache_key
+
+        async def _load() -> None:
+            try:
+                table = await self._fetch_table(code, schema_version)
             except Exception as exc:  # noqa: BLE001 - degradation is the contract
-                self._inflight.pop(cache_key, None)
+                # Exactly one failure per upstream attempt.
                 self._failures += 1
                 if self._failures >= _BREAKER_THRESHOLD:
                     self._tripped = True
                     _log.warning("EPC codebook unavailable; breaker tripped (%s)", exc)
-                # Cache nothing on failure, so a later recovery can still populate.
-                return None
-
-            self._inflight.pop(cache_key, None)
+                raise
+            # Cache nothing on failure, so a later recovery can still populate.
             self._tables[cache_key] = table
             self._failures = 0
-        return self._tables[cache_key].get(key)
+
+        task = asyncio.ensure_future(_load())
+
+        def _done(t: "asyncio.Task[None]") -> None:
+            self._inflight.pop(cache_key, None)
+            # Consume any exception even when every waiter has already gone
+            # away, so a background failure cannot surface as an unretrieved
+            # task exception.
+            if not t.cancelled():
+                t.exception()
+
+        task.add_done_callback(_done)
+        self._inflight[cache_key] = task
+        return task
 
     async def warm(self, schema_version: Optional[str]) -> list[str]:
         """Pre-fetch the tables v1 semantics need, so projection stays sync.
