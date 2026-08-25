@@ -1,5 +1,68 @@
 # Changelog
 
+## v1.14.0 (2026-08-25) — EPC restored on the GOV.UK Bearer API
+
+Operational restoration after the retirement of `epc.opendatacommunities.org`.
+**This does not claim that every historical EPC operation remains available** —
+the replacement service exposes less in a search than the retired one did, and
+the gaps are reported honestly rather than fabricated or hidden behind
+per-certificate fan-out.
+
+### Restored
+- **Direct certificate retrieval** — `get_certificate(certificate_number)`; one upstream call (plus at most three cold codebook-table fetches).
+- **Summary-native EPC search** — new `search_summaries()` returning `EPCSearchPage` (results, pagination, returned distinct count, unusable rows, duplicates removed, `complete`, warnings). One call, never any certificate fan-out.
+- **Address-specific retrieval** — only when a unique candidate can be selected safely; one search plus one certificate.
+- **Report and comps enrichment** — summary match first, then a single certificate fetch for the selected candidate, cached by certificate number.
+- **Area count** and, when the bounded response demonstrably contains every matching summary, the area rating distribution.
+
+### Configuration — Bearer token
+- `EPC_API_TOKEN` is now required. Get one at https://get-energy-performance-data.communities.gov.uk/.
+- `EPC_API_EMAIL` / `EPC_API_KEY` are **deprecated and unsupported**. They are parsed only to raise an actionable `EPCConfigurationError`; they are never used to make a request, and `is_configured()` is true only with a Bearer token. Scheduled for removal in the next breaking release.
+
+### Deprecated / unsupported
+- **`search_all_by_postcode()`** raises `EPCUnsupportedOperationError` and makes no request. Search now returns summaries with no energy score, and `EPCData.score` is a non-Optional `int` — every row would need its own certificate fetch or a fabricated `0`. Use `search_summaries()` then `get_certificate()`.
+- **MCP `property_epc_search` / `epc_search` (full-row)** — replaced by `property_epc_summaries` / summary-native `epc_search`. The old tool raises with a message naming the replacement.
+
+### Unavailable metrics (reported as `None`, never `{}` or `0`)
+- `property_type_breakdown`, `floor_area_min`/`max`/`avg` — these exist only on full certificates.
+- `rating_distribution` is an area-wide distribution **only** when the bounded response is complete; otherwise it is returned as a labelled sample with its sample size and `complete: false`.
+- `certificates` on `/v1/epc/search-area` is `None` (not `[]`) when per-certificate detail is not returned.
+- `lodgement_date`, `construction_age`, `floor_level` — no demonstrated equivalent in the new API (absent from all 11 observed schemas; no old-API capture exists to prove a `lodgement_date` mapping). Reported `None` with an explicit warning rather than guessed.
+
+### Scope and completeness limitations
+- **England and Wales only.** Scotland, Northern Ireland and the Channel Islands return "no certificates found" — a coverage boundary, not evidence about a property.
+- **Pagination is not a stable snapshot.** Upstream page traversal is page-size-dependent: in one measured 200-row comparison, 7 records (3.5%) were absent from the paged union and 7 positions duplicated, all sharing the boundary `registrationDate`. Responses therefore carry `complete`, `duplicates_removed` and `unusable_rows`, and no operation claims a complete harvest.
+- **Ambiguous matches are refused.** Where the legacy matcher would accept a different house on the same street, or tie-break between flats by upstream row order, selection now raises `EPCAmbiguousMatchError` and fetches nothing. Enrichment leaves such comps un-enriched rather than attaching another property's certificate.
+
+### Fixed after adversarial review
+- **Unit agreement is enforced even when one candidate remains.** A lone `Flat 3` was returned for a `Flat 2` query — narrowing to a single row said nothing about whether that row was the right property.
+- **A supplied UPRN that matches nothing no longer falls back to address text.** A UPRN miss is evidence of a miss, not licence to guess.
+- **`epc_match_score` is no longer 100 for a unique selection.** 100 is reserved for identity evidence (UPRN or exact address); structured narrowing reports 80 and the new `epc_match_method` field names the evidence.
+- **Complete REST failure taxonomy.** Upstream 403 surfaced as HTTP 500; upstream 400 would have surfaced as 503. Now: configuration 501, authentication 502, rate limit 429, invalid query 400, ambiguity 409, unsupported operation 410, outage 503, absence 404.
+- **Unknown record counts are `null`, never `0`.** Missing `totalRecords` produced HTTP 200 with `count: 0`.
+- **Codebook lookups are async.** A synchronous request inside the async certificate path blocked the event loop on every cold code.
+- **Warnings reach every surface.** Compatibility, codebook, currency and no-source warnings were produced and then discarded by normal `get_certificate()` calls; `EPCData.warnings` now carries them through REST, MCP and CLI.
+- CLI area mode, `EPC_API_TOKEN` in application settings, a `PropertyReportService(epc_token=...)` option, and the gated live tests were all still on the retired contract.
+
+### Fixed after review round 3
+- **Street agreement must be exact.** A single shared token was treated as agreement, so a query for "12 High Street" selected the sole candidate "12 High Road" at confidence 80. Street tokens must now match exactly; abbreviations ("Rd" vs "Road") are deliberately not equated, because inferring that equivalence is a guess.
+- **A sole candidate is not identity evidence.** With no address and no UPRN, the one returned row was selected as `sole_candidate`. Selection now refuses regardless of how few candidates come back.
+- **Unknown record counts no longer read as absence on any surface.** `property_app/tools.py`, `app/mcp/server.py` and the CLI each collapsed a missing `totalRecords` into "no EPC data". `0` now means genuinely none; `None` means unknown, with `complete: false` and warnings preserved.
+- **Codebook tables are fetched concurrently under one bounded budget.** Three sequential 15s per-request timeouts could reach ~45s, exceeding the 30s MCP tool timeout and failing an entire certificate call for a cosmetic label. Overrunning the budget degrades to `labels=None` plus a warning.
+- **A certificate without `schema_type` no longer triggers an unscoped codebook query.** An unscoped lookup returns one value per schema version, and taking the first would be a guess; labels are left unresolved with an explanatory warning.
+- **`EPCData.from_api_row` no longer fabricates.** The retired kebab-case parser wrote `rating=""` and `score=0` for missing values (0 being a plausible band-G score). It now raises, is documented as deprecated, and a test pins that no production path calls it.
+- Documentation told users to copy a `.env.example` that does not exist; the instructions now describe creating `.env` directly, and warn that `KEY=` sets an empty string rather than leaving a variable unset — the footgun that made the EPC live tests send an empty postcode.
+
+### Fixed after review round 4
+- **Building and unit identifiers are parsed and compared independently.** A pooled set of all numbers let a shared unit mask a conflicting building: "Flat 2, 24 Alexandra Road" selected "Flat 2, 99 Alexandra Road" because both contained "2". A matching unit can no longer compensate for a mismatched building, and vice versa.
+- **Codebook fetches are single-flighted per `(code, schemaVersion)`.** Four concurrent cold certificates issued twelve requests — four each for `built_form`, `property_type` and `tenure`. Concurrent callers now share one in-flight fetch, protected with `asyncio.shield` so a caller hitting the warm budget cannot tear down the fetch others are awaiting. The regression test asserts exactly one request per table rather than elapsed time, which duplicate concurrent requests would have satisfied.
+- Corrected stale descriptions in `CLAUDE.md` and `property_app/tools.py` that still described EPC enrichment as fetching every certificate per postcode in one call and fuzzy-matching, and area mode as returning all certificates.
+
+### Compatibility
+- v1 `EPCData` fields, types and meanings are unchanged; `lmk_key`/`certificate_hash` carry the certificate number; the MCP `epc_certificate` tool still accepts `lmk_key`.
+- Coded upstream integers (`built_form`, `property_type`, `tenure`) are resolved to labels via a cached codebook, or reported `None` with a warning — never an integer in a field whose contract is a human-readable string.
+- Cost fields project to the legacy integer scalar only when the currency is GBP; otherwise `None` plus a warning naming the currency. The structured `{value, currency}` is available additively.
+
 ## v1.13.1 (2026-08-24) — EPC honest-failure hotfix
 
 ### Fixed

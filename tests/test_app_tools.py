@@ -189,58 +189,68 @@ def test_lookup_epc_with_address_and_result():
 
 
 def test_lookup_epc_no_address_empty():
-    """lookup_epc without address returns error dict when area has no certs."""
+    """No certificates lodged -> error dict, unchanged from v1."""
     from property_app.tools import lookup_epc
 
     with patch("property_core.EPCClient") as mock_cls:
-        mock_cls.return_value.search_all_by_postcode = AsyncMock(return_value=[])
+        mock_cls.return_value.area_summary = AsyncMock(
+            return_value={"total_records": 0, "complete": True, "warnings": [],
+                          "rating_distribution": {}, "rating_distribution_sample": None,
+                          "rating_distribution_sample_size": None})
         result = asyncio.run(lookup_epc("ZZ99 9ZZ"))
         assert result == {"error": "No EPC data"}
 
 
-def test_lookup_epc_no_address_returns_area_summary():
-    """lookup_epc without address returns area summary (no cert list for token budget)."""
+def test_lookup_epc_area_summary_reports_unavailable_stats_as_none():
+    """Floor-area and property-type stats live only on full certificates.
+
+    They must be None (unavailable), never {} or 0, which would assert that the
+    area genuinely has none.
+    """
     from property_app.tools import lookup_epc
 
-    def make_cert(rating, floor_area, prop_type):
-        m = MagicMock()
-        m.rating = rating
-        m.floor_area = floor_area
-        m.property_type = prop_type
-        m.model_dump.return_value = {
-            "rating": rating,
-            "floor_area": floor_area,
-            "property_type": prop_type,
-        }
-        return m
-
-    certs = [
-        make_cert("C", 80.0, "Flat"),
-        make_cert("B", 95.0, "Flat"),
-        make_cert("D", 60.0, "Flat"),
-        make_cert("C", 75.0, "Terraced"),
-    ]
-
     with patch("property_core.EPCClient") as mock_cls:
-        mock_cls.return_value.search_all_by_postcode = AsyncMock(return_value=certs)
+        mock_cls.return_value.area_summary = AsyncMock(return_value={
+            "total_records": 4,
+            "complete": True,
+            "rating_distribution": {"B": 1, "C": 2, "D": 1},
+            "rating_distribution_sample": None,
+            "rating_distribution_sample_size": None,
+            "warnings": ["property_type_breakdown and floor-area statistics are unavailable"],
+        })
         result = asyncio.run(lookup_epc("NG11 9HD"))
 
     assert result["postcode"] == "NG11 9HD"
     assert result["summary"]["count"] == 4
     assert result["summary"]["rating_distribution"] == {"B": 1, "C": 2, "D": 1}
-    assert result["summary"]["property_type_breakdown"] == {"Flat": 3, "Terraced": 1}
-    assert result["summary"]["floor_area_min"] == 60.0
-    assert result["summary"]["floor_area_max"] == 95.0
-    assert result["summary"]["floor_area_avg"] == 77.5
-    # Certificates list should NOT be in the LLM-visible dict — only the summary.
-    # Full certs are available via the core EPCClient directly if needed.
+    assert result["summary"]["property_type_breakdown"] is None
+    assert result["summary"]["floor_area_min"] is None
+    assert result["summary"]["floor_area_avg"] is None
+    assert result["summary"]["complete"] is True
+    assert result["summary"]["warnings"]
     assert "certificates" not in result
     assert "note" in result
 
 
-# ---------------------------------------------------------------------------
-# rightmove_search
-# ---------------------------------------------------------------------------
+def test_lookup_epc_incomplete_area_does_not_present_a_sample_as_the_distribution():
+    """A bounded page is a sample, explicitly labelled, not an area distribution."""
+    from property_app.tools import lookup_epc
+
+    with patch("property_core.EPCClient") as mock_cls:
+        mock_cls.return_value.area_summary = AsyncMock(return_value={
+            "total_records": 500,
+            "complete": False,
+            "rating_distribution": None,
+            "rating_distribution_sample": {"C": 25},
+            "rating_distribution_sample_size": 25,
+            "warnings": ["bounded page"],
+        })
+        result = asyncio.run(lookup_epc("NG11 9HD"))
+
+    assert result["summary"]["rating_distribution"] is None
+    assert result["summary"]["rating_distribution_sample"] == {"C": 25}
+    assert result["summary"]["rating_distribution_sample_size"] == 25
+    assert result["summary"]["complete"] is False
 
 
 def test_search_rightmove_returns_structure():
@@ -295,50 +305,56 @@ def test_search_rightmove_empty_results():
 
 
 def test_browse_epc_certs_empty():
-    """browse_epc_certs returns None when no certs exist at postcode."""
+    """No certificates lodged -> an empty results list, never an error."""
+    from types import SimpleNamespace
+
     from property_app.tools import browse_epc_certs
 
+    page = SimpleNamespace(results=[], pagination=SimpleNamespace(total_records=0),
+                           returned_distinct_count=0, duplicates_removed=0,
+                           unusable_rows=0, complete=True, warnings=[])
     with patch("property_core.EPCClient") as mock_cls:
-        mock_cls.return_value.search_all_by_postcode = AsyncMock(return_value=[])
+        mock_cls.return_value.search_summaries = AsyncMock(return_value=page)
         result = asyncio.run(browse_epc_certs("ZZ99 9ZZ"))
-        assert result is None
+    assert result["results"] == [] and result["total_records"] == 0
 
 
-def test_browse_epc_certs_returns_slim_list():
-    """browse_epc_certs returns slim list with only the 9 expected fields."""
+def test_browse_epc_certs_returns_summary_fields_only():
+    """Summary browse exposes only what the EPC search provides.
+
+    score, floor_area and property_type used to appear here. They exist solely
+    on a full certificate now, so returning them would require one upstream
+    request per row.
+    """
+    from types import SimpleNamespace
+
     from property_app.tools import browse_epc_certs
 
-    def make_cert(address, rating, floor_area, lmk_key):
-        m = MagicMock()
-        m.model_dump.return_value = {
-            "address": address,
-            "rating": rating,
-            "score": 72,
-            "floor_area": floor_area,
-            "property_type": "Flat",
-            "floor_level": "2nd floor",
-            "habitable_rooms": 3,
-            "inspection_date": "2023-01-01",
-            "lmk_key": lmk_key,
-            "raw": {"extra": "noise"},
-        }
-        return m
+    def row(cert_no, address, band):
+        return SimpleNamespace(
+            certificate_number=cert_no, address=address, uprn=None,
+            current_energy_efficiency_band=band,
+            registration_date="2023-01-01", schema_type="RdSAP-Schema-20.0.0",
+        )
 
-    certs = [
-        make_cert("FLAT 1, 10 TEST STREET", "C", 55.0, "abc123"),
-        make_cert("FLAT 2, 10 TEST STREET", "B", 60.0, "def456"),
-    ]
-
+    page = SimpleNamespace(
+        results=[row("abc123", "FLAT 1, 10 TEST STREET", "C"),
+                 row("def456", "FLAT 2, 10 TEST STREET", "B")],
+        pagination=SimpleNamespace(total_records=2),
+        returned_distinct_count=2, duplicates_removed=0,
+        unusable_rows=0, complete=True, warnings=[],
+    )
     with patch("property_core.EPCClient") as mock_cls:
-        mock_cls.return_value.search_all_by_postcode = AsyncMock(return_value=certs)
+        mock_cls.return_value.search_summaries = AsyncMock(return_value=page)
         result = asyncio.run(browse_epc_certs("SW1A 1AA"))
 
-    assert isinstance(result, list)
-    assert len(result) == 2
-    first = result[0]
-    assert first["lmk_key"] == "abc123"
-    assert first["floor_area"] == 55.0
-    assert "raw" not in first
+    assert result["total_records"] == 2 and result["complete"] is True
+    first = result["results"][0]
+    assert first["certificate_number"] == "abc123"
+    assert set(first) == {"certificate_number", "address", "uprn",
+                          "energy_band", "registration_date", "schema_type"}
+    for absent in ("score", "floor_area", "property_type", "raw"):
+        assert absent not in first
 
 
 def test_fetch_epc_certificate_not_found():

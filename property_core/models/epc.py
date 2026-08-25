@@ -94,6 +94,10 @@ class EPCData(BaseModel):
     lodgement_date: str | None = None
     mains_gas: str | None = None
 
+    # Additive (v1.14.0): source-migration provenance — unresolved code labels,
+    # non-GBP costs, and fields with no demonstrated source in the new API.
+    warnings: list[str] = Field(default_factory=list)
+
     # Raw API response dict (populated by from_api_row)
     raw: dict[str, Any] | None = Field(default=None, exclude=True)
 
@@ -101,15 +105,39 @@ class EPCData(BaseModel):
 
     @classmethod
     def from_api_row(cls, row: Dict[str, Any]) -> EPCData:
-        """Construct an EPCData from an EPC API response row.
+        """DEPRECATED — parses the RETIRED kebab-case EPC API response.
 
-        The EPC API returns kebab-case keys which are mapped to model fields.
-        Empty strings are converted to None for optional fields.
+        The host this parsed (epc.opendatacommunities.org) has been retired. No
+        production path calls this: `property_core/epc/compat.to_epcdata()` is
+        the only constructor used, and it refuses to fabricate.
+
+        It is retained for third-party callers holding archived kebab-case rows,
+        but it will no longer invent values. Missing `current-energy-rating` or
+        `current-energy-efficiency` raises instead of writing `""` and `0` — a
+        score of 0 is a plausible band-G value, so the old default was
+        indistinguishable from real data.
+
+        Raises:
+            ValueError: If the row lacks a rating or a numeric efficiency score.
         """
+        rating = _str_or_none(row.get("current-energy-rating"))
+        score = _int_or_none(row.get("current-energy-efficiency"))
+        if rating is None:
+            raise ValueError(
+                "EPCData.from_api_row: row has no 'current-energy-rating'. This "
+                "constructor parses the retired EPC API and no longer substitutes "
+                'an empty rating. Use property_core.epc.compat.to_epcdata() instead.'
+            )
+        if score is None:
+            raise ValueError(
+                "EPCData.from_api_row: row has no 'current-energy-efficiency'. A "
+                "score of 0 is a plausible band-G value, so it is not a safe "
+                "placeholder. Use property_core.epc.compat.to_epcdata() instead."
+            )
         return cls(
             # Core ratings
-            rating=row.get("current-energy-rating", ""),
-            score=_int_or_none(row.get("current-energy-efficiency")) or 0,
+            rating=rating,
+            score=score,
             potential_rating=_str_or_none(row.get("potential-energy-rating")),
             potential_score=_int_or_none(row.get("potential-energy-efficiency")),
             # Property details

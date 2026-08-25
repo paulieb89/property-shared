@@ -1,17 +1,19 @@
-"""EPC upstream failures must not be reported as "no certificate exists".
+"""EPC failures must never be reported as "no certificate exists".
 
-Context: the API host hardcoded in EPCClient.BASE_URL was retired and now 301s
-to a GOV.UK landing page. Because every failure was caught by a broad
-`except (httpx.HTTPError, KeyError, ValueError)` and turned into None/[], the
-deployed product answered "No EPC certificate found" for every postcode in
-England and Wales, and the area endpoint returned HTTP 200 with count: 0.
+Originally written for v1.13.1 against the retired epc.opendatacommunities.org
+contract ({"rows": [...]}, Basic auth). The wire shape has moved to the GOV.UK
+Bearer API, so the fixtures here changed — but every behavioural guarantee from
+v1.13.1 is preserved, and several are now stronger:
 
-The distinction these tests pin is narrow and deliberate:
-  * upstream reachable, genuinely nothing lodged  -> None / []   (unchanged)
-  * upstream unreachable/erroring/misconfigured   -> EPCUpstreamError
-
-Migrating to the replacement API is explicitly NOT in scope here. The goal is
-that the system stops asserting a falsehood.
+  v1.13.1                              v1.14.0
+  ------------------------------------ --------------------------------------
+  outage -> EPCUpstreamError           unchanged
+  unconfigured -> raises               now EPCConfigurationError, more precise
+  absence -> None/[]                   unchanged (now a real upstream 404)
+  REST outage -> 503 not 404           unchanged
+  auth failure -> generic upstream     now EPCAuthenticationError
+  404 -> treated as failure            now genuine absence (the upstream
+                                        separates 400-invalid from 404-absent)
 """
 
 from __future__ import annotations
@@ -21,13 +23,44 @@ import asyncio
 import httpx
 import pytest
 
-from property_core.epc_client import EPCClient, EPCUpstreamError
+from property_core.epc.errors import (
+    EPCAuthenticationError,
+    EPCInvalidQueryError,
+    EPCConfigurationError,
+    EPCRateLimitError,
+    EPCUpstreamError,
+    EPCUpstreamShapeError,
+)
+from property_core.epc_client import EPCClient
+
+SEARCH_BODY = {
+    "data": [{
+        "certificateNumber": "1111-2222-3333-4444-5555",
+        "addressLine1": "1 Test Street",
+        "postcode": "AA1 1AA",
+        "currentEnergyEfficiencyBand": "C",
+        "registrationDate": "2023-01-01",
+        "schemaType": "RdSAP-Schema-20.0.0",
+        "uprn": 100000000001,
+    }],
+    "pagination": {"totalRecords": 1, "currentPage": 1, "totalPages": 1,
+                   "pageSize": 5000, "nextPage": None, "prevPage": None},
+}
+
+CERT_BODY = {"data": {
+    "address_line_1": "1 Test Street",
+    "postcode": "AA1 1AA",
+    "current_energy_efficiency_band": "C",
+    "energy_rating_current": 72,
+    "total_floor_area": 55.5,
+    "schema_type": "RdSAP-Schema-20.0.0",
+    "assessment_type": "RdSAP",
+}}
 
 
-def _client(handler, *, configured=True):
-    c = EPCClient(email="t@example.com" if configured else None,
-                  api_key="k" if configured else None)
-    c._transport = httpx.MockTransport(handler)  # honoured by the client under test
+def _client(handler, *, token="test-token"):
+    c = EPCClient(token=token)
+    c._transport = httpx.MockTransport(handler)
     return c
 
 
@@ -35,137 +68,124 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-# --------------------------------------------------------------------------
-# Upstream failure must raise, not return "no data"
-# --------------------------------------------------------------------------
-
-
 class TestUpstreamFailuresRaise:
-    @pytest.mark.parametrize(
-        "status",
-        [301, 302, 400, 401, 403, 404, 429, 500, 502, 503],
-    )
-    def test_non_success_status_raises(self, status):
-        """A redirect is the live failure mode — the retired host 301s."""
+    @pytest.mark.parametrize("status,exc", [
+        (403, EPCAuthenticationError),   # token supplied and rejected
+        (401, EPCAuthenticationError),
+        (429, EPCRateLimitError),
+        (500, EPCUpstreamError),
+        (502, EPCUpstreamError),
+        (503, EPCUpstreamError),
+        (301, EPCUpstreamError),         # the retired host's failure mode
+        (400, EPCInvalidQueryError),     # caller error, not an outage
+    ])
+    def test_failure_statuses_raise_typed_errors(self, status, exc):
         c = _client(lambda req: httpx.Response(status, text="nope"))
-        with pytest.raises(EPCUpstreamError):
-            _run(c.search_all_by_postcode("NG7 1FN"))
-        with pytest.raises(EPCUpstreamError):
-            _run(c.search_by_postcode("NG7 1FN"))
-        with pytest.raises(EPCUpstreamError):
-            _run(c.get_certificate("abc"))
+        with pytest.raises(exc):
+            _run(c.search_summaries("AA1 1AA"))
+        with pytest.raises(exc):
+            _run(c.get_certificate("1111-2222-3333-4444-5555"))
 
     def test_network_error_raises(self):
         def boom(request):
             raise httpx.ConnectError("dns failure", request=request)
 
-        c = _client(boom)
         with pytest.raises(EPCUpstreamError):
-            _run(c.search_all_by_postcode("NG7 1FN"))
+            _run(_client(boom).search_summaries("AA1 1AA"))
 
     def test_malformed_json_raises(self):
         c = _client(lambda req: httpx.Response(200, text="<html>not json</html>"))
-        with pytest.raises(EPCUpstreamError):
-            _run(c.search_all_by_postcode("NG7 1FN"))
+        with pytest.raises(EPCUpstreamShapeError):
+            _run(c.search_summaries("AA1 1AA"))
 
-    def test_unexpected_envelope_raises(self):
-        """The replacement API returns {"data": [...]}, not {"rows": [...]}.
+    def test_retired_envelope_raises_rather_than_reading_as_empty(self):
+        """The old {"rows": []} shape must not parse as an empty result."""
+        c = _client(lambda req: httpx.Response(200, json={"rows": []}))
+        with pytest.raises(EPCUpstreamShapeError):
+            _run(c.search_summaries("AA1 1AA"))
 
-        Silently reading .get("rows", []) off a foreign envelope is exactly how
-        a migrated-but-unadapted upstream would look like an empty result.
-        """
-        c = _client(lambda req: httpx.Response(200, json={"data": [{"x": 1}], "pagination": {}}))
-        with pytest.raises(EPCUpstreamError):
-            _run(c.search_all_by_postcode("NG7 1FN"))
+    def test_unconfigured_raises_without_any_request(self):
+        called = []
 
-    def test_unconfigured_raises_not_empty(self):
-        """Missing credentials is an operator error, not an absence of data."""
-        c = _client(lambda req: httpx.Response(200, json={"rows": []}), configured=False)
-        with pytest.raises(EPCUpstreamError):
-            _run(c.search_all_by_postcode("NG7 1FN"))
-        with pytest.raises(EPCUpstreamError):
-            _run(c.get_certificate("abc"))
+        def handler(request):
+            called.append(request.url.path)
+            return httpx.Response(200, json=SEARCH_BODY)
 
+        c = _client(handler, token=None)
+        c._legacy_email = c._legacy_api_key = None
+        with pytest.raises(EPCConfigurationError):
+            _run(c.search_summaries("AA1 1AA"))
+        assert called == [], "no request may be made without a credential"
 
-# --------------------------------------------------------------------------
-# Genuine absence must still be absence
-# --------------------------------------------------------------------------
+    def test_legacy_credentials_alone_are_not_a_fallback(self):
+        """Never silently ignore legacy creds while reporting as configured."""
+        c = _client(lambda req: httpx.Response(200, json=SEARCH_BODY), token=None)
+        c._legacy_email, c._legacy_api_key = "a@b.c", "key"
+        assert c.is_configured() is False
+        with pytest.raises(EPCConfigurationError) as exc:
+            _run(c.search_summaries("AA1 1AA"))
+        assert "EPC_API_TOKEN" in str(exc.value)
 
 
 class TestGenuineAbsenceUnchanged:
-    def test_empty_rows_returns_empty_list(self):
-        c = _client(lambda req: httpx.Response(200, json={"rows": []}))
-        assert _run(c.search_all_by_postcode("NG7 1FN")) == []
-
-    def test_empty_rows_returns_none_for_single_lookups(self):
-        c = _client(lambda req: httpx.Response(200, json={"rows": []}))
-        assert _run(c.search_by_postcode("NG7 1FN")) is None
-        assert _run(c.get_certificate("abc")) is None
+    def test_upstream_404_is_absence_not_failure(self):
+        c = _client(lambda req: httpx.Response(
+            404, json={"data": {"error": "No certificates could be found for that query"}}))
+        assert _run(c.search_summaries("AA1 1AA")).results == []
+        assert _run(c.get_certificate("1111-2222-3333-4444-5555")) is None
 
     def test_real_rows_still_parse(self):
-        row = {
-            "lmk-key": "abc123",
-            "address": "1 TEST STREET",
-            "postcode": "NG7 1FN",
-            "current-energy-rating": "C",
-            "current-energy-efficiency": "72",
-            "total-floor-area": "55.5",
-        }
-        c = _client(lambda req: httpx.Response(200, json={"rows": [row]}))
-        certs = _run(c.search_all_by_postcode("NG7 1FN"))
-        assert len(certs) == 1
-        assert certs[0].rating == "C" and certs[0].score == 72
+        def handler(request):
+            if request.url.path.endswith("/certificate"):
+                return httpx.Response(200, json=CERT_BODY)
+            return httpx.Response(200, json=SEARCH_BODY)
 
-    def test_address_matching_no_match_is_absence_not_failure(self):
-        row = {"lmk-key": "k", "address": "1 OTHER STREET", "current-energy-rating": "C"}
-        c = _client(lambda req: httpx.Response(200, json={"rows": [row]}))
-        assert _run(c.search_by_postcode("NG7 1FN", address="999 NOWHERE LANE")) is None
+        c = _client(handler)
+        page = _run(c.search_summaries("AA1 1AA"))
+        assert len(page.results) == 1
+        assert page.results[0].current_energy_efficiency_band == "C"
 
+        data = _run(c.get_certificate("1111-2222-3333-4444-5555"))
+        assert data.rating == "C" and data.score == 72 and data.floor_area == 55.5
 
-# --------------------------------------------------------------------------
-# The error must be distinguishable and actionable
-# --------------------------------------------------------------------------
+    def test_no_matching_address_is_explicit_not_arbitrary(self):
+        """A non-match must never silently return a neighbour's certificate."""
+        from property_core.epc.errors import EPCAmbiguousMatchError
+
+        c = _client(lambda req: httpx.Response(200, json=SEARCH_BODY))
+        with pytest.raises(EPCAmbiguousMatchError):
+            _run(c.search_by_postcode("AA1 1AA", address="999 NOWHERE LANE"))
 
 
 class TestErrorSemantics:
-    def test_error_message_names_the_upstream_and_cause(self):
-        c = _client(lambda req: httpx.Response(301, headers={"Location": "https://example.gov.uk/"}))
+    def test_upstream_error_names_the_cause(self):
+        c = _client(lambda req: httpx.Response(503, text="down"))
         with pytest.raises(EPCUpstreamError) as exc:
-            _run(c.search_all_by_postcode("NG7 1FN"))
-        msg = str(exc.value)
-        assert "EPC" in msg
-        assert "301" in msg or "redirect" in msg.lower()
+            _run(c.search_summaries("AA1 1AA"))
+        assert "503" in str(exc.value)
 
-    def test_is_not_a_valueerror_subclass_that_would_read_as_bad_input(self):
-        """Must not be mistaken for caller error (which would map to 4xx)."""
-        assert not issubclass(EPCUpstreamError, ValueError)
-
-
-# --------------------------------------------------------------------------
-# Enrichment must degrade per-postcode, not lose the whole batch
-# --------------------------------------------------------------------------
+    def test_errors_are_not_valueerror_subclasses(self):
+        for cls in (EPCUpstreamError, EPCConfigurationError,
+                    EPCAuthenticationError, EPCRateLimitError):
+            assert not issubclass(cls, ValueError), f"{cls.__name__} must not read as caller error"
 
 
 class TestEnrichmentDegradesGracefully:
     def test_one_failing_postcode_does_not_abort_the_batch(self):
-        """asyncio.gather without return_exceptions=True loses everything.
-
-        With EPC now raising, an un-hardened gather would 500 every
-        comps?enrich_epc=true request while the upstream is down.
-        """
         from property_core.enrichment import enrich_comps_with_epc
         from property_core.models.ppd import PPDTransaction
 
-        good_row = {
-            "lmk-key": "k", "address": "10 GOOD STREET", "postcode": "AA1 1AA",
-            "current-energy-rating": "B", "current-energy-efficiency": "85",
-            "total-floor-area": "50",
+        good_rows = {
+            "data": [{**SEARCH_BODY["data"][0], "addressLine1": "10 Good Street"}],
+            "pagination": SEARCH_BODY["pagination"],
         }
 
         def handler(request):
+            if request.url.path.endswith("/certificate"):
+                return httpx.Response(200, json=CERT_BODY)
             if "BB2" in str(request.url):
                 return httpx.Response(503, text="upstream down")
-            return httpx.Response(200, json={"rows": [good_row]})
+            return httpx.Response(200, json=good_rows)
 
         comps = [
             PPDTransaction(transaction_id="1", price=200000, postcode="AA1 1AA",
@@ -173,19 +193,9 @@ class TestEnrichmentDegradesGracefully:
             PPDTransaction(transaction_id="2", price=300000, postcode="BB2 2BB",
                            paon="20", street="BAD STREET"),
         ]
-        client = _client(handler)
-
-        result = _run(enrich_comps_with_epc(comps, epc_client=client))
-
-        # The healthy postcode is still enriched...
-        assert result[0].epc_rating == "B", "successful postcode must survive a sibling failure"
-        # ...and the failing one is simply un-enriched, not fatal.
+        result = _run(enrich_comps_with_epc(comps, epc_client=_client(handler)))
+        assert result[0].epc_rating == "C", "a healthy postcode must survive a sibling failure"
         assert result[1].epc_rating is None
-
-
-# --------------------------------------------------------------------------
-# REST boundary: an outage must be 503, never 404 or an empty 200
-# --------------------------------------------------------------------------
 
 
 class TestRestBoundary:
@@ -196,24 +206,21 @@ class TestRestBoundary:
 
         from app.api.v1 import epc as epc_router
 
-        dead = _client(lambda req: httpx.Response(301, headers={"Location": "https://gov.uk/"}))
-        monkeypatch.setattr(epc_router, "_client", dead)
+        monkeypatch.setattr(epc_router, "_client",
+                            _client(lambda req: httpx.Response(503, text="down")))
         app = FastAPI()
         app.include_router(epc_router.router, prefix="/v1")
         return TestClient(app, raise_server_exceptions=False)
 
     def test_search_returns_503_not_404(self, client):
-        r = client.get("/v1/epc/search", params={"postcode": "NG7 1FN"})
-        assert r.status_code == 503, f"outage must not read as 'not found' (got {r.status_code})"
-        assert "unavailable" in r.json()["detail"].lower()
+        r = client.get("/v1/epc/search", params={"postcode": "AA1 1AA"})
+        assert r.status_code == 503, "an outage must not read as 'not found'"
 
     def test_certificate_returns_503_not_404(self, client):
-        r = client.get("/v1/epc/certificate/abc123")
-        assert r.status_code == 503
+        assert client.get("/v1/epc/certificate/1111-2222-3333-4444-5555").status_code == 503
 
     def test_search_area_returns_503_not_empty_200(self, client):
-        """The worst failure mode: a 200 with count:0 looks like real data."""
-        r = client.get("/v1/epc/search-area", params={"postcode": "NG7 1FN"})
+        r = client.get("/v1/epc/search-area", params={"postcode": "AA1 1AA"})
         assert r.status_code == 503, "an outage must never render as a zero-count summary"
 
     def test_genuine_absence_still_404s(self, monkeypatch):
@@ -222,12 +229,9 @@ class TestRestBoundary:
 
         from app.api.v1 import epc as epc_router
 
-        empty = _client(lambda req: httpx.Response(200, json={"rows": []}))
-        monkeypatch.setattr(epc_router, "_client", empty)
+        monkeypatch.setattr(epc_router, "_client", _client(lambda req: httpx.Response(
+            404, json={"data": {"error": "No certificates could be found for that query"}})))
         app = FastAPI()
         app.include_router(epc_router.router, prefix="/v1")
         c = TestClient(app, raise_server_exceptions=False)
-
-        assert c.get("/v1/epc/search", params={"postcode": "NG7 1FN"}).status_code == 404
-        area = c.get("/v1/epc/search-area", params={"postcode": "NG7 1FN"})
-        assert area.status_code == 200 and area.json()["summary"]["count"] == 0
+        assert c.get("/v1/epc/search", params={"postcode": "AA1 1AA"}).status_code == 404

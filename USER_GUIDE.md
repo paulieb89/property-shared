@@ -1,7 +1,9 @@
 # Property Shared API — User Guide
 
 ## Setup
-1) Create `.env` from `.env.example` (set `EPC_API_EMAIL`/`EPC_API_KEY` if you want EPC enabled).
+1) Create a `.env` file in the repo root (gitignored) and set `EPC_API_TOKEN` if you
+   want EPC enabled. Omit optional variables entirely rather than assigning them
+   empty — `KEY=` is an empty string, not unset, and defeats code defaults.
 2) Install dependencies: `uv sync --extra dev`.
 3) Run the API: `uv run property-api` (or `uv run uvicorn app.main:app --reload`).
 4) Open the demo UI: http://localhost:8000/demo.
@@ -45,7 +47,7 @@ property-cli ppd download-url --kind monthly           # Latest monthly update
 
 ### EPC (Energy Performance Certificates)
 
-Requires `EPC_API_EMAIL` and `EPC_API_KEY` in `.env`.
+Requires `EPC_API_TOKEN` in `.env`. Area mode returns the record count and, when the bounded response is complete, the rating distribution; property-type and floor-area statistics are unavailable because the EPC service exposes them only on individual certificates. England & Wales only.
 
 ```bash
 # Search by postcode (returns first/best match)
@@ -280,7 +282,7 @@ record = client.get_transaction_record("<transaction_id>")  # PPDTransactionReco
 service = PPDService()
 result = service.comps(postcode="SW1A 1AA", months=24, limit=20, search_level="sector")
 
-# EPC (requires EPC_API_EMAIL/EPC_API_KEY in env)
+# EPC (requires EPC_API_TOKEN in env)
 epc = EPCClient()
 await epc.search_by_postcode("SW1A 1AA", address="10 Downing Street")
 
@@ -371,7 +373,7 @@ print(result["results"][0].district)     # "CITY OF WESTMINSTER"
 import asyncio
 from property_core import enrich_comps_with_epc, EPCClient, compute_enriched_stats
 result = service.comps(postcode="B1 1BB", months=24, search_level="sector")
-epc_client = EPCClient()  # requires EPC_API_EMAIL/EPC_API_KEY in env
+epc_client = EPCClient()  # requires EPC_API_TOKEN in env
 enriched = asyncio.run(enrich_comps_with_epc(result.transactions, epc_client))
 # enriched transactions now have epc_floor_area_sqm, price_per_sqft, epc_rating, etc.
 stats = compute_enriched_stats(enriched)  # median_price_per_sqft, epc_match_rate

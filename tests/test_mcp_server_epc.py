@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
+
+import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
@@ -10,91 +13,60 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # ---------------------------------------------------------------------------
 
 
-def test_property_epc_search_returns_none_when_no_certs():
-    """property_epc_search returns None when postcode has no EPC records."""
+def test_property_epc_search_is_deprecated_with_an_actionable_message():
+    """The full-row tool cannot be honoured: search returns no score/floor area."""
+    from property_core.epc.errors import EPCUnsupportedOperationError
+
     from app.mcp.server import property_epc_search
 
+    with pytest.raises(EPCUnsupportedOperationError) as exc:
+        asyncio.run(property_epc_search("NG7 1FN"))
+    msg = str(exc.value)
+    assert "property_epc_summaries" in msg, "must name the replacement tool"
+    assert "epc_certificate" in msg, "must name the follow-up call"
+
+
+def test_property_epc_summaries_returns_summary_fields_only():
+    """The summary-native tool exposes what search actually provides."""
+    from app.mcp.server import property_epc_summaries
+
+    page = SimpleNamespace(
+        results=[SimpleNamespace(
+            certificate_number="1111-2222-3333-4444-5555",
+            address="Flat 2, 42 Example Boulevard",
+            uprn="100000000001",
+            current_energy_efficiency_band="D",
+            registration_date="2023-03-05",
+            schema_type="RdSAP-Schema-20.0.0",
+        )],
+        pagination=SimpleNamespace(total_records=1),
+        returned_distinct_count=1, duplicates_removed=0,
+        unusable_rows=0, complete=True, warnings=[],
+    )
     with patch("property_core.EPCClient") as mock_cls:
-        mock_cls.return_value.search_all_by_postcode = AsyncMock(return_value=[])
-        result = asyncio.run(property_epc_search("ZZ99 9ZZ"))
-        assert result is None
+        mock_cls.return_value.search_summaries = AsyncMock(return_value=page)
+        result = asyncio.run(property_epc_summaries("NG7 1FN"))
+
+    assert result["total_records"] == 1 and result["complete"] is True
+    row = result["results"][0]
+    assert set(row) == {"certificate_number", "address", "uprn",
+                        "energy_band", "registration_date", "schema_type"}
+    for absent in ("score", "floor_area", "property_type"):
+        assert absent not in row, f"{absent} is not available from a summary search"
 
 
-def test_property_epc_search_returns_slim_list():
-    """property_epc_search returns slim list with exactly the 9 documented fields."""
-    from app.mcp.server import property_epc_search
+def test_property_epc_summaries_reports_incompleteness():
+    from app.mcp.server import property_epc_summaries
 
-    def make_cert(**kwargs):
-        m = MagicMock()
-        m.model_dump.return_value = {
-            "address": kwargs.get("address", "1 TEST STREET"),
-            "rating": kwargs.get("rating", "C"),
-            "score": 72,
-            "floor_area": kwargs.get("floor_area", 55.0),
-            "property_type": "Flat",
-            "floor_level": "2nd floor",
-            "habitable_rooms": 3,
-            "inspection_date": "2023-01-01",
-            "lmk_key": kwargs.get("lmk_key", "abc123"),
-            "raw": {"noise": True},
-            "uprn": "1234567890",
-        }
-        return m
-
-    certs = [
-        make_cert(address="FLAT 1, 10 TEST ST", lmk_key="aaa111", floor_area=55.0),
-        make_cert(address="FLAT 2, 10 TEST ST", lmk_key="bbb222", floor_area=60.0),
-    ]
-
+    page = SimpleNamespace(
+        results=[], pagination=SimpleNamespace(total_records=500),
+        returned_distinct_count=0, duplicates_removed=0, unusable_rows=0,
+        complete=False, warnings=["bounded page"],
+    )
     with patch("property_core.EPCClient") as mock_cls:
-        mock_cls.return_value.search_all_by_postcode = AsyncMock(return_value=certs)
-        result = asyncio.run(property_epc_search("SW1A 1AA"))
-
-    assert isinstance(result, list)
-    assert len(result) == 2
-
-    first = result[0]
-    # Must have the 9 documented fields
-    for field in ("address", "rating", "score", "floor_area", "property_type",
-                  "floor_level", "habitable_rooms", "inspection_date", "lmk_key"):
-        assert field in first, f"missing field: {field}"
-
-    # Must strip raw and other non-slim fields
-    assert "raw" not in first
-    assert "uprn" not in first
-    assert first["lmk_key"] == "aaa111"
-    assert first["floor_area"] == 55.0
-
-
-def test_property_epc_search_filters_to_keep_fields_only():
-    """property_epc_search strips any fields outside the documented 9-field keep set."""
-    from app.mcp.server import property_epc_search
-
-    m = MagicMock()
-    # Simulate what model_dump(exclude_none=True) returns for a real cert
-    m.model_dump.return_value = {
-        "address": "10 TEST STREET",
-        "rating": "C",
-        "score": 72,
-        "property_type": "Flat",
-        "inspection_date": "2023-01-01",
-        "lmk_key": "abc123",
-        # Fields outside keep set that should be dropped
-        "uprn": "1234567890",
-        "country": "England",
-        "local_authority": "Westminster",
-    }
-
-    with patch("property_core.EPCClient") as mock_cls:
-        mock_cls.return_value.search_all_by_postcode = AsyncMock(return_value=[m])
-        result = asyncio.run(property_epc_search("SW1A 1AA"))
-
-    assert result is not None
-    first = result[0]
-    assert "uprn" not in first
-    assert "country" not in first
-    assert "local_authority" not in first
-    assert first["lmk_key"] == "abc123"
+        mock_cls.return_value.search_summaries = AsyncMock(return_value=page)
+        result = asyncio.run(property_epc_summaries("NG7 1FN"))
+    assert result["complete"] is False and result["warnings"]
 
 
 # ---------------------------------------------------------------------------

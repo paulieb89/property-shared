@@ -53,12 +53,17 @@ class PropertyReportService:
         epc_client: Optional[EPCClient] = None,
         rightmove_location: Optional[RightmoveLocationAPI] = None,
         *,
-        epc_email: Optional[str] = None,
-        epc_api_key: Optional[str] = None,
+        epc_token: Optional[str] = None,
+        epc_email: Optional[str] = None,   # deprecated: retired service
+        epc_api_key: Optional[str] = None,  # deprecated: retired service
         rightmove_delay: float = 0.6,
     ):
         self.ppd = ppd_service or PPDService()
+        # epc_email/epc_api_key are still accepted so existing callers keep
+        # constructing successfully, but they authenticate against a retired
+        # service; EPCClient raises an actionable error if only they are set.
         self.epc = epc_client or EPCClient(
+            token=epc_token or os.environ.get("EPC_API_TOKEN"),
             email=epc_email or os.environ.get("EPC_API_EMAIL"),
             api_key=epc_api_key or os.environ.get("EPC_API_KEY"),
         )

@@ -90,8 +90,9 @@ Built on FastMCP 3.2+ and Prefab UI 0.19+. All tools import directly from `prope
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `EPC_API_EMAIL` | For EPC | EPC registry credentials |
-| `EPC_API_KEY` | For EPC | EPC registry credentials |
+| `EPC_API_TOKEN` | For EPC | GOV.UK EPC Bearer token (England & Wales) |
+| `EPC_API_EMAIL` | *(deprecated)* | Retired service; not a fallback |
+| `EPC_API_KEY` | *(deprecated)* | Retired service; not a fallback |
 | `COMPANIES_HOUSE_API_KEY` | For companies | Companies House API |
 | `MCP_TRANSPORT` | No | `stdio` (default), `sse`, or `http` |
 | `FASTMCP_HOST` | No | Bind host (default `0.0.0.0`) |

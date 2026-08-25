@@ -9,19 +9,42 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas.epc import EPCAreaResponse, EPCAreaSummary, EPCRecordResponse
 from property_core.address_matching import parse_address
-from property_core.epc_client import EPCClient, EPCUpstreamError
+from property_core.epc.errors import (
+    EPCAmbiguousMatchError,
+    EPCError,
+    EPCAuthenticationError,
+    EPCConfigurationError,
+    EPCInvalidQueryError,
+    EPCRateLimitError,
+    EPCUnsupportedOperationError,
+    EPCUpstreamError,
+)
+from property_core.epc_client import EPCClient
 from property_core.models.epc import EPCData
 
 router = APIRouter(prefix="/epc", tags=["epc"])
 _client = EPCClient()
 
 
-def _upstream_unavailable(exc: EPCUpstreamError) -> HTTPException:
-    """Map an EPC outage to 503, never to 404 or an empty 200.
+# Complete EPC failure taxonomy. Every typed failure gets a status that means
+# what it says: an outage is not "not found", a malformed query is not an
+# outage, and a refusal to guess is not a server crash.
+_EPC_STATUS: tuple[tuple[type, int, str], ...] = (
+    (EPCConfigurationError, 501, "EPC service not configured"),
+    (EPCAuthenticationError, 502, "EPC upstream rejected our credentials"),
+    (EPCRateLimitError, 429, "EPC upstream rate limit reached"),
+    (EPCInvalidQueryError, 400, "EPC query rejected"),
+    (EPCAmbiguousMatchError, 409, "EPC candidate could not be uniquely identified"),
+    (EPCUnsupportedOperationError, 410, "EPC operation no longer supported"),
+    (EPCUpstreamError, 503, "EPC service unavailable"),
+)
 
-    Reporting an outage as "not found" (or as a zero-count area summary) states
-    a falsehood about the property, which is worse than failing.
-    """
+
+def _epc_http_error(exc: Exception) -> HTTPException:
+    """Translate a typed EPC failure to the status that describes it."""
+    for cls, status, label in _EPC_STATUS:
+        if isinstance(exc, cls):
+            return HTTPException(status_code=status, detail=f"{label}: {exc}")
     return HTTPException(status_code=503, detail=f"EPC service unavailable: {exc}")
 
 
@@ -52,8 +75,8 @@ async def get_certificate(
 
     try:
         result = await _client.get_certificate(certificate_hash)
-    except EPCUpstreamError as exc:
-        raise _upstream_unavailable(exc) from exc
+    except EPCError as exc:
+        raise _epc_http_error(exc) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="No EPC certificate found")
     return EPCRecordResponse(record=result, raw=result.raw if include_raw else None)
@@ -91,8 +114,8 @@ async def search(
 
     try:
         result = await _client.search_by_postcode(postcode, address=address)
-    except EPCUpstreamError as exc:
-        raise _upstream_unavailable(exc) from exc
+    except EPCError as exc:
+        raise _epc_http_error(exc) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="No EPC certificate found")
     return EPCRecordResponse(record=result, raw=result.raw if include_raw else None)
@@ -102,23 +125,41 @@ async def search(
 async def search_area(
     postcode: str = Query(..., min_length=2, description="UK postcode"),
 ) -> EPCAreaResponse:
-    """List all EPC certificates for a postcode with area summary statistics.
+    """List EPC certificate statistics for a postcode.
 
-    Returns every certificate at the given postcode plus aggregate stats
-    (rating distribution, floor area range, property type breakdown).
-    Use /epc/search when you have a specific street address to match.
+    Returns the record count and, when the bounded response contains every
+    matching summary, the rating distribution. Property-type breakdown and
+    floor-area statistics are NOT available: the EPC service exposes them only
+    on individual certificates. `certificates` is null — per-certificate detail
+    is not returned by a summary search. Use /epc/search with a street address,
+    or fetch a specific certificate.
     """
     if not _client.is_configured():
         raise HTTPException(status_code=501, detail="EPC client not configured")
 
     try:
-        certs = await _client.search_all_by_postcode(postcode)
-    except EPCUpstreamError as exc:
+        area = await _client.area_summary(postcode)
+    except EPCError as exc:
         # Never return a zero-count summary for an outage: it is indistinguishable
         # from a postcode that genuinely has no certificates.
-        raise _upstream_unavailable(exc) from exc
+        raise _epc_http_error(exc) from exc
+
     return EPCAreaResponse(
         postcode=postcode,
-        summary=_build_area_summary(certs),
-        certificates=certs,
+        summary=EPCAreaSummary(
+            # None means "unknown", never 0 — an unknown total must not read as empty.
+            count=area.get("total_records"),
+            rating_distribution=area.get("rating_distribution"),
+            rating_distribution_sample=area.get("rating_distribution_sample"),
+            rating_distribution_sample_size=area.get("rating_distribution_sample_size"),
+            # Unavailable from summaries; None, never {} or 0.
+            property_type_breakdown=None,
+            floor_area_min=None,
+            floor_area_max=None,
+            floor_area_avg=None,
+        ),
+        # None (not []) — per-certificate detail is not returned by a summary search.
+        certificates=None,
+        complete=bool(area.get("complete")),
+        warnings=area.get("warnings") or [],
     )
