@@ -155,10 +155,22 @@ class TestMoney:
         assert doc.heating_cost_current.currency == "GBP"
 
     def test_malformed_money_raises_rather_than_becoming_none(self):
-        for bad in (785, "785", {"value": 785}, {"currency": "GBP"}, {"value": "x", "currency": "GBP"}):
+        # NB: a BARE NUMBER was in this list until v1.14.1. It was wrong — SAP
+        # schemas 13.0/14.0/14.2/15.0 genuinely return scalars, and rejecting
+        # them made every such certificate a production 503. It is now accepted
+        # with no stated currency; see tests/test_epc_scalar_money.py.
+        for bad in (True, False, "785", [785], {}, {"value": 785}, {"currency": "GBP"},
+                    {"value": "x", "currency": "GBP"}, {"value": 785, "currency": ""}):
             with pytest.raises(EPCUpstreamShapeError):
                 EPCCertificateDoc.from_source(
                     {**CERT_DOC, "heating_cost_current": bad}, certificate_number="1")
+
+    def test_bare_scalar_is_accepted_without_a_currency(self):
+        doc = EPCCertificateDoc.from_source(
+            {**CERT_DOC, "heating_cost_current": 785}, certificate_number="1")
+        assert doc.heating_cost_current.value == Decimal("785")
+        assert doc.heating_cost_current.currency is None
+        assert doc.heating_cost_current.currency_stated is False
 
     def test_non_gbp_currency_is_preserved_not_discarded(self):
         doc = EPCCertificateDoc.from_source(

@@ -1,0 +1,50 @@
+{
+  "data": {
+    "address_line_1": "1 Example Street",
+    "address_line_2": null,
+    "address_line_3": null,
+    "assessment_type": "RdSAP",
+    "built_form": 2,
+    "certificate_number": "0000-0000-0000-0000-0001",
+    "co2_emissions_current": 2.9,
+    "co2_emissions_potential": 1.3,
+    "completion_date": "2017-05-15",
+    "current_energy_efficiency_band": "D",
+    "energy_rating_current": 64,
+    "energy_rating_potential": 80,
+    "habitable_room_count": 3,
+    "heating_cost_current": {
+      "currency": "GBP",
+      "value": 527
+    },
+    "heating_cost_potential": {
+      "currency": "GBP",
+      "value": 223
+    },
+    "hot_water_cost_current": {
+      "currency": "GBP",
+      "value": 94
+    },
+    "hot_water_cost_potential": {
+      "currency": "GBP",
+      "value": 95
+    },
+    "inspection_date": "2017-05-15",
+    "lighting_cost_current": {
+      "currency": "GBP",
+      "value": 55
+    },
+    "lighting_cost_potential": {
+      "currency": "GBP",
+      "value": 42
+    },
+    "postcode": "AA1 1AA",
+    "potential_energy_efficiency_band": "C",
+    "property_type": 2,
+    "registration_date": "2017-05-15",
+    "schema_type": "RdSAP-Schema-17.1",
+    "tenure": 3,
+    "total_floor_area": 58,
+    "uprn": null
+  }
+}

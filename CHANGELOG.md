@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.14.1 (2026-08-26) — EPC hotfix: legacy SAP scalar cost fields
+
+**v1.14.0 returned HTTP 503 for every certificate on SAP-Schema-13.0, 14.0, 14.2 and 15.0.** Found by production dogfooding minutes after release:
+
+```
+503  "EPC service unavailable: heating_cost_current: expected {value, currency}, got int 267"
+```
+
+### Cause
+The money shape is a property of the **schema**, not the field — an audit of all six cost fields across the eleven saved schema captures shows they move together:
+
+| Schema | cost fields |
+|---|---|
+| RdSAP 17.0 / 17.1 / 18.0 / 19.0 / 20.0.0, SAP 16.0 / 16.2 | `{value, currency}` |
+| **SAP 13.0 / 14.0 / 14.2 / 15.0** | **bare number** |
+
+`EPCMoney.from_source` accepted only the object form and raised `EPCUpstreamShapeError`, which subclasses `EPCUpstreamError` and therefore surfaced as 503. That broke certificate lookup, exact-address search, comps enrichment, the report service and both MCP surfaces for those schemas. Area summaries were unaffected, as they fetch no certificate.
+
+The evidence was present in the probe captures used to build the migration; the model was written without checking them.
+
+### Fixed
+- **Bare numbers are accepted.** The source model records that upstream stated no currency (`currency=None`, `currency_stated=False`) and does **not** rewrite the raw shape into a fabricated `{"currency": "GBP"}` object.
+- **The v1 projection keeps the amount** and reads it as GBP — the same representation the retired v1 field used, on a register scoped to England and Wales — emitting **one aggregated warning per certificate** naming the inference. Not one per field: all six cost fields share a schema's shape, so per-field warnings would repeat the same sentence six times.
+- **Malformed money is still rejected**: `bool` (checked explicitly, since `isinstance(True, int)` is `True` in Python), strings, lists, empty objects, missing `value`/`currency`, non-numeric values, and empty currency. A stated non-GBP currency still suppresses the legacy scalar with its existing warning.
+
+### Tests
+- Sanitised fixtures for all eleven observed schemas (`tests/fixtures/epc/`) — no real addresses, UPRNs or certificate numbers — pinning both shapes so an upstream change fails loudly.
+- Regression coverage through certificate lookup, exact-address search, comps enrichment, the report service, REST, and both MCP surfaces, asserting the warning survives each without per-field spam.
+
 ## v1.14.0 (2026-08-25) — EPC restored on the GOV.UK Bearer API
 
 Operational restoration after the retirement of `epc.opendatacommunities.org`.
