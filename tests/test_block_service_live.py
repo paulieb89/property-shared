@@ -2,13 +2,20 @@
 
 import os
 
-try:
-    from dotenv import load_dotenv
-except ImportError:
-    load_dotenv = None
-
-if load_dotenv:
-    load_dotenv()
+# Credentials are loaded ONLY when live tests are explicitly enabled.
+#
+# This used to run at import time, so merely HAVING a .env on disk leaked
+# credentials into os.environ for the whole pytest session — and unit tests
+# asserting unconfigured behaviour then saw a configured client and failed.
+# Collection must never configure an integration as a side effect: a .env is a
+# convenience for the developer, not an instruction to talk to live services.
+if os.getenv("RUN_LIVE_TESTS") == "1":  # pragma: no cover - live-only path
+    try:
+        from dotenv import load_dotenv
+    except ImportError:  # optional local dev dependency
+        pass
+    else:
+        load_dotenv()
 
 import pytest
 
