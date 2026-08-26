@@ -366,13 +366,14 @@ async def fetch_epc_certificate(lmk_key: str) -> dict | None:
 async def epc_certificate(
     lmk_key: Annotated[str, Field(description="EPC certificate number (accepted as lmk_key for compatibility)")],
 ) -> dict | None:
-    """Fetch a single EPC certificate by its lmk_key (certificate hash).
+    """Fetch a single EPC certificate by its GOV.UK certificate number.
 
     Use after epc_search has identified the correct cert — this is faster
     than epc_lookup(postcode, address) as it makes a direct lookup with no
-    fuzzy matching or postcode re-fetch.
+    address matching or postcode re-fetch.
 
-    lmk_key accepts the certificate_number returned by the summary search (the parameter name is retained for compatibility).
+    The parameter is named lmk_key as a compatibility alias; pass the
+    certificate_number returned by the summary search.
 
     Returns the full EPC certificate, or null only when no such certificate is lodged. A null result means no such certificate is lodged. If the EPC service cannot be reached the tool raises an error instead — never treat an error as evidence that a property has no certificate.
     """

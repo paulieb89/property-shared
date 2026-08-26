@@ -476,11 +476,21 @@ def epc_search(
 
 @epc.command("certificate")
 def epc_certificate(
-    certificate_hash: str = typer.Argument(..., help="EPC certificate hash (lmk-key)"),
+    certificate_hash: str = typer.Argument(..., help="GOV.UK EPC certificate number"),
     include_raw: bool = typer.Option(False, help="Show raw EPC payload"),
     api_url: Optional[str] = typer.Option(None, help="Call API instead of core"),
 ) -> None:
-    """Get EPC certificate by hash (lmk-key)."""
+    """Get an EPC certificate by its GOV.UK certificate number.
+
+    An optional shortcut for a number already in hand — from the GOV.UK EPC
+    register or an MCP summary-listing tool. Area mode (``epc search`` with a
+    postcode only) reports aggregate statistics and does NOT supply certificate
+    numbers. Without a number, use ``epc search --address`` instead: it returns
+    the full certificate directly.
+
+    The argument is named ``certificate_hash`` for backward compatibility; the
+    value to pass is the certificate number.
+    """
     http = _maybe_http_client(api_url)
     if http:
         data = http.get(
@@ -498,7 +508,7 @@ def epc_certificate(
 
     result = asyncio.run(client.get_certificate(certificate_hash))
     if not result:
-        typer.echo("No EPC found for this certificate hash")
+        typer.echo("No EPC found for this certificate number")
         raise typer.Exit(code=1)
     output = {"record": result.model_dump(), "raw": result.raw if include_raw else None}
     _echo_json(output)

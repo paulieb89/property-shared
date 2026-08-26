@@ -69,7 +69,17 @@ async def get_certificate(
     certificate_hash: str,
     include_raw: bool = Query(False, description="Include raw EPC API JSON"),
 ) -> EPCRecordResponse:
-    """Get EPC certificate by lmk-key (certificate hash)."""
+    """Get an EPC certificate by its GOV.UK certificate number.
+
+    An optional shortcut for a certificate number already in hand — from the
+    GOV.UK EPC register or an MCP summary-listing tool. `/search-area` does NOT
+    supply one: it returns aggregate statistics with `certificates: null`. To
+    fetch a certificate without knowing its number, use `/search` with an exact
+    address, which returns the full certificate directly.
+
+    The `{certificate_hash}` path parameter is a compatibility alias kept from
+    the retired API; the value to pass is the certificate number.
+    """
     if not _client.is_configured():
         raise HTTPException(status_code=501, detail="EPC client not configured")
 
@@ -89,11 +99,28 @@ async def search(
     q: Optional[str] = Query(None, description="Combined address query, e.g. '10 Downing Street, SW1A 2AA'"),
     include_raw: bool = Query(False, description="Include raw EPC API JSON"),
 ) -> EPCRecordResponse:
-    """Search for an EPC certificate by postcode (optional address match).
+    """Find ONE property's EPC certificate. Returns the full certificate.
 
-    Supports two modes:
+    An address is required in practice: a postcode identifies an area, not a
+    property, so a postcode alone cannot single one out and returns 409.
+
+    Two ways to supply it:
     1. Explicit: postcode=SW1A+2AA&address=10+Downing+Street
     2. Combined: q=10+Downing+Street,+SW1A+2AA (postcode parsed from end)
+
+    The address must match a certificate exactly, allowing only for case,
+    punctuation and a leading Flat/Apartment designator.
+
+    Status outcomes:
+      422 - local validation failure: neither postcode nor q supplied, a q whose
+            postcode could not be parsed, or FastAPI query validation. Nothing
+            is sent upstream.
+      400 - the upstream EPC service rejected the query.
+      404 - the postcode holds no certificates at all (genuine absence).
+      409 - candidates exist but none or several matched; the service refuses
+            rather than guessing.
+
+    For a postcode's aggregate statistics use /search-area instead.
     """
     if not _client.is_configured():
         raise HTTPException(status_code=501, detail="EPC client not configured")
