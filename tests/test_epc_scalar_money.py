@@ -171,6 +171,31 @@ class TestMalformedMoneyIsStillRejected:
             EPCMoney.from_source({"value": value, "currency": "GBP"},
                                  "heating_cost_current")
 
+    def test_direct_construction_without_a_currency_reports_unstated(self):
+        """Human review blocker: EPCMoney(value=...) used to yield currency=None
+        with currency_stated=True — "a currency was stated" and "there is no
+        currency" simultaneously. currency_stated is now DERIVED, so the
+        contradictory state cannot be constructed at all."""
+        m = EPCMoney(value=Decimal("625"))
+        assert m.currency is None
+        assert m.currency_stated is False
+
+    def test_direct_construction_with_a_currency_reports_stated(self):
+        m = EPCMoney(value=Decimal("625"), currency="GBP")
+        assert m.currency == "GBP"
+        assert m.currency_stated is True
+
+    def test_currency_stated_is_not_a_settable_field(self):
+        """If it were settable, provenance could contradict the data again."""
+        assert "currency_stated" not in EPCMoney.model_fields
+        m = EPCMoney(value=Decimal("1"))
+        with pytest.raises((ValueError, AttributeError)):
+            m.currency_stated = True   # type: ignore[misc]
+
+    def test_constructor_ignores_an_attempt_to_force_the_flag(self):
+        m = EPCMoney(value=Decimal("1"), currency_stated=True)  # type: ignore[call-arg]
+        assert m.currency_stated is False, "a forced flag overrode the invariant"
+
     def test_currency_flag_cannot_desync_the_projection(self):
         """A directly constructed EPCMoney with no currency must still be
         treated as unstated, whatever the flag says."""

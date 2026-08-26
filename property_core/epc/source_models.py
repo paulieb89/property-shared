@@ -85,7 +85,19 @@ class EPCMoney(BaseModel):
 
     value: Decimal
     currency: Optional[str] = None
-    currency_stated: bool = True
+
+    @property
+    def currency_stated(self) -> bool:
+        """Whether upstream stated a currency.
+
+        DERIVED, never stored. As a settable field it could be constructed to
+        contradict `currency` — EPCMoney(value=1) yielded currency=None with
+        currency_stated=True, i.e. "a currency was stated" and "there is no
+        currency" at once. Provenance that can disagree with the data it
+        describes is worse than no provenance, so the invariant is structural:
+        a currency is stated exactly when there is one.
+        """
+        return self.currency is not None
 
     @classmethod
     def from_source(cls, raw: Any, field: str) -> "EPCMoney":
@@ -98,7 +110,7 @@ class EPCMoney(BaseModel):
 
         if isinstance(raw, (int, float)):
             # Legacy SAP scalar: an amount with no stated currency.
-            return cls(value=_finite(raw, field), currency=None, currency_stated=False)
+            return cls(value=_finite(raw, field), currency=None)
 
         if not isinstance(raw, dict) or "value" not in raw or "currency" not in raw:
             raise EPCUpstreamShapeError(
@@ -111,7 +123,7 @@ class EPCMoney(BaseModel):
         currency = _str_or_none(raw["currency"])
         if not currency:
             raise EPCUpstreamShapeError(f"{field}: missing currency")
-        return cls(value=value, currency=currency, currency_stated=True)
+        return cls(value=value, currency=currency)
 
 
 class EPCPagination(BaseModel):

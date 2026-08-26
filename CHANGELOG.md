@@ -25,6 +25,11 @@ The evidence was present in the probe captures used to build the migration; the 
 - **The v1 projection keeps the amount** and reads it as GBP — the same representation the retired v1 field used, on a register scoped to England and Wales — emitting **one aggregated warning per certificate** naming the inference. Not one per field: all six cost fields share a schema's shape, so per-field warnings would repeat the same sentence six times.
 - **Malformed money is still rejected**: `bool` (checked explicitly, since `isinstance(True, int)` is `True` in Python), strings, lists, empty objects, missing `value`/`currency`, non-numeric values, and empty currency. A stated non-GBP currency still suppresses the legacy scalar with its existing warning.
 
+### Fixed after human review
+- **The report service used the inferred cost values but dropped the caveat.** `EPCData.warnings` stopped at `_fetch_epc_data()`, so a report presented GBP amounts whose currency was inferred as though they were stated. `EnergyPerformance` now carries `warnings`, the service propagates them, and the shared HTML report template renders them beside the energy block. Asserted at every step: service output, REST JSON and rendered HTML each disclose it exactly once.
+- **`EPCMoney` could be constructed with contradictory provenance.** `EPCMoney(value=...)` produced `currency=None` with `currency_stated=True` — "a currency was stated" and "there is no currency" at the same time. `currency_stated` is now a derived property rather than a settable field, so the contradiction is structurally impossible; a value passed for it is ignored.
+- Enrichment and REST-search tests asserted success alone; they now assert the warning propagates with the attached certificate.
+
 ### Tests
 - Sanitised fixtures for all eleven observed schemas (`tests/fixtures/epc/`) — no real addresses, UPRNs or certificate numbers — pinning both shapes so an upstream change fails loudly.
 - Regression coverage through certificate lookup, exact-address search, comps enrichment, the report service, REST, and both MCP surfaces, asserting the warning survives each without per-field spam.

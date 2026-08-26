@@ -95,8 +95,12 @@ class TestEnrichmentAndReport:
         comps = [PPDTransaction(transaction_id="1", price=250000, postcode=POSTCODE,
                                 paon="1", street="EXAMPLE STREET")]
         out = asyncio.run(enrich_comps_with_epc(comps, epc_client=_client()))
-        assert out[0].epc_match is not None, "enrichment dropped a scalar-cost certificate"
+        match = out[0].epc_match
+        assert match is not None, "enrichment dropped a scalar-cost certificate"
         assert out[0].epc_rating == "D"
+        # Success alone is not enough: the attached certificate carries costs
+        # with an INFERRED currency, so the caveat must ride along with it.
+        _assert_disclosed_once(match.get("warnings"), "enrichment epc_match")
 
     def test_report_service_epc_step_succeeds(self):
         """_fetch_epc_data() swallows failures into success=False — the v1.14.0
@@ -113,6 +117,41 @@ class TestEnrichmentAndReport:
         assert ep.heating_cost == 625
         assert ep.hot_water_cost == 136
         assert ep.lighting_cost == 58
+        # Those costs are denominated by INFERENCE. Presenting them without the
+        # caveat would render an inference as a measurement.
+        _assert_disclosed_once(ep.warnings, "report service EnergyPerformance")
+
+    def test_report_warning_survives_json_and_html(self):
+        """Service output, REST JSON and the rendered HTML must each disclose it
+        exactly once — the HTML report is where a human actually reads the cost."""
+        from property_core.report_service import PropertyReportService
+
+        svc = PropertyReportService(epc_client=_client())
+        result = asyncio.run(svc._fetch_epc_data(POSTCODE, ADDRESS))
+        ep = result["energy_performance"]
+
+        # 1. JSON serialisation of the model (what REST returns)
+        payload = ep.model_dump(mode="json")
+        _assert_disclosed_once(payload.get("warnings"), "report JSON")
+
+        # 2. Rendered HTML
+        from jinja2 import Environment, FileSystemLoader
+
+        from datetime import datetime
+
+        from property_core.models.report import PropertyReport
+
+        report = PropertyReport(
+            report_id="test", generated_at=datetime(2026, 1, 1),
+            query_address=ADDRESS, query_postcode=POSTCODE,
+            energy_performance=ep,
+        )
+        env = Environment(loader=FileSystemLoader("app/templates"), autoescape=True)
+        html = env.get_template("report.html").render(report=report)
+        needle = "interpreted as GBP"
+        assert needle in html, "the currency inference is not rendered in the HTML report"
+        assert html.count(needle) == 1, \
+            f"warning rendered {html.count(needle)} times — duplicated in the HTML"
 
 
 def _rest(client):
@@ -136,7 +175,9 @@ class TestRestSurface:
         got = _rest(_client()).get("/v1/epc/search",
                                    params={"postcode": POSTCODE, "address": ADDRESS})
         assert got.status_code == 200, f"regression: {got.status_code} {got.text[:200]}"
-        assert got.json()["record"]["heating_cost_current"] == 625
+        record = got.json()["record"]
+        assert record["heating_cost_current"] == 625
+        _assert_disclosed_once(record.get("warnings"), "REST search")
 
 
 class TestMcpSurfaces:
