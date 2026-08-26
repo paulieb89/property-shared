@@ -169,7 +169,7 @@ class TestRestErrorTaxonomy:
         got = tc.get("/v1/epc/search", params={"postcode": "AA1 1AA", "address": "24 Alexandra Road"})
         assert got.status_code == 409
 
-    def test_configuration_error_is_501_not_500(self):
+    def test_configuration_error_is_501_not_500(self, no_epc_credentials):
         from app.api.v1 import epc as R
 
         c = EPCClient(token=None)

@@ -104,7 +104,7 @@ class TestUpstreamFailuresRaise:
         with pytest.raises(EPCUpstreamShapeError):
             _run(c.search_summaries("AA1 1AA"))
 
-    def test_unconfigured_raises_without_any_request(self):
+    def test_unconfigured_raises_without_any_request(self, no_epc_credentials):
         called = []
 
         def handler(request):
@@ -117,7 +117,7 @@ class TestUpstreamFailuresRaise:
             _run(c.search_summaries("AA1 1AA"))
         assert called == [], "no request may be made without a credential"
 
-    def test_legacy_credentials_alone_are_not_a_fallback(self):
+    def test_legacy_credentials_alone_are_not_a_fallback(self, no_epc_credentials):
         """Never silently ignore legacy creds while reporting as configured."""
         c = _client(lambda req: httpx.Response(200, json=SEARCH_BODY), token=None)
         c._legacy_email, c._legacy_api_key = "a@b.c", "key"
