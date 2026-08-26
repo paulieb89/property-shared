@@ -21,6 +21,11 @@ from property_core.epc.compat import to_epcdata
 from property_core.epc.source_models import EPCCertificateDoc
 
 FIXTURES = Path(__file__).parent / "fixtures" / "epc"
+COST_FIELDS = [
+    "heating_cost_current", "heating_cost_potential",
+    "hot_water_cost_current", "hot_water_cost_potential",
+    "lighting_cost_current", "lighting_cost_potential",
+]
 SCALAR_SCHEMAS = ["sap_schema_13_0", "sap_schema_14_0", "sap_schema_14_2", "sap_schema_15_0"]
 OBJECT_SCHEMAS = [
     "rdsap_schema_17_0", "rdsap_schema_17_1", "rdsap_schema_18_0",
@@ -30,6 +35,23 @@ OBJECT_SCHEMAS = [
 
 def _warnings(name: str) -> list[str]:
     raw = json.loads((FIXTURES / f"{name}.json").read_text())["data"]
+    doc = EPCCertificateDoc.from_source(
+        raw, certificate_number=raw["certificate_number"], schema_type=raw.get("schema_type"))
+    return to_epcdata(doc).warnings or []
+
+
+def _warnings_with_explicit_gbp(name: str) -> list[str]:
+    """The same fixture with only its cost fields rewritten to {value, currency}.
+
+    Everything else — schema_type, codes, dates, absent fields — is untouched, so
+    the control's warnings are exactly what this certificate would produce if
+    upstream had stated the currency.
+    """
+    raw = json.loads((FIXTURES / f"{name}.json").read_text())["data"]
+    raw = dict(raw)
+    for field in COST_FIELDS:
+        if raw.get(field) is not None:
+            raw[field] = {"value": raw[field], "currency": "GBP"}
     doc = EPCCertificateDoc.from_source(
         raw, certificate_number=raw["certificate_number"], schema_type=raw.get("schema_type"))
     return to_epcdata(doc).warnings or []
@@ -56,11 +78,28 @@ class TestScalarSchemasLeadWithTheInference:
         assert len([w for w in _warnings(name) if _is_currency(w)]) == 1
 
     @pytest.mark.parametrize("name", SCALAR_SCHEMAS)
-    def test_the_other_warnings_are_preserved_in_order(self, name):
-        """Only the currency warning moves; the rest keep their sequence."""
-        warnings = _warnings(name)
-        others = [w for w in warnings if not _is_currency(w)]
-        assert warnings == [warnings[0]] + others, "reordering disturbed the other warnings"
+    def test_remaining_warnings_match_an_explicit_gbp_control_exactly(self, name):
+        """The rest of the list must be byte-identical to the same certificate
+        with explicit GBP costs.
+
+        The previous version of this test compared the scalar result against a
+        list rebuilt from itself, which is true by construction whatever the code
+        does. The control is built by rewriting only the six cost fields of the
+        SAME fixture into {value, currency} objects — so the two runs differ in
+        exactly one input dimension, and any warning the reordering added,
+        dropped, altered or moved shows up as a mismatch.
+        """
+        scalar = _warnings(name)
+        control = _warnings_with_explicit_gbp(name)
+
+        assert _is_currency(scalar[0]), "precondition: inference warning is not first"
+        assert not any(_is_currency(w) for w in control), \
+            "control still infers a currency — it is not a valid control"
+        assert scalar[1:] == control, (
+            "after the leading inference warning the lists diverge\n"
+            f"  scalar[1:] = {scalar[1:]}\n"
+            f"  control    = {control}"
+        )
 
 
 class TestObjectSchemasUnchanged:

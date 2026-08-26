@@ -18,8 +18,8 @@ mcp = FastMCP(
     "property-app",
     # Without this, FastMCP advertises its OWN version on the MCP card, so the
     # `initialize` response reported the framework version (3.2.4) while the
-    # HTTP /server-info route below reported the real one. The plain server in
-    # app/mcp/server.py has always passed it; this one did not.
+    # /.well-known/mcp/server-card.json route below reported the real one. The
+    # plain server in app/mcp/server.py has always passed it; this one did not.
     version=_pkg_version("property-shared"),
     instructions=(
         "UK property tools with interactive dashboards. "
