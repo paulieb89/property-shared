@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.14.2 (2026-08-26) — MCP server card version; inferred-GBP warning ordering
+
+Two small corrections found by dogfooding v1.14.1 in production. No behaviour change to any tool, endpoint or data value.
+
+### Fixed
+- **The MCP app advertised the FastMCP version on its server card.** `initialize` returned `{"name":"property-app","version":"3.2.4"}` — the pinned dependency's version, not the app's. FastMCP falls back to its own when the constructor receives no `version=`, and `property_app/server.py` never passed one, so the protocol card disagreed with the app's own `/server-info` route. Pre-existing (v1.13.0 would have reported 3.2.4 too) and cosmetic, but a card that misreports what is deployed defeats its purpose. Both servers now advertise the installed `property-shared` version, asserted as a property rather than a literal so it holds across releases.
+- **The inferred-GBP warning now leads for scalar SAP certificates.** Every other warning on a certificate explains why something is *absent*; this one qualifies a number that is *present* and that the reader is looking at. Rendered fifth of five in the HTML report it read as boilerplate, so a cost could be taken as measured when only its amount was. Ordering is pinned by test. Modern object-shaped certificates are unchanged — they state their currency and carry no such warning.
+
 ## v1.14.1 (2026-08-26) — EPC hotfix: legacy SAP scalar cost fields
 
 **v1.14.0 returned HTTP 503 for every certificate on SAP-Schema-13.0, 14.0, 14.2 and 15.0.** Found by production dogfooding minutes after release:
