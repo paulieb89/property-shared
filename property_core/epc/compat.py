@@ -33,15 +33,27 @@ _NO_DEMONSTRATED_SOURCE = (
 )
 
 
-def _money(value, field: str, warnings: list[str]) -> Optional[int]:
-    """Legacy scalar, only when the currency is the expected one.
+def _money(value, field: str, warnings: list[str], inferred: list[str]) -> Optional[int]:
+    """Legacy scalar, when the currency is the expected one or was never stated.
 
     The legacy field is typed `int | None`, so the projection must stay int —
     widening it to float would itself be a contract change.
+
+    Legacy SAP schemas (13.0, 14.0, 14.2, 15.0) return a bare number with no
+    currency. That is precisely the shape the retired v1 API used, and the
+    register covers England and Wales only, so the amount is read as GBP rather
+    than discarded — but the inference is recorded in `inferred` so the caller
+    can disclose it ONCE per certificate instead of once per field. All six cost
+    fields share a schema's shape, so per-field warnings would be six copies of
+    the same sentence.
     """
     if value is None:
         return None
-    if value.currency != LEGACY_CURRENCY:
+    # Keyed off the currency itself rather than the flag, so a directly
+    # constructed EPCMoney cannot desync the two and change behaviour.
+    if value.currency is None:
+        inferred.append(field)
+    elif value.currency != LEGACY_CURRENCY:
         warnings.append(
             f"{field} is denominated in {value.currency}; the legacy scalar field "
             f"expects {LEGACY_CURRENCY} and is reported as missing. The structured "
@@ -71,6 +83,9 @@ def to_epcdata(
             not compatibility.
     """
     warnings: list[str] = []
+    # Cost fields whose currency upstream never stated (legacy SAP scalar
+    # shape). Collected so the inference is disclosed once, not six times.
+    inferred_currency: list[str] = []
 
     if not doc.current_energy_efficiency_band:
         raise EPCUnsupportedOperationError(
@@ -114,12 +129,12 @@ def to_epcdata(
         construction_age=None,     # no demonstrated source
         floor_level=None,          # no demonstrated source
         lodgement_date=None,       # equivalence not demonstrated
-        heating_cost_current=_money(doc.heating_cost_current, "heating_cost_current", warnings),
-        heating_cost_potential=_money(doc.heating_cost_potential, "heating_cost_potential", warnings),
-        hot_water_cost_current=_money(doc.hot_water_cost_current, "hot_water_cost_current", warnings),
-        hot_water_cost_potential=_money(doc.hot_water_cost_potential, "hot_water_cost_potential", warnings),
-        lighting_cost_current=_money(doc.lighting_cost_current, "lighting_cost_current", warnings),
-        lighting_cost_potential=_money(doc.lighting_cost_potential, "lighting_cost_potential", warnings),
+        heating_cost_current=_money(doc.heating_cost_current, "heating_cost_current", warnings, inferred_currency),
+        heating_cost_potential=_money(doc.heating_cost_potential, "heating_cost_potential", warnings, inferred_currency),
+        hot_water_cost_current=_money(doc.hot_water_cost_current, "hot_water_cost_current", warnings, inferred_currency),
+        hot_water_cost_potential=_money(doc.hot_water_cost_potential, "hot_water_cost_potential", warnings, inferred_currency),
+        lighting_cost_current=_money(doc.lighting_cost_current, "lighting_cost_current", warnings, inferred_currency),
+        lighting_cost_potential=_money(doc.lighting_cost_potential, "lighting_cost_potential", warnings, inferred_currency),
         co2_emissions_current=doc.co2_emissions_current,
         co2_emissions_potential=doc.co2_emissions_potential,
         inspection_date=doc.inspection_date,
@@ -131,5 +146,14 @@ def to_epcdata(
         raw=doc.raw,
     )
 
+    if inferred_currency:
+        # One sentence per certificate. Naming the fields would repeat the
+        # same disclosure six times, since a schema's cost fields share a shape.
+        warnings.append(
+            "cost amounts were returned by upstream as bare numbers with no "
+            f"currency (the legacy {doc.schema_type or 'SAP'} scalar shape); they are "
+            "interpreted as GBP, inferred from that shape and the England and "
+            "Wales scope of the register, not stated by the source"
+        )
     data.warnings = warnings
     return (data, warnings) if return_warnings else data

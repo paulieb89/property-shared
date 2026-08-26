@@ -1,0 +1,49 @@
+{
+  "data": {
+    "address_line_1": "1 Example Street",
+    "address_line_2": null,
+    "address_line_3": null,
+    "assessment_type": "RdSAP",
+    "built_form": 1,
+    "certificate_number": "0000-0000-0000-0000-0001",
+    "co2_emissions_current": 2.3,
+    "co2_emissions_potential": 1.8,
+    "completion_date": "2012-09-24",
+    "current_energy_efficiency_band": "C",
+    "energy_rating_current": 72,
+    "energy_rating_potential": 77,
+    "habitable_room_count": 4,
+    "heating_cost_current": {
+      "currency": "GBP",
+      "value": 386
+    },
+    "heating_cost_potential": {
+      "currency": "GBP",
+      "value": 321
+    },
+    "hot_water_cost_current": {
+      "currency": "GBP",
+      "value": 104
+    },
+    "hot_water_cost_potential": {
+      "currency": "GBP",
+      "value": 105
+    },
+    "inspection_date": "2012-09-22",
+    "lighting_cost_current": {
+      "currency": "GBP",
+      "value": 79
+    },
+    "lighting_cost_potential": {
+      "currency": "GBP",
+      "value": 47
+    },
+    "postcode": "AA1 1AA",
+    "potential_energy_efficiency_band": "C",
+    "property_type": 2,
+    "registration_date": "2012-09-24",
+    "schema_type": "SAP-Schema-16.0",
+    "total_floor_area": 74,
+    "uprn": null
+  }
+}

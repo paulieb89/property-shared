@@ -1,0 +1,31 @@
+{
+  "data": {
+    "address_line_1": "1 Example Street",
+    "address_line_2": null,
+    "address_line_3": null,
+    "assessment_type": "RdSAP",
+    "built_form": 2,
+    "certificate_number": "0000-0000-0000-0000-0001",
+    "co2_emissions_current": 3.0,
+    "co2_emissions_potential": 3.0,
+    "completion_date": "2010-08-25",
+    "current_energy_efficiency_band": "D",
+    "energy_rating_current": 64,
+    "energy_rating_potential": 65,
+    "habitable_room_count": 3,
+    "heating_cost_current": 515,
+    "heating_cost_potential": 518,
+    "hot_water_cost_current": 78,
+    "hot_water_cost_potential": 78,
+    "inspection_date": "2010-08-25",
+    "lighting_cost_current": 39,
+    "lighting_cost_potential": 28,
+    "postcode": "AA1 1AA",
+    "potential_energy_efficiency_band": "D",
+    "property_type": 2,
+    "registration_date": "2010-08-25",
+    "schema_type": "SAP-Schema-14.2",
+    "total_floor_area": 53,
+    "uprn": null
+  }
+}

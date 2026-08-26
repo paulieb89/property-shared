@@ -56,6 +56,11 @@ class EnergyPerformance(BaseModel):
     # Potential savings
     potential_heating_cost: Optional[int] = None
     potential_savings: Optional[int] = None
+    # Caveats attached to the certificate this block was derived from — e.g.
+    # that the cost amounts carry an inferred currency. The costs above are
+    # reported as plain numbers, so dropping these would present an inference
+    # as a measurement.
+    warnings: list[str] = Field(default_factory=list)
     # Certificate info
     inspection_date: Optional[str] = None
     certificate_hash: Optional[str] = None

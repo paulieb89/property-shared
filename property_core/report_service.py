@@ -334,6 +334,10 @@ class PropertyReportService:
                 potential_savings=potential_savings,
                 inspection_date=result.inspection_date,
                 certificate_hash=result.lmk_key,
+                # The cost fields above may carry an inferred currency (legacy
+                # SAP scalar shape). Carrying the caveats forward is what keeps
+                # them an inference rather than an unqualified measurement.
+                warnings=list(result.warnings or []),
             )
 
             return {"success": True, "energy_performance": energy}

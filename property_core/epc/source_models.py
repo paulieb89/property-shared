@@ -51,22 +51,75 @@ def _str_or_none(v: Any) -> Optional[str]:
     return s or None
 
 
+def _finite(raw: Any, field: str) -> Decimal:
+    """Decimal or EPCUpstreamShapeError — never a bare pydantic ValidationError.
+
+    json.loads accepts the literals NaN, Infinity and -Infinity, and pydantic
+    rejects non-finite Decimals with a ValidationError. That would escape the EPC
+    error taxonomy and surface as an unhandled 500 instead of a typed failure.
+    """
+    try:
+        value = Decimal(str(raw))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise EPCUpstreamShapeError(f"{field}: value is not numeric: {raw!r}") from exc
+    if not value.is_finite():
+        raise EPCUpstreamShapeError(f"{field}: value is not finite: {raw!r}")
+    return value
+
+
 class EPCMoney(BaseModel):
-    """A currency amount. Decimal, because these are money."""
+    """A currency amount. Decimal, because these are money.
+
+    Two shapes are observed upstream, and which one appears is a property of the
+    SCHEMA, not of the field — all six cost fields move together:
+
+        RdSAP 17.0/17.1/18.0/19.0/20.0.0, SAP 16.0/16.2 -> {"value", "currency"}
+        SAP 13.0/14.0/14.2/15.0                         -> a bare number
+
+    A bare number states no currency, so ``currency`` stays None and
+    ``currency_stated`` is False. The raw shape is deliberately NOT rewritten
+    into a fabricated {"currency": "GBP"} object here: inferring the
+    denomination is a compatibility-layer decision, and this layer's job is to
+    report what upstream actually said. See compat.to_epcdata().
+    """
 
     value: Decimal
-    currency: str
+    currency: Optional[str] = None
+
+    @property
+    def currency_stated(self) -> bool:
+        """Whether upstream stated a currency.
+
+        DERIVED, never stored. As a settable field it could be constructed to
+        contradict `currency` — EPCMoney(value=1) yielded currency=None with
+        currency_stated=True, i.e. "a currency was stated" and "there is no
+        currency" at once. Provenance that can disagree with the data it
+        describes is worse than no provenance, so the invariant is structural:
+        a currency is stated exactly when there is one.
+        """
+        return self.currency is not None
 
     @classmethod
     def from_source(cls, raw: Any, field: str) -> "EPCMoney":
+        # bool BEFORE the number check: isinstance(True, int) is True in Python,
+        # so a bare `True` would otherwise validate as the amount 1.
+        if isinstance(raw, bool):
+            raise EPCUpstreamShapeError(
+                f"{field}: expected a number or {{value, currency}}, got bool {raw!r}"
+            )
+
+        if isinstance(raw, (int, float)):
+            # Legacy SAP scalar: an amount with no stated currency.
+            return cls(value=_finite(raw, field), currency=None)
+
         if not isinstance(raw, dict) or "value" not in raw or "currency" not in raw:
             raise EPCUpstreamShapeError(
-                f"{field}: expected {{value, currency}}, got {type(raw).__name__} {raw!r:.60}"
+                f"{field}: expected a number or {{value, currency}}, "
+                f"got {type(raw).__name__} {raw!r:.60}"
             )
-        try:
-            value = Decimal(str(raw["value"]))
-        except (InvalidOperation, TypeError) as exc:
-            raise EPCUpstreamShapeError(f"{field}: value is not numeric: {raw['value']!r}") from exc
+        if isinstance(raw["value"], bool):
+            raise EPCUpstreamShapeError(f"{field}: value is not numeric: {raw['value']!r}")
+        value = _finite(raw["value"], field)
         currency = _str_or_none(raw["currency"])
         if not currency:
             raise EPCUpstreamShapeError(f"{field}: missing currency")

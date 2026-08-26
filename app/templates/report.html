@@ -267,6 +267,13 @@
                 </div>
                 {% endif %}
             </div>
+            {% if report.energy_performance.warnings %}
+            <div class="epc-warnings" style="margin-top: 1rem; padding: 0.75rem 1rem; background: #fffbeb; border-left: 3px solid #f59e0b; font-size: 0.8125rem; color: var(--gray-700);">
+                {% for w in report.energy_performance.warnings %}
+                <div>{{ w }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
             {% if report.energy_performance.property_type or report.energy_performance.construction_age %}
             <p style="margin-top: 1rem; font-size: 0.875rem; color: var(--gray-600);">
                 {{ report.energy_performance.property_type or '' }}
