@@ -149,11 +149,18 @@ def to_epcdata(
     if inferred_currency:
         # One sentence per certificate. Naming the fields would repeat the
         # same disclosure six times, since a schema's cost fields share a shape.
-        warnings.append(
+        #
+        # INSERTED FIRST, not appended. Every other warning here explains why
+        # something is ABSENT; this one qualifies a number that is present and
+        # that the reader is looking at. Buried behind the missing-field notes it
+        # read as boilerplate, so a cost could be taken as measured when only its
+        # amount was. Ordering is pinned by tests/test_epc_warning_order.py.
+        warnings.insert(
+            0,
             "cost amounts were returned by upstream as bare numbers with no "
             f"currency (the legacy {doc.schema_type or 'SAP'} scalar shape); they are "
             "interpreted as GBP, inferred from that shape and the England and "
-            "Wales scope of the register, not stated by the source"
+            "Wales scope of the register, not stated by the source",
         )
     data.warnings = warnings
     return (data, warnings) if return_warnings else data
