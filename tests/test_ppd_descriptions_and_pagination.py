@@ -96,6 +96,42 @@ def test_record_status_docs_do_not_imply_the_filter_works():
         assert claim not in doc, f"docs still claim the filter works: {claim!r}"
 
 
+def test_record_status_rationale_is_not_factually_false():
+    """Catch the FALSE REASON, not merely the absence of a false promise.
+
+    Live evidence showed `lrppi:recordStatus` does exist on the SPARQL
+    transaction and binds to .../ppi/add. Claiming it is Linked-Data-only, or
+    that the URI mapping is an unverified guess, is wrong -- and a wrong reason
+    is what stops someone re-examining the decision later.
+    """
+    from property_core.ppd_client import UnsupportedRecordStatusFilterError
+
+    doc = (inspect.getdoc(UnsupportedRecordStatusFilterError) or "").lower()
+
+    false_claims = [
+        "that field exists only on ppdtransactionrecord",
+        "look like rdf:type nodes",
+        "rather than a literal predicate",
+        "guessed at",
+    ]
+    for claim in false_claims:
+        assert claim not in doc, f"docs still assert a disproven claim: {claim!r}"
+
+    # and it must state the real, scope-based reason
+    assert "recordstatus" in doc, doc
+    assert "not yet supported" in doc or "scope decision" in doc, doc
+
+
+def test_record_status_error_message_states_the_honest_reason():
+    from property_core.ppd_client import UnsupportedRecordStatusFilterError
+
+    client = PricePaidDataClient()
+    with pytest.raises(UnsupportedRecordStatusFilterError) as ei:
+        client.sparql_search(postcode="B5 4BX", record_status="A", limit=5)
+    msg = str(ei.value).lower()
+    assert "does exist upstream" in msg or "lrppi:recordstatus" in msg, msg
+
+
 def test_rest_rejects_record_status_with_422():
     from fastapi.testclient import TestClient
 

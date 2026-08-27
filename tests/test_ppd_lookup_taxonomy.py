@@ -165,3 +165,99 @@ def test_comps_still_succeeds_when_the_subject_lookup_fails():
         resp = svc.comps(postcode="B5 4BX", address="33 ESSEX STREET",
                          search_level="sector", auto_escalate=False)
     assert resp is not None and resp.count == 0
+
+
+# --------------------------------------------------------------------------
+# Review follow-up: only the OBSERVED bare-string stub proves not-found.
+# Every other invalid-but-successful envelope is an upstream shape problem
+# (502), not "this transaction does not exist" (404). Reporting a malformed
+# response as 404 tells the caller a false fact about the world.
+# --------------------------------------------------------------------------
+
+MALFORMED_ENVELOPES = {
+    "empty-envelope": {},
+    "missing-result": {"other": 1},
+    "result-null": {"result": None},
+    "result-not-a-dict": {"result": "nope"},
+    "primaryTopic-missing": {"result": {}},
+    "primaryTopic-null": {"result": {"primaryTopic": None}},
+    "primaryTopic-list": {"result": {"primaryTopic": [{"a": 1}]}},
+    "primaryTopic-int": {"result": {"primaryTopic": 42}},
+    "raw-not-a-dict": ["not", "an", "envelope"],
+}
+
+
+@pytest.mark.parametrize("name", sorted(MALFORMED_ENVELOPES))
+def test_malformed_envelope_is_upstream_shape_not_not_found(name):
+    from property_core.exceptions import UpstreamShapeError
+
+    client = PricePaidDataClient()
+    with patch.object(PricePaidDataClient, "_fetch_json",
+                      return_value=MALFORMED_ENVELOPES[name]):
+        with pytest.raises(UpstreamShapeError):
+            client.get_transaction_record(TXID)
+
+
+@pytest.mark.parametrize("name", sorted(MALFORMED_ENVELOPES))
+def test_malformed_envelope_is_never_reported_as_not_found(name):
+    client = PricePaidDataClient()
+    with patch.object(PricePaidDataClient, "_fetch_json",
+                      return_value=MALFORMED_ENVELOPES[name]):
+        try:
+            client.get_transaction_record(TXID)
+        except TransactionNotFoundError:  # pragma: no cover - the defect
+            pytest.fail(f"{name}: malformed response reported as 404 not-found")
+        except Exception:
+            pass
+
+
+def test_upstream_shape_error_maps_to_502_and_is_retryable_upstream():
+    from property_core.exceptions import UpstreamShapeError
+
+    assert issubclass(UpstreamShapeError, UpstreamUnavailableError)
+    assert UpstreamShapeError("bad shape").to_dict()["error"] == "upstream_shape_error"
+
+
+def test_only_the_bare_string_stub_is_not_found():
+    """The control: the one shape actually observed to mean 'no such record'."""
+    client = PricePaidDataClient()
+    with patch.object(PricePaidDataClient, "_fetch_json", return_value=NOT_FOUND):
+        with pytest.raises(TransactionNotFoundError):
+            client.get_transaction_record(TXID)
+
+
+def test_attribute_error_while_parsing_an_object_is_not_not_found():
+    """A parse failure on a dict primaryTopic is our problem, not an absence."""
+    from property_core.exceptions import UpstreamShapeError
+    from property_core.models.ppd import PPDTransactionRecord
+
+    client = PricePaidDataClient()
+    with patch.object(PricePaidDataClient, "_fetch_json", return_value=FOUND), \
+         patch.object(PPDTransactionRecord, "from_linked_data",
+                      side_effect=AttributeError("'str' object has no attribute 'get'")):
+        with pytest.raises(UpstreamShapeError):
+            client.get_transaction_record(TXID)
+
+
+def test_rest_maps_malformed_envelope_to_502_not_404():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    c = TestClient(app)
+    with patch.object(PricePaidDataClient, "_fetch_json", return_value={"result": {}}):
+        assert c.get(f"/v1/ppd/transaction/{TXID}").status_code == 502
+
+
+def test_from_linked_data_rejects_a_malformed_shape_rather_than_emptying_it():
+    """Item 2: silently normalising a bad shape to {} weakens the taxonomy.
+
+    The model must refuse; only the client translates the specifically observed
+    bare-string stub into not-found.
+    """
+    from property_core.models.ppd import PPDTransactionRecord
+
+    with pytest.raises((ValueError, TypeError)):
+        PPDTransactionRecord.from_linked_data({"result": {"primaryTopic": "http://x"}})
+    with pytest.raises((ValueError, TypeError)):
+        PPDTransactionRecord.from_linked_data({"result": {}})

@@ -207,7 +207,8 @@ async def property_yield(
             or "district".
         property_type: Filter sales by type. None (default) = residential set
             (F+D+S+T). Pass "F"/"D"/"S"/"T"/"O" for one type, "ALL" for firehose.
-        auto_escalate: Widen the PPD search area on thin markets — postcode→
+        auto_escalate: Compatibility parameter. Does NOT widen the search area on
+            the live source (see `warnings`); previously postcode→
             sector→district. Default True. Set False for strict-locality only.
 
     Returns:
@@ -235,7 +236,8 @@ async def rental_analysis(
 ) -> dict:
     """Rental market analysis and achievable rent estimate.
 
-    auto_escalate widens the search area when fewer than 5 listings are found
+    auto_escalate is accepted for compatibility but does NOT widen the search
+    area on the live source; it previously widened when fewer than 5 were found
     (thin market). Response includes thin_market, escalated_from, escalated_to
     fields when escalation occurs.
     """
@@ -564,13 +566,13 @@ def ppd_transactions(
 ) -> dict:
     """Land Registry Price Paid transactions for a postcode, most recent first.
 
-    Returns up to `limit` most recent transactions within snapshot coverage
-    (see `coverage_from`/`coverage_to` in the response where present),
-    unfiltered -- includes category-B bulk transfers and commercial sales.
+    Returns up to `limit` most recent transactions currently available from the
+    live Land Registry source, unfiltered -- includes category-B bulk transfers
+    and commercial sales.
 
-    This is not a complete property history: older sales may exist beyond what
-    is returned. Check `sample_complete` before describing the result as the
-    full record. For clean residential comparable sales, use `property_comps` instead.
+    This is a bounded result, not a complete property history: older sales may
+    exist beyond what is returned, and the result carries no completeness
+    guarantee. For clean residential comparable sales, use `property_comps` instead.
     """
     from property_core import PPDService
     result = PPDService().search_transactions(

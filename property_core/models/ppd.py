@@ -257,11 +257,20 @@ class PPDTransactionRecord(BaseModel):
         property_type, estate_type, transaction_category from nested nodes.
         """
         result = raw.get("result", {}) if isinstance(raw, dict) else {}
-        primary = result.get("primaryTopic", {}) if isinstance(result, dict) else {}
-        # The API returns a bare URI string here for an unknown id; every
-        # downstream access assumes a mapping, so normalise rather than raise.
+        # Reject rather than normalise. Emptying a malformed shape produced a
+        # blank record that looked like a real answer; translating the one
+        # observed bare-URI stub into "not found" is the CLIENT's job, because
+        # only it knows that stub means an unknown id.
+        if not isinstance(result, dict):
+            raise ValueError(
+                f"linked data 'result' is {type(result).__name__}, expected an object"
+            )
+        primary = result.get("primaryTopic")
         if not isinstance(primary, dict):
-            primary = {}
+            raise ValueError(
+                f"linked data 'primaryTopic' is {type(primary).__name__}, "
+                "expected an object"
+            )
 
         property_type_node = primary.get("propertyType")
         estate_type_node = primary.get("estateType")

@@ -1,8 +1,12 @@
-"""PR 2 — the comps completeness warning must survive to every consumer.
+"""PR 2 — the comps completeness warning on the DIRECT comps surfaces.
 
-A warning that exists only on the core model is not a contract. It has to reach
-REST, both MCP servers, the CLI, and the derived consumers (yield, report,
-dashboards) wherever they expose comps.
+Scope of this file: surfaces that expose comps itself -- core, REST, both MCP
+servers, the CLI. An earlier version of this header also claimed yield, report
+and dashboard coverage while testing none of it, which is exactly the kind of
+false assurance these tests exist to prevent.
+
+Propagation into DERIVED figures (yield, report, dashboards) is covered by
+`test_ppd_derived_warning_propagation.py`, which drives those paths end to end.
 
 No snapshot provenance fields are added in PR 2 -- only `warnings`.
 """

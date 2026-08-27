@@ -136,3 +136,17 @@ class UpstreamUnavailableError(PPDError):
 
     code = "upstream_unavailable"
     retryable = True
+
+
+class UpstreamShapeError(UpstreamUnavailableError):
+    """A successful upstream response whose shape we cannot use.
+
+    Deliberately NOT ``TransactionNotFoundError``: a malformed envelope tells us
+    nothing about whether the record exists, so reporting it as an absence would
+    state a false fact about the world. Subclasses ``UpstreamUnavailableError``
+    so existing upstream-failure handling catches it, while keeping its own code
+    for diagnosis.
+    """
+
+    code = "upstream_shape_error"
+    retryable = True

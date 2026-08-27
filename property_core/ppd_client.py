@@ -78,15 +78,19 @@ RECORD_STATUS_URIS: Dict[str, str] = {
 class UnsupportedRecordStatusFilterError(ValueError):
     """Raised when record_status filtering is requested on the SPARQL search path.
 
-    SPARQL search returns PPDTransaction rows, which have no record_status field
-    (it lives on PPDTransactionRecord, from the Linked Data endpoint). Filtering
-    previously dereferenced the missing attribute and crashed with AttributeError
-    on the first returned row.
+    SPARQL search returns PPDTransaction rows, which carry no record_status
+    field. Filtering previously dereferenced the missing attribute and crashed
+    with AttributeError on the first returned row.
 
-    Implementing this properly needs the record-status triple shape verified
-    against the live Land Registry ontology first — the URIs in
-    RECORD_STATUS_URIS look like rdf:type nodes rather than a literal predicate,
-    so it is deliberately rejected rather than guessed at.
+    **Honest reason it stays disabled.** An earlier version of this docstring
+    said the predicate exists only on the Linked Data endpoint and that the URI
+    mapping was an unverified guess. Both claims were wrong: live evidence showed
+    ``lrppi:recordStatus`` does exist on the SPARQL transaction and binds to
+    ``.../ppi/add``. It remains rejected because it is not yet supported under
+    the verified search and performance contract — the binding is not part of the
+    required-binding chain this query is tuned around, and adding it has not been
+    validated for the 503/timeout behaviour the rest of the filter set was shaped
+    by. Rejecting is a scope decision, not an ontology unknown.
     """
 
 # The Land Registry site currently splits some recent years into two files.
@@ -173,6 +177,7 @@ class PricePaidDataClient:
         """
         from property_core.exceptions import (
             TransactionNotFoundError,
+            UpstreamShapeError,
             UpstreamUnavailableError,
         )
 
@@ -185,18 +190,37 @@ class PricePaidDataClient:
                 f"transaction lookup failed: {type(exc).__name__}: {exc}"
             ) from exc
 
-        result = raw.get("result") if isinstance(raw, dict) else None
-        primary = result.get("primaryTopic") if isinstance(result, dict) else None
-        if not isinstance(primary, dict):
+        if not isinstance(raw, dict):
+            raise UpstreamShapeError(
+                f"upstream returned {type(raw).__name__}, expected a JSON object"
+            )
+        result = raw.get("result")
+        if not isinstance(result, dict):
+            raise UpstreamShapeError(
+                f"upstream 'result' is {type(result).__name__}, expected an object"
+            )
+        if "primaryTopic" not in result:
+            raise UpstreamShapeError("upstream response has no 'primaryTopic'")
+
+        primary = result["primaryTopic"]
+        if isinstance(primary, str):
+            # The ONE shape observed to mean "no such record": the API returns a
+            # bare URI stub. Every other invalid shape is an upstream problem and
+            # must not be reported as an absence.
             raise TransactionNotFoundError(transaction_id)
+        if not isinstance(primary, dict):
+            raise UpstreamShapeError(
+                f"'primaryTopic' is {type(primary).__name__}, expected an object or the "
+                "bare-URI not-found stub"
+            )
 
         try:
             return PPDTransactionRecord.from_linked_data(raw)
-        except AttributeError as exc:
-            # Defence in depth: the shape guard above should make this
-            # unreachable, but an AttributeError must never reach the caller.
-            raise TransactionNotFoundError(
-                transaction_id, f"unusable record shape: {exc}"
+        except (AttributeError, TypeError, ValueError) as exc:
+            # A parse failure on a well-shaped object is our problem, never an
+            # absence. AttributeError in particular must never become a 404.
+            raise UpstreamShapeError(
+                f"unusable record shape: {type(exc).__name__}: {exc}"
             ) from exc
 
     # --------
@@ -249,7 +273,9 @@ class PricePaidDataClient:
         if record_status is not None:
             raise UnsupportedRecordStatusFilterError(
                 "record_status filtering is not supported on SPARQL search: results are "
-                "PPDTransaction rows, which do not carry a record status. Use "
+                "PPDTransaction rows, which do not carry a record status. The predicate "
+                "does exist upstream (lrppi:recordStatus), but is not yet supported under "
+                "this search's verified binding and performance contract. Use "
                 "PricePaidDataClient.get_transaction_record(transaction_id) / "
                 "PPDService.transaction_record() to read record_status for a known transaction."
             )

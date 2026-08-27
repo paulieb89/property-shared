@@ -219,8 +219,10 @@ class PPDService:
         * ``filter_outliers=False`` — opt in to a 1.5*IQR price filter; when
           enabled, outlier transactions are dropped from BOTH the stats and
           the returned transaction list (needs >=4 prices, otherwise no-op).
-        * ``auto_escalate=True`` — widen postcode→sector→district when the
-          result set is below ``thin_market_threshold``.
+        * ``auto_escalate=True`` — **compatibility parameter only.** Widening is
+          disabled on the live source: the exhaustion evidence available here
+          derives from the presentation limit, so geography would move with
+          page size. The requested area is returned with a warning instead.
 
         If address is provided, also returns subject_property with its
         transaction history.
@@ -286,17 +288,19 @@ class PPDService:
         # upstream window was not truncated. It is derived from a fetch limit
         # that itself scales with the caller's presentation limit, so it is
         # reported but never used to widen geography on the live path.
+        # Containment and exhaustion are independent facts and are reported
+        # separately. An earlier version reported containment only inside the
+        # exhausted branch while calling the page "saturated" -- a contradiction
+        # that meant the message could never appear when it was true.
+        if page.contained_out:
+            warnings.append(
+                f"{page.contained_out} out-of-area row(s) returned by the upstream "
+                "were removed by geography containment"
+            )
         if page.evidence.source_exhausted is not True:
             warnings.append(
                 "result may be incomplete: the upstream window was not exhausted, "
                 "so thin_market reflects the returned sample rather than the market"
-            )
-        elif page.contained_out:
-            # Containment removed rows from a page the upstream considered full,
-            # so what was discarded is unknown -- completeness is not established.
-            warnings.append(
-                f"result may be incomplete: {page.contained_out} out-of-area row(s) "
-                "were removed from a saturated upstream page"
             )
 
         # 4. Apply residential post-filter when property_type=None.
