@@ -45,6 +45,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# DuckDB is needed only to read a local PPD snapshot. It is deliberately NOT
+# a required dependency: library and CLI consumers on the live SPARQL path
+# must not pay for a ~59 MB native wheel they never load.
+snapshot = ["duckdb==1.5.5"]
 planning = [
   "playwright>=1.57.0",
   "openai>=1.83.0,<2",
