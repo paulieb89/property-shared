@@ -97,10 +97,17 @@ class SnapshotRuntime:
             return self._report
 
         # This Machine already materialized exactly this release, same bytes.
-        if self._already_materialized(materialized, manifest):
-            self._report = self._ready(materialized, manifest.snapshot_version,
-                                       reused_existing=True, warnings=warnings,
-                                       started=started)
+        # A same-version/different-digest conflict is a publisher error: keep
+        # serving what we have and report it, rather than letting it escape boot.
+        try:
+            if self._already_materialized(materialized, manifest):
+                self._report = self._ready(materialized, manifest.snapshot_version,
+                                           reused_existing=True, warnings=warnings,
+                                           started=started)
+                return self._report
+        except ValueError as exc:
+            self._report = self._degrade(
+                materialized, self._describe(exc), warnings, started)
             return self._report
 
         try:
@@ -112,10 +119,15 @@ class SnapshotRuntime:
                 manifest = self._load_manifest()
 
                 current = self.store.current_version()
-                if self._already_materialized(current, manifest):
-                    self._report = self._ready(current, manifest.snapshot_version,
-                                               reused_existing=True,
-                                               warnings=warnings, started=started)
+                try:
+                    if self._already_materialized(current, manifest):
+                        self._report = self._ready(current, manifest.snapshot_version,
+                                                   reused_existing=True,
+                                                   warnings=warnings, started=started)
+                        return self._report
+                except ValueError as exc:
+                    self._report = self._degrade(
+                        current, self._describe(exc), warnings, started)
                     return self._report
 
                 downloaded, directory = self._install(manifest)
@@ -138,12 +150,24 @@ class SnapshotRuntime:
         same version with different contents would otherwise be ignored forever,
         leaving us serving bytes the publisher has replaced.
         """
-        if not directory or not self.store.is_verified(directory):
+        if not directory or directory != manifest.snapshot_version:
             return False
-        if self.store.version_of(directory) != manifest.snapshot_version:
+        if not self.store.is_verified(directory):
             return False
-        record = self.store.verified_record(directory) or {}
-        return record.get("bundle_sha256") == manifest.bundle_sha256
+        record = self.store.verified_record(directory)
+        if record is None:
+            return False
+        if record.bundle_sha256 != manifest.bundle_sha256:
+            # Same version, different bytes. Published versions are immutable, so
+            # this is a publisher error, not something to paper over by
+            # re-materialising: fail closed and say which digests disagree.
+            raise ValueError(
+                f"version {manifest.snapshot_version!r} is already materialized "
+                f"from digest {record.bundle_sha256[:16]}..., but the manifest "
+                f"now declares {manifest.bundle_sha256[:16]}...; a changed bundle "
+                f"requires a new published version"
+            )
+        return True
 
     # -- steps ----------------------------------------------------------
     def _load_manifest(self) -> SnapshotManifest:
@@ -231,7 +255,7 @@ class SnapshotRuntime:
         """
         if materialized and self.store.is_verified(materialized):
             return self._ready(
-                materialized, self.store.version_of(materialized),
+                materialized, materialized,
                 reused_existing=True, behind_advertised_release=True,
                 source_error=error, started=started,
                 warnings=[

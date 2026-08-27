@@ -566,6 +566,14 @@ Startup where this Machine already materialized the advertised version skips the
 download (measured in the lab: **0.81 s, 0 bytes**) — same Machine, not across a
 restart.
 
+**Published versions are immutable.** One `snapshot_version` names one set of
+bytes. If a manifest advertises a version already materialized here under a
+*different* `bundle_sha256`, the runtime **fails closed**: it keeps serving what
+it has, reports the digest conflict, and does not re-materialise. Publishing
+changed bytes requires a **new version**. Version directories are never replaced
+in place and never carry generation suffixes — those made a single published
+version identify several different snapshots.
+
 ### 4.6 Process-safe single-flight
 Exclusive `flock()` on `<cache>/.boot.lock` held across download → verify →
 extract → activate. A worker that cannot acquire it **blocks** (bounded by

@@ -61,8 +61,15 @@ def _canonical(name: str) -> str:
 
     Called only after `_name_violation` has rejected traversal, so normpath
     cannot be used here to smuggle a "..".
+
+    Only a leading "./" is removed, never leading dots: `lstrip("./")` stripped
+    character-wise, collapsing ".hidden" onto "hidden" and treating two distinct
+    files as one.
     """
-    return posixpath.normpath(name).lstrip("./") or ""
+    canonical = posixpath.normpath(name)
+    while canonical.startswith("./"):
+        canonical = canonical[2:]
+    return "" if canonical in (".", "") else canonical
 
 
 def _name_violation(name: str) -> str | None:

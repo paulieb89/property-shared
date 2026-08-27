@@ -18,19 +18,21 @@ _SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _RESERVED_COMPONENTS = frozenset({"CURRENT", "staging", "snapshots"})
 
 
-def validate_component(value: str, field: str) -> str:
+def validate_component(value: object, field: str, *, reserved: bool = True) -> str:
     """A single, safe path component -- or a ValueError.
 
-    Shared by the manifest and the store so both boundaries apply the same rule,
-    and neither has to assume the other already checked.
+    Shared by the manifest and every store entry point so all boundaries apply
+    one rule, and none has to assume another already checked.
     """
-    text = (value or "").strip()
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string; got {type(value).__name__}")
+    text = value.strip()
     if not _SAFE_COMPONENT.match(text) or text in {".", ".."}:
         raise ValueError(
             f"{field} must be a single path component matching "
             f"[A-Za-z0-9][A-Za-z0-9._-]{{0,127}}; got {value!r}"
         )
-    if text in _RESERVED_COMPONENTS:
+    if reserved and text in _RESERVED_COMPONENTS:
         raise ValueError(f"{field} {text!r} is reserved by the snapshot store")
     return text
 
@@ -93,11 +95,10 @@ class SnapshotManifest(BaseModel):
     @field_validator("bundle_object")
     @classmethod
     def _object_is_a_bare_name(cls, v: str) -> str:
-        # The object name is joined onto a base location. A path segment or an
-        # absolute name would let a manifest redirect the fetch elsewhere.
-        if v.startswith("/") or ".." in v.split("/") or "\\" in v:
-            raise ValueError("bundle_object must be a plain object name")
-        return v
+        # The object name is joined onto a base location, so anything with
+        # structure lets a manifest redirect the fetch. The contract is a bare
+        # name; "a/b.tar" and "./x.tar" were previously accepted.
+        return validate_component(v, "bundle_object", reserved=False)
 
 
 class BootReport(BaseModel):
@@ -127,3 +128,56 @@ class BootReport(BaseModel):
     @property
     def ready(self) -> bool:
         return self.readiness is Readiness.READY
+
+
+class VerificationRecord(BaseModel):
+    """What was verified about a materialized snapshot, and how.
+
+    Strict and validated on the way IN and on the way OUT. Reading it back with
+    ad-hoc `int(...)` calls let a malformed value raise out of the readiness
+    check and escape boot entirely, which is the opposite of failing closed.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    version: str
+    bundle_sha256: str
+    bundle_bytes: int = Field(gt=0)
+    parquet_files: int = Field(gt=0)
+    rows: int = Field(ge=0)
+    verified_at: str
+    #: Relative POSIX path -> exact byte size, for every file in the snapshot.
+    inventory: dict[str, int] = Field(min_length=1)
+
+    @field_validator("version")
+    @classmethod
+    def _version_component(cls, v: str) -> str:
+        return validate_component(v, "version")
+
+    @field_validator("bundle_sha256")
+    @classmethod
+    def _digest_shape(cls, v: str) -> str:
+        text = v.strip().lower()
+        if not _SHA256.match(text):
+            raise ValueError("bundle_sha256 must be 64 lowercase hex characters")
+        return text
+
+    @field_validator("inventory", mode="before")
+    @classmethod
+    def _inventory_shape(cls, v: object) -> dict[str, int]:
+        # mode="before" on purpose: pydantic's lax int coercion turns True into
+        # 1 *before* an after-validator runs, so a bool size would have slipped
+        # through a check written there.
+        if not isinstance(v, dict):
+            raise ValueError("inventory must be an object of path -> size")
+        out: dict[str, int] = {}
+        for key, size in v.items():
+            if not isinstance(key, str) or not key:
+                raise ValueError("inventory keys must be non-empty strings")
+            if key.startswith("/") or ".." in key.split("/"):
+                raise ValueError(f"inventory path is not relative: {key!r}")
+            # bool is an int subclass; a True size is a malformed record.
+            if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+                raise ValueError(f"inventory size for {key!r} must be a non-negative int")
+            out[key] = size
+        return out

@@ -74,6 +74,13 @@ class Src:
         return S()
 
 
+def _record(**over):
+    payload = {"bundle_sha256": "a" * 64, "bundle_bytes": 10, "parquet_files": 1,
+               "rows": 1, "verified_at": "2026-01-01T00:00:00Z"}
+    payload.update(over)
+    return payload
+
+
 def _manifest(**over):
     payload = {"snapshot_version": "v1", "bundle_object": "b.tar",
                "bundle_sha256": "a" * 64, "bundle_bytes": 10,
@@ -115,7 +122,14 @@ def test_manifest_forbids_unknown_fields():
 
 # --- 3. a same-version republish with different bytes must be detected -----
 
-def test_a_changed_digest_for_the_same_version_is_reinstalled(tmp_path):
+def test_a_changed_digest_for_the_same_version_fails_closed(tmp_path):
+    """Published versions are immutable: one version, one set of bytes.
+
+    Re-materialising under the same name made a single published version
+    identify several different snapshots. The publisher must issue a new
+    version, and until they do we say so rather than guessing which bytes are
+    intended.
+    """
     first = _bundle(b"ORIGINAL")
     SnapshotRuntime(source=Src(_objects("v1", first)),
                     store=SnapshotStore(tmp_path)).boot()
@@ -125,14 +139,27 @@ def test_a_changed_digest_for_the_same_version_is_reinstalled(tmp_path):
     second = _bundle(b"REPLACED")
     report = SnapshotRuntime(source=Src(_objects("v1", second)),
                              store=SnapshotStore(tmp_path)).boot()
+
+    # The already-materialized snapshot keeps serving; the conflict is reported.
     assert report.readiness is Readiness.READY
-    assert report.bytes_downloaded > 0, "a changed digest must trigger a refetch"
-    # The rebuild lands in a fresh generation directory -- version directories
-    # are immutable -- so read the active one rather than assuming its name.
-    store = SnapshotStore(tmp_path)
-    active = store.path_for(store.current_version())
-    assert (active / "data.parquet").read_bytes() == b"REPLACED"
-    assert report.version == "v1"
+    assert report.behind_advertised_release is True
+    assert report.bytes_downloaded == 0, "must not refetch under an immutable version"
+    assert (SnapshotStore(tmp_path).path_for("v1") / "data.parquet").read_bytes() \
+        == b"ORIGINAL"
+    assert "new published version" in (report.source_error or ""), report.source_error
+
+
+def test_a_new_version_carrying_the_changed_bytes_is_installed(tmp_path):
+    """The supported path: republish under a new version."""
+    SnapshotRuntime(source=Src(_objects("v1", _bundle(b"ORIGINAL"))),
+                    store=SnapshotStore(tmp_path)).boot()
+    report = SnapshotRuntime(source=Src(_objects("v2", _bundle(b"REPLACED"))),
+                             store=SnapshotStore(tmp_path)).boot()
+    assert report.readiness is Readiness.READY
+    assert report.version == "v2"
+    assert report.bytes_downloaded > 0
+    assert (SnapshotStore(tmp_path).path_for("v2") / "data.parquet").read_bytes() \
+        == b"REPLACED"
 
 
 def test_an_unchanged_digest_still_skips_the_download(tmp_path):
@@ -190,7 +217,7 @@ def test_truncating_a_parquet_file_invalidates_verification(tmp_path):
     store = SnapshotStore(tmp_path)
     with store.stage("v1") as staging:
         (staging / "a.parquet").write_bytes(b"PAR1" * 100)
-        store.activate(staging, "v1", {"parquet_files": 1, "rows": 5})
+        store.activate(staging, "v1", _record())
     assert store.is_verified("v1")
 
     (store.path_for("v1") / "a.parquet").write_bytes(b"P")
@@ -201,7 +228,7 @@ def test_adding_a_file_invalidates_verification(tmp_path):
     store = SnapshotStore(tmp_path)
     with store.stage("v1") as staging:
         (staging / "a.parquet").write_bytes(b"PAR1")
-        store.activate(staging, "v1", {"parquet_files": 1, "rows": 1})
+        store.activate(staging, "v1", _record())
     (store.path_for("v1") / "b.parquet").write_bytes(b"PAR1")
     assert not store.is_verified("v1")
 
@@ -210,31 +237,147 @@ def test_removing_a_file_invalidates_verification(tmp_path):
     store = SnapshotStore(tmp_path)
     with store.stage("v1") as staging:
         (staging / "a.parquet").write_bytes(b"PAR1")
-        store.activate(staging, "v1", {"parquet_files": 1, "rows": 1})
+        store.activate(staging, "v1", _record())
     (store.path_for("v1") / "a.parquet").unlink()
     assert not store.is_verified("v1")
 
 
 # --- 5. activation must never delete the active snapshot first -------------
 
-def test_activation_never_removes_an_existing_version_before_renaming(tmp_path):
-    """Version directories are immutable: a rebuild lands somewhere new."""
+def test_activating_an_existing_version_is_refused_and_leaves_it_intact(tmp_path):
+    """Version directories are immutable and activation never deletes one."""
+    from property_core.snapshot.store import VersionAlreadyMaterialized
+
     store = SnapshotStore(tmp_path)
     with store.stage("v1") as staging:
         (staging / "a.parquet").write_bytes(b"FIRST")
-        store.activate(staging, "v1", {"parquet_files": 1, "rows": 1})
-    original = store.path_for("v1")
-    assert original.exists()
+        store.activate(staging, "v1", _record())
 
+    with pytest.raises(VersionAlreadyMaterialized):
+        with store.stage("v1") as staging:
+            (staging / "a.parquet").write_bytes(b"SECOND")
+            store.activate(staging, "v1", _record())
+
+    assert store.is_verified("v1")
+    assert (store.path_for("v1") / "a.parquet").read_bytes() == b"FIRST"
+
+
+# --- 8. every store entry point validates its input ------------------------
+
+@pytest.mark.parametrize("bad", ["../escaped", "a/b", "..", ".", "", "  ", "/abs"])
+def test_stage_refuses_an_unsafe_version(tmp_path, bad):
+    """stage() passes the version to mkdtemp as a prefix, so it must validate."""
+    store = SnapshotStore(tmp_path)
+    with pytest.raises(ValueError):
+        with store.stage(bad):
+            pass  # pragma: no cover
+
+
+@pytest.mark.parametrize("bad", ["../escaped", "a/b", "..", ""])
+def test_every_store_entry_point_refuses_an_unsafe_version(tmp_path, bad):
+    store = SnapshotStore(tmp_path)
+    for call in (lambda: store.path_for(bad),
+                 lambda: store.set_current(bad)):
+        with pytest.raises(ValueError):
+            call()
+    # Read paths must not raise on the readiness path -- they fail closed.
+    assert store.is_verified(bad) is False
+    assert store.verified_record(bad) is None
+
+
+# --- 9. a malformed verification record fails closed -----------------------
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"inventory": {"a.parquet": "not-an-int"}},
+        {"inventory": {"a.parquet": -1}},
+        {"inventory": {"a.parquet": True}},
+        {"inventory": {"../escape": 4}},
+        {"inventory": {}},
+        {"inventory": "not-a-dict"},
+        {"bundle_sha256": "short"},
+        {"parquet_files": 0},
+        {"rows": -1},
+        {"unexpected_field": 1},
+    ],
+)
+def test_a_malformed_record_makes_the_snapshot_unusable_not_boot_explode(
+        tmp_path, mutation):
+    store = SnapshotStore(tmp_path)
     with store.stage("v1") as staging:
-        (staging / "a.parquet").write_bytes(b"SECOND")
-        store.activate(staging, "v1", {"parquet_files": 1, "rows": 1})
+        (staging / "a.parquet").write_bytes(b"PAR1")
+        store.activate(staging, "v1", _record())
 
-    # The active snapshot is intact and now holds the new content; at no point
-    # was the only copy deleted ahead of a rename that might fail.
-    assert store.is_verified(store.current_version())
-    active = store.path_for(store.current_version())
-    assert (active / "a.parquet").read_bytes() == b"SECOND"
+    record_path = store.path_for("v1") / ".verified.json"
+    payload = json.loads(record_path.read_text())
+    payload.update(mutation)
+    record_path.write_text(json.dumps(payload))
+
+    # No exception, and definitely not "verified".
+    assert store.verified_record("v1") is None
+    assert store.is_verified("v1") is False
+
+
+def test_a_boot_over_a_malformed_record_falls_back_to_live(tmp_path):
+    store = SnapshotStore(tmp_path)
+    with store.stage("v1") as staging:
+        (staging / "a.parquet").write_bytes(b"PAR1")
+        store.activate(staging, "v1", _record())
+    record_path = store.path_for("v1") / ".verified.json"
+    record_path.write_text('{"inventory": {"a.parquet": "nope"}}')
+
+    class Down:
+        def read_bytes(self, name, *, max_bytes=None):
+            raise OSError("source down")
+
+        def open_stream(self, name):
+            raise OSError("source down")
+
+    report = SnapshotRuntime(source=Down(), store=SnapshotStore(tmp_path)).boot()
+    assert report.readiness is Readiness.UNREADY
+    assert report.fallback_to_live is True
+
+
+# --- 10. bundle_object must be a bare name ---------------------------------
+
+@pytest.mark.parametrize(
+    "name", ["a/b.tar", "./x.tar", "sub/dir/s.tar", "../up.tar", "/abs.tar",
+             "a\\b.tar", "", "  "],
+)
+def test_bundle_object_must_be_a_bare_name(name):
+    with pytest.raises(ValidationError):
+        _manifest(bundle_object=name)
+
+
+def test_a_plain_object_name_is_accepted():
+    assert _manifest(bundle_object="snapshot-v1.tar.zst").bundle_object
+
+
+# --- 11. a leading dot is part of the name ---------------------------------
+
+def test_hidden_and_unhidden_names_stay_distinct(tmp_path):
+    """`.hidden` and `hidden` are different files; collapsing them lost one."""
+    from property_core.snapshot.archive import _canonical
+
+    assert _canonical(".hidden") == ".hidden"
+    assert _canonical("hidden") == "hidden"
+    assert _canonical(".hidden") != _canonical("hidden")
+    assert _canonical("./visible") == "visible"
+    assert _canonical(".config/x") == ".config/x"
+
+
+def test_a_dotfile_and_its_unhidden_twin_both_extract(tmp_path):
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for name, body in ((".keep", b"HIDDEN"), ("keep", b"PLAIN")):
+            ti = tarfile.TarInfo(name); ti.size = len(body)
+            tar.addfile(ti, io.BytesIO(body))
+    path = tmp_path / "dots.tar"; path.write_bytes(buf.getvalue())
+    dest = tmp_path / "out"
+    assert safe_extract(path, dest).files == 2
+    assert (dest / ".keep").read_bytes() == b"HIDDEN"
+    assert (dest / "keep").read_bytes() == b"PLAIN"
 
 
 def test_activate_does_not_rmtree_its_destination():

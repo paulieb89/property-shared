@@ -37,13 +37,23 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
-from property_core.snapshot.models import validate_component
+from property_core.snapshot.models import VerificationRecord, validate_component
 
 VERIFIED_RECORD = ".verified.json"
 #: One active snapshot. Not "current plus previous": the filesystem does not
 #: survive a restart, so a retained previous version buys nothing and would
 #: misrepresent the store as durable.
 DEFAULT_KEEP = 1
+
+
+class VersionAlreadyMaterialized(ValueError):
+    """A different bundle was published under an already-materialized version.
+
+    **Published versions are immutable.** One version identifies one set of
+    bytes; if the bytes change, the publisher must issue a new version.
+    Re-materialising under the same name was how one published version came to
+    identify several different snapshots.
+    """
 
 
 class SnapshotStore:
@@ -85,10 +95,18 @@ class SnapshotStore:
         os.replace(tmp, self.current_file)
 
     # -- verification ---------------------------------------------------
-    def verified_record(self, version: str) -> Optional[dict[str, Any]]:
+    def verified_record(self, version: str) -> Optional[VerificationRecord]:
+        """The parsed record, or None if absent or malformed.
+
+        Every failure returns None rather than raising: this is consulted on the
+        readiness path, and a malformed record must make the snapshot unusable,
+        not make boot explode. A bad `inventory` value previously raised
+        ValueError straight out of the readiness check.
+        """
         try:
-            return json.loads((self.path_for(version) / VERIFIED_RECORD).read_text())
-        except (FileNotFoundError, json.JSONDecodeError, NotADirectoryError):
+            raw = json.loads((self.path_for(version) / VERIFIED_RECORD).read_text())
+            return VerificationRecord(**raw)
+        except Exception:
             return None
 
     @staticmethod
@@ -121,13 +139,12 @@ class SnapshotStore:
         except ValueError:
             return False
         record = self.verified_record(version)
-        if not record or not directory.is_dir():
+        if record is None or not directory.is_dir():
             return False
-        declared = record.get("inventory")
-        if not isinstance(declared, dict) or not declared:
+        try:
+            return self.inventory(directory) == record.inventory
+        except OSError:
             return False
-        return self.inventory(directory) == {str(k): int(v)
-                                             for k, v in declared.items()}
 
     # -- staging and activation ----------------------------------------
     @contextmanager
@@ -137,6 +154,10 @@ class SnapshotStore:
         Removed on success too: `activate` renames it away, so anything left
         here is by definition an abandoned attempt.
         """
+        # The version reaches mkdtemp as a filename prefix, so "../escaped"
+        # produced a staging directory outside the store. Validated here as at
+        # every other entry point.
+        version = validate_component(version, "version")
         staging = Path(tempfile.mkdtemp(prefix=f"{version}.", dir=self.staging_dir))
         try:
             yield staging
@@ -147,48 +168,35 @@ class SnapshotStore:
                  record: dict[str, Any]) -> Path:
         """Move a verified staging directory into place and flip the pointer.
 
-        **Version directories are immutable.** A rebuild of the same version
-        lands in a fresh generation directory rather than replacing the existing
-        one in place. Deleting the destination before the rename meant a failed
-        rename left no snapshot at all -- destroying the only good copy to make
-        room for one that never arrived.
+        **Published versions are immutable.** One version names one directory and
+        one set of bytes. If the destination already exists this raises rather
+        than replacing it: generation suffixes made a single published version
+        identify several different snapshots, and deleting the destination first
+        risked losing the only good copy to a rename that never completed.
         """
         staging = Path(staging)
-        record = {**record, "inventory": self.inventory(staging)}
-        (staging / VERIFIED_RECORD).write_text(json.dumps(record, indent=2))
-
+        version = validate_component(version, "version")
         target = self.path_for(version)
         if target.exists():
-            # Never reuse an occupied name. A generation suffix keeps the old
-            # directory whole until the pointer has moved; pruning removes it.
-            # The suffix uses '.', which is a valid component character, so the
-            # resulting name still passes the same boundary validation.
-            generation = 1
-            while target.exists():
-                target = self.path_for(f"{version}.{generation}")
-                generation += 1
+            raise VersionAlreadyMaterialized(
+                f"version {version!r} is already materialized at {target}; "
+                f"a changed bundle requires a new published version"
+            )
+
+        # Validated on the way in, so a malformed record is never written.
+        parsed = VerificationRecord(**{**record, "version": version,
+                                       "inventory": self.inventory(staging)})
+        (staging / VERIFIED_RECORD).write_text(parsed.model_dump_json(indent=2))
 
         # Atomic within the store filesystem: the directory appears complete or
         # not at all. Nothing ever observes a half-populated version.
         os.replace(staging, target)
-        self._write_pointer(target.name)
+        self.set_current(version)
         return target
 
-    def _write_pointer(self, directory_name: str) -> None:
-        tmp = self.current_file.with_suffix(".tmp")
-        tmp.write_text(directory_name)
-        os.replace(tmp, self.current_file)
-
     # -- retention ------------------------------------------------------
-    def version_of(self, directory_name: str) -> str:
-        """The manifest version a directory holds, stripping any generation."""
-        return directory_name.split(".")[0]
-
     def prune(self, keep: int = DEFAULT_KEEP) -> list[str]:
         """Drop every materialization except the active one.
-
-        Superseded generations of the same version are removed here, which is
-        why activation can afford to leave the old directory whole.
 
         `keep` is retained as a parameter for tests and for a future durable
         store; production uses the default of one.
