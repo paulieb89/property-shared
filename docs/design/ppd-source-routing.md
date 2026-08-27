@@ -855,16 +855,38 @@ The two facts Phase 3 could not evidence are now **blocking gates**, not caveats
   count and re-derive the RSS budget for that count, **or** explicitly pin the
   app to one worker and record that as a deployment constraint.
 
-* **G3 — both production images install the snapshot extra.** The boot runtime
-  imports `duckdb` and `zstandard`, which live only in the optional `snapshot`
-  extra. Neither image installs it today (`uv sync --frozen --no-dev --extra api`
-  and `--extra apps`), which is correct while the flag is off because the runtime
-  is never booted. **Before `PPD_SNAPSHOT_ENABLED` may be turned on for an image,
-  that image's Dockerfile must `uv sync ... --extra snapshot`.** Enabling the
-  flag without it fails at startup on a live machine. Both packages stay optional
-  and stay together in that one extra; neither becomes a required `property_core`
-  dependency. A conditional test enforces this: it is inert while the flag is off
-  and fails on the commit that enables the feature without the extra.
+* **G3 — the snapshot extra is installed in both production images, and proven
+  to be.** The boot runtime imports `duckdb` and `zstandard`, which live only in
+  the optional `snapshot` extra. Neither image installs it today
+  (`--extra api` / `--extra apps`), which is correct while the flag is off
+  because the runtime is never booted. Both packages stay optional and stay
+  together in that one extra; neither becomes a required `property_core`
+  dependency.
+
+  G3 passes only when all four hold:
+
+  1. **Both production Dockerfiles install `--extra snapshot` unconditionally**,
+     landed *before* routing is introduced — not alongside it, so the dependency
+     change can be deployed and observed on its own.
+  2. **Built-image smoke tests import both `duckdb` and `zstandard`** in the
+     actual built image. Reading the Dockerfile is not evidence that the wheel
+     resolved, installed and imports on that platform.
+  3. **Flag-on with either dependency unavailable fails closed**: the runtime
+     raises the typed `snapshot_extra_missing` error, snapshot readiness stays
+     **false**, and the live source continues to serve. A missing optional
+     dependency must never take the service down or silently half-enable it.
+  4. **The production flag is not enabled until those image checks, G1 and G2
+     all pass.**
+
+  **What the repository test does NOT cover.** `tests/snapshot/test_rollout_prerequisites.py`
+  is a **repository-config lint**, not enforcement of G3. It reads the checked-in
+  Dockerfiles and fly configs and nothing else, so it cannot see the flag being
+  enabled by a **Fly secret** (`fly secrets set PPD_SNAPSHOT_ENABLED=1`), by
+  machine environment, or by any deploy-time injection — on those paths it stays
+  green while the feature is on and the dependencies are missing. It is kept as a
+  cheap secondary guard for the ordinary mistake of enabling the flag in
+  checked-in config without adding the extra. Requirements 2 and 3 are what
+  actually enforce G3, and both belong to PR 4 / the rollout.
 
 **If any gate fails or cannot be measured, stop before enabling the flag.**
 No estimate substitutes for the measurement.

@@ -1,17 +1,34 @@
-"""Rollout prerequisite: an image that enables the snapshot must install the extra.
+"""Repository-config lint for the snapshot-extra prerequisite.
+
+**This is a lint over checked-in configuration, NOT enforcement of rollout gate
+G3.** It reads the Dockerfiles and fly configs in this repository and nothing
+else. The flag can be switched on by paths this file cannot see:
+
+* `fly secrets set PPD_SNAPSHOT_ENABLED=1` — no checked-in change at all;
+* machine or process environment set outside the repo;
+* any orchestration that injects env at deploy time.
+
+On any of those paths this lint stays green while the feature is on and the
+dependencies are missing. Treat a pass as "the repo does not contradict the
+prerequisite", never as "the prerequisite is satisfied".
+
+The definitive gate is G3 in `docs/design/ppd-source-routing.md`, enforced by
+built-image smoke tests and a fail-closed runtime check, both of which belong to
+PR 4 / the rollout rather than here.
+
+What this file is good for: catching the ordinary mistake of enabling the flag
+in a Dockerfile or fly.toml without adding the extra alongside it. Cheap,
+immediate, and covers the path a change to this repository would take.
 
 `property_core.snapshot` needs `duckdb` and `zstandard`, both optional and both
 in the `snapshot` extra. Neither production image installs that extra today,
-which is correct while `PPD_SNAPSHOT_ENABLED` is off — the runtime is never
-booted, so the packages are never imported.
+which is correct while the flag is off — the runtime is never booted, so the
+packages are never imported.
 
-The trap this guards is enabling the flag without the extra. That fails at boot
-with a missing dependency on a live machine, which is the worst place to find
-out. The invariants below are therefore CONDITIONAL: vacuous today, and
-load-bearing on the exact commit that turns the feature on.
-
-They are deliberately not "assert the extra is absent" — that would fail the day
-PR 4 correctly adds it, inviting someone to delete the test rather than read it.
+The invariants below are CONDITIONAL: inert today, and firing on the commit that
+turns the feature on in checked-in config. They are deliberately not "assert the
+extra is absent" — that would fail the day PR 4 correctly adds it, inviting
+someone to delete the test rather than read it.
 """
 
 from __future__ import annotations
@@ -68,16 +85,25 @@ def _flag_enabled(*config_files: str, root: Path | None = None) -> bool:
 
 @pytest.mark.parametrize("image, dockerfile, flyconfig", IMAGES,
                          ids=[i[0] for i in IMAGES])
-def test_an_image_that_enables_the_snapshot_must_install_the_extra(
+def test_an_image_that_enables_the_snapshot_in_repo_config_installs_the_extra(
         image, dockerfile, flyconfig):
-    """THE rollout gate. Vacuous while the flag is off; it fires the moment
-    someone enables the feature without the dependencies it needs."""
+    """Secondary guard, not gate G3.
+
+    Covers only the flag being enabled in checked-in config. A Fly secret or an
+    injected environment variable enables it without touching this repository,
+    and this test cannot see that. G3 is enforced by built-image smoke tests and
+    the fail-closed runtime check.
+    """
     if not _flag_enabled(dockerfile, flyconfig):
-        pytest.skip(f"{image}: snapshot flag not enabled; prerequisite not yet due")
+        pytest.skip(
+            f"{image}: flag not enabled in checked-in config. NOTE: this does not "
+            f"prove the flag is off in the deployed image — a Fly secret would not "
+            f"appear here."
+        )
     assert _installs_snapshot_extra(dockerfile), (
-        f"{image} enables PPD_SNAPSHOT_ENABLED but {dockerfile} does not "
-        f"`uv sync --extra snapshot`. The boot runtime imports duckdb and "
-        f"zstandard, so this image would fail at startup."
+        f"{image} enables PPD_SNAPSHOT_ENABLED in checked-in config but "
+        f"{dockerfile} does not `uv sync --extra snapshot`. The boot runtime "
+        f"imports duckdb and zstandard, so this image would fail at startup."
     )
 
 
@@ -85,18 +111,21 @@ def test_an_image_that_enables_the_snapshot_must_install_the_extra(
                          ids=[i[0] for i in IMAGES])
 def test_the_snapshot_flag_is_not_enabled_in_deployment_config(
         image, dockerfile, flyconfig):
-    """PR 3 ships inert: nothing may switch the feature on."""
+    """PR 3 ships inert: no checked-in config may switch the feature on.
+
+    Scope limit as above — this says nothing about secrets or injected env.
+    """
     assert not _flag_enabled(dockerfile, flyconfig), (
         f"{image} enables PPD_SNAPSHOT_ENABLED; the feature is not ready to be on"
     )
 
 
-def test_both_images_are_covered_by_the_gate():
-    """A new deployed image must not quietly escape the prerequisite."""
+def test_both_images_are_covered_by_the_lint():
+    """A new deployed image must not quietly escape even this partial check."""
     dockerfiles = {p.name for p in REPO.glob("Dockerfile*")}
     covered = {d for _n, d, _f in IMAGES}
     assert dockerfiles == covered, (
-        f"Dockerfiles not covered by the rollout gate: {dockerfiles - covered}"
+        f"Dockerfiles not covered by the config lint: {dockerfiles - covered}"
     )
 
 
@@ -104,7 +133,7 @@ def test_the_runtime_dependencies_live_only_in_the_snapshot_extra():
     """Both packages stay optional and stay together.
 
     Splitting them across extras, or promoting either to a required dependency,
-    would break the single prerequisite this gate encodes.
+    would break the single prerequisite G3 encodes.
     """
     data = tomllib.loads((REPO / "pyproject.toml").read_text())
     extra = data["project"]["optional-dependencies"]["snapshot"]
@@ -123,12 +152,34 @@ def test_the_runtime_dependencies_live_only_in_the_snapshot_extra():
         )
 
 
-def test_the_prerequisite_is_recorded_in_the_governing_specification():
-    """A gate that lives only in a test is a gate the rollout will not read."""
+def test_the_definitive_gate_is_recorded_in_the_governing_specification():
+    """The real gate lives in the spec; this lint is only its cheap shadow.
+
+    Asserts the four requirements that actually enforce it, so the spec cannot
+    drift into describing this test as sufficient.
+    """
     spec = (REPO / "docs" / "design" / "ppd-source-routing.md").read_text()
     normalised = " ".join(spec.split())
-    assert "--extra snapshot" in normalised
+
     assert "G3" in normalised, "the image prerequisite is not listed as a rollout gate"
+    assert "--extra snapshot" in normalised
+    # 1. unconditional install before routing
+    assert "unconditionally" in normalised
+    # 2. built-image smoke tests
+    assert "smoke test" in normalised
+    # 3. fail closed with readiness false
+    assert "fails closed" in normalised
+    # 4. flag stays off until the image checks, G1 and G2 pass
+    assert "G1 and G2" in normalised
+
+
+def test_the_specification_states_this_lint_is_not_sufficient():
+    """The limitation must be written down, not only known to whoever wrote it."""
+    spec = (REPO / "docs" / "design" / "ppd-source-routing.md").read_text()
+    normalised = " ".join(spec.split())
+    assert "Fly secret" in normalised, (
+        "the spec does not record that a secret bypasses the repo-config lint"
+    )
 
 
 # --------------------------------------------------------------------------
