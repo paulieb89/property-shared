@@ -855,7 +855,18 @@ The two facts Phase 3 could not evidence are now **blocking gates**, not caveats
   count and re-derive the RSS budget for that count, **or** explicitly pin the
   app to one worker and record that as a deployment constraint.
 
-**If either gate fails or cannot be measured, stop before enabling the flag.**
+* **G3 — both production images install the snapshot extra.** The boot runtime
+  imports `duckdb` and `zstandard`, which live only in the optional `snapshot`
+  extra. Neither image installs it today (`uv sync --frozen --no-dev --extra api`
+  and `--extra apps`), which is correct while the flag is off because the runtime
+  is never booted. **Before `PPD_SNAPSHOT_ENABLED` may be turned on for an image,
+  that image's Dockerfile must `uv sync ... --extra snapshot`.** Enabling the
+  flag without it fails at startup on a live machine. Both packages stay optional
+  and stay together in that one extra; neither becomes a required `property_core`
+  dependency. A conditional test enforces this: it is inert while the flag is off
+  and fails on the commit that enables the feature without the extra.
+
+**If any gate fails or cannot be measured, stop before enabling the flag.**
 No estimate substitutes for the measurement.
 
 Once both pass: enable for `comps`/`yield`/`report`/`blocks` on `property-shared`

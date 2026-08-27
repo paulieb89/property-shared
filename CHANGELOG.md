@@ -48,6 +48,15 @@ Not released. No version bump. Two merged/pending PRs against the frozen design 
   single-flight process locking, readiness states, and current+previous
   retention. **Wired to nothing:** it is not booted by any request path, does not
   query a snapshot, and changes no response. No hot refresh.
+- **Rollout prerequisite recorded and tested (gate G3):** the boot runtime needs
+  `duckdb` and `zstandard`, which live only in the optional `snapshot` extra.
+  Neither production image installs it (`--extra api` / `--extra apps`), which is
+  correct while the flag is off because the runtime is never booted. **Before
+  `PPD_SNAPSHOT_ENABLED` may be enabled for an image, that image must
+  `uv sync ... --extra snapshot`.** A conditional test is inert today and fails on
+  the commit that enables the feature without the extra. Both packages stay
+  optional and stay together; neither becomes a required dependency. The
+  Dockerfiles are deliberately unchanged here.
 - `zstandard` added to the optional `snapshot` extra. The bundle is `.tar.zst`;
   Python 3.11 has no stdlib zstd and neither production image installs the `zstd`
   binary, so without a reader the runtime could not open a real bundle.
