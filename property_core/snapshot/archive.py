@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import os
+import posixpath
 import shutil
 import subprocess
 import tarfile
@@ -48,6 +49,20 @@ class ExtractionStats:
 
 #: Only these member kinds are ever written.
 _ALLOWED_TYPES = frozenset({tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE})
+
+
+def _canonical(name: str) -> str:
+    """The path a member actually resolves to, as one canonical key.
+
+    "dir/data.parquet", "dir/./data.parquet", "./dir/data.parquet" and
+    "dir//data.parquet" all name the SAME target. Deduplicating on the raw name
+    let the later member silently overwrite the earlier one; deduplicating on
+    this key makes the collision visible.
+
+    Called only after `_name_violation` has rejected traversal, so normpath
+    cannot be used here to smuggle a "..".
+    """
+    return posixpath.normpath(name).lstrip("./") or ""
 
 
 def _name_violation(name: str) -> str | None:
@@ -158,7 +173,7 @@ def safe_extract(bundle: Path, dest: Path,
                     raise ArchiveRejected("special_file", member.name,
                                           f"type={member.type!r}")
 
-                norm = member.name.strip("./")
+                norm = _canonical(member.name)
                 if norm:
                     if member.isdir():
                         if norm in seen_files:

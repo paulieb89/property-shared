@@ -122,10 +122,22 @@ def test_an_unverified_directory_is_not_treated_as_verified(store_root):
 
 
 def test_a_verification_record_that_disagrees_with_contents_is_rejected(store_root):
+    """Verification is by full file inventory -- paths and sizes -- so a record
+    that no longer describes what is on disk is not trusted."""
     store = SnapshotStore(store_root)
     _activate(store, "v1")
     rec = store.path_for("v1") / ".verified.json"
     payload = json.loads(rec.read_text())
-    payload["parquet_files"] = 99
+    payload["inventory"] = {"data.parquet": 999999}
+    rec.write_text(json.dumps(payload))
+    assert not store.is_verified("v1")
+
+
+def test_a_record_without_an_inventory_is_not_trusted(store_root):
+    store = SnapshotStore(store_root)
+    _activate(store, "v1")
+    rec = store.path_for("v1") / ".verified.json"
+    payload = json.loads(rec.read_text())
+    payload.pop("inventory")
     rec.write_text(json.dumps(payload))
     assert not store.is_verified("v1")

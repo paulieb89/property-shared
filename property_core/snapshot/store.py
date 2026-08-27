@@ -37,6 +37,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
+from property_core.snapshot.models import validate_component
+
 VERIFIED_RECORD = ".verified.json"
 #: One active snapshot. Not "current plus previous": the filesystem does not
 #: survive a restart, so a retained previous version buys nothing and would
@@ -55,7 +57,12 @@ class SnapshotStore:
 
     # -- layout ---------------------------------------------------------
     def path_for(self, version: str) -> Path:
-        return self.snapshots_dir / version
+        """The directory for a version, refusing anything that is not one.
+
+        Revalidated here rather than trusted from the manifest: this is the
+        boundary that turns a string into a filesystem path.
+        """
+        return self.snapshots_dir / validate_component(version, "version")
 
     def versions(self) -> list[str]:
         return [p.name for p in self.snapshots_dir.iterdir() if p.is_dir()]
@@ -72,6 +79,7 @@ class SnapshotStore:
 
     def set_current(self, version: str) -> None:
         """Flip the pointer atomically: write beside it, then rename over it."""
+        validate_component(version, "version")
         tmp = self.current_file.with_suffix(".tmp")
         tmp.write_text(version)
         os.replace(tmp, self.current_file)
@@ -83,22 +91,43 @@ class SnapshotStore:
         except (FileNotFoundError, json.JSONDecodeError, NotADirectoryError):
             return None
 
+    @staticmethod
+    def inventory(directory: Path) -> dict[str, int]:
+        """Relative path -> size for every file, excluding the record itself.
+
+        Sizes, not just names: a count matched while a file was truncated to a
+        single byte, so the directory reported verified with unusable contents.
+        """
+        directory = Path(directory)
+        out: dict[str, int] = {}
+        for root, _dirs, files in os.walk(directory):
+            for name in files:
+                path = Path(root) / name
+                rel = path.relative_to(directory).as_posix()
+                if rel == VERIFIED_RECORD:
+                    continue
+                out[rel] = path.stat().st_size
+        return out
+
     def is_verified(self, version: str) -> bool:
         """Whether this version is present AND matches its verification record.
 
-        The record is not taken on trust: its file count is re-counted on disk,
-        so a truncated or half-copied directory is not mistaken for a good one.
+        The record is not taken on trust. The full file inventory -- every
+        relative path and its size -- must match exactly, so a truncated,
+        extended or half-copied directory is never mistaken for a good one.
         """
+        try:
+            directory = self.path_for(version)
+        except ValueError:
+            return False
         record = self.verified_record(version)
-        directory = self.path_for(version)
         if not record or not directory.is_dir():
             return False
-        declared = record.get("parquet_files")
-        if declared is None:
+        declared = record.get("inventory")
+        if not isinstance(declared, dict) or not declared:
             return False
-        actual = sum(1 for _r, _d, files in os.walk(directory)
-                     for f in files if f.endswith(".parquet"))
-        return actual == declared
+        return self.inventory(directory) == {str(k): int(v)
+                                             for k, v in declared.items()}
 
     # -- staging and activation ----------------------------------------
     @contextmanager
@@ -116,22 +145,50 @@ class SnapshotStore:
 
     def activate(self, staging: Path, version: str,
                  record: dict[str, Any]) -> Path:
-        """Move a verified staging directory into place and flip the pointer."""
+        """Move a verified staging directory into place and flip the pointer.
+
+        **Version directories are immutable.** A rebuild of the same version
+        lands in a fresh generation directory rather than replacing the existing
+        one in place. Deleting the destination before the rename meant a failed
+        rename left no snapshot at all -- destroying the only good copy to make
+        room for one that never arrived.
+        """
         staging = Path(staging)
+        record = {**record, "inventory": self.inventory(staging)}
         (staging / VERIFIED_RECORD).write_text(json.dumps(record, indent=2))
 
-        final = self.path_for(version)
-        if final.exists():
-            shutil.rmtree(final, ignore_errors=True)
+        target = self.path_for(version)
+        if target.exists():
+            # Never reuse an occupied name. A generation suffix keeps the old
+            # directory whole until the pointer has moved; pruning removes it.
+            # The suffix uses '.', which is a valid component character, so the
+            # resulting name still passes the same boundary validation.
+            generation = 1
+            while target.exists():
+                target = self.path_for(f"{version}.{generation}")
+                generation += 1
+
         # Atomic within the store filesystem: the directory appears complete or
         # not at all. Nothing ever observes a half-populated version.
-        os.replace(staging, final)
-        self.set_current(version)
-        return final
+        os.replace(staging, target)
+        self._write_pointer(target.name)
+        return target
+
+    def _write_pointer(self, directory_name: str) -> None:
+        tmp = self.current_file.with_suffix(".tmp")
+        tmp.write_text(directory_name)
+        os.replace(tmp, self.current_file)
 
     # -- retention ------------------------------------------------------
+    def version_of(self, directory_name: str) -> str:
+        """The manifest version a directory holds, stripping any generation."""
+        return directory_name.split(".")[0]
+
     def prune(self, keep: int = DEFAULT_KEEP) -> list[str]:
         """Drop every materialization except the active one.
+
+        Superseded generations of the same version are removed here, which is
+        why activation can afford to leave the old directory whole.
 
         `keep` is retained as a parameter for tests and for a future durable
         store; production uses the default of one.

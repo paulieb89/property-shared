@@ -96,36 +96,54 @@ class SnapshotRuntime:
                 materialized, self._describe(exc), warnings, started)
             return self._report
 
-        # This Machine already materialized exactly this release: nothing to fetch.
-        if (materialized == manifest.snapshot_version
-                and self.store.is_verified(materialized)):
-            self._report = self._ready(materialized, reused_existing=True,
-                                       warnings=warnings, started=started)
+        # This Machine already materialized exactly this release, same bytes.
+        if self._already_materialized(materialized, manifest):
+            self._report = self._ready(materialized, manifest.snapshot_version,
+                                       reused_existing=True, warnings=warnings,
+                                       started=started)
             return self._report
 
         try:
             with single_flight(self.store.root / ".boot.lock",
                                timeout=self.lock_timeout):
-                # Re-check under the lock: another starter may have activated
-                # this release while we were waiting, in which case fetching
-                # again would be pure waste.
+                # RELOAD the manifest under the lock. The copy read before
+                # waiting may name an older release than the holder has since
+                # activated, and installing it would be a downgrade.
+                manifest = self._load_manifest()
+
                 current = self.store.current_version()
-                if current == manifest.snapshot_version and self.store.is_verified(current):
-                    self._report = self._ready(current, reused_existing=True,
+                if self._already_materialized(current, manifest):
+                    self._report = self._ready(current, manifest.snapshot_version,
+                                               reused_existing=True,
                                                warnings=warnings, started=started)
                     return self._report
 
-                downloaded = self._install(manifest)
+                downloaded, directory = self._install(manifest)
         except (LockTimeout, Exception) as exc:
             self._report = self._degrade(
                 self.store.current_version(), self._describe(exc), warnings, started)
             return self._report
 
         self.store.prune(self.keep_versions)
-        self._report = self._ready(manifest.snapshot_version, activated=True,
-                                   bytes_downloaded=downloaded, warnings=warnings,
-                                   started=started)
+        self._report = self._ready(directory, manifest.snapshot_version,
+                                   activated=True, bytes_downloaded=downloaded,
+                                   warnings=warnings, started=started)
         return self._report
+
+    def _already_materialized(self, directory: Optional[str],
+                              manifest: SnapshotManifest) -> bool:
+        """Whether this Machine already holds exactly this release, same bytes.
+
+        Version equality alone is not enough: a release republished under the
+        same version with different contents would otherwise be ignored forever,
+        leaving us serving bytes the publisher has replaced.
+        """
+        if not directory or not self.store.is_verified(directory):
+            return False
+        if self.store.version_of(directory) != manifest.snapshot_version:
+            return False
+        record = self.store.verified_record(directory) or {}
+        return record.get("bundle_sha256") == manifest.bundle_sha256
 
     # -- steps ----------------------------------------------------------
     def _load_manifest(self) -> SnapshotManifest:
@@ -135,7 +153,7 @@ class SnapshotRuntime:
             raise ValueError(f"current.json names an unusable manifest: {name!r}")
         return SnapshotManifest(**json.loads(self.source.read_bytes(name)))
 
-    def _install(self, manifest: SnapshotManifest) -> int:
+    def _install(self, manifest: SnapshotManifest) -> tuple[int, str]:
         """Download, verify, extract and activate. Raises on any failure."""
         with self.store.stage(manifest.snapshot_version) as staging:
             # Keep the published object's extension: the archive format is a
@@ -151,23 +169,27 @@ class SnapshotRuntime:
                 # The bundle is large and is never needed again once unpacked.
                 Path(bundle).unlink(missing_ok=True)
 
-            if stats.files < manifest.parquet_files:
+            # EXACT, not "at least": an archive with more parquet files than the
+            # manifest declares is as much a mismatch as one with fewer, and an
+            # archive with none is not a snapshot at all.
+            found = self._count_parquet(extract_into)
+            if found != manifest.parquet_files:
                 raise ValueError(
-                    f"archive holds {stats.files} files, manifest declares at least "
-                    f"{manifest.parquet_files} parquet files"
+                    f"archive holds {found} parquet file(s), manifest declares "
+                    f"{manifest.parquet_files}"
                 )
-            self.store.activate(
+            directory = self.store.activate(
                 extract_into, manifest.snapshot_version,
                 {
                     "version": manifest.snapshot_version,
                     "bundle_sha256": manifest.bundle_sha256,
                     "bundle_bytes": manifest.bundle_bytes,
-                    "parquet_files": self._count_parquet(extract_into),
+                    "parquet_files": found,
                     "rows": manifest.rows,
                     "verified_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 },
             )
-        return result.bytes_written
+        return result.bytes_written, directory.name
 
     @staticmethod
     def _count_parquet(directory: Path) -> int:
@@ -184,14 +206,14 @@ class SnapshotRuntime:
     def _elapsed(self, started: float) -> dict[str, float]:
         return {"total_ms": round((time.perf_counter() - started) * 1000, 1)}
 
-    def _ready(self, version: str, *, activated: bool = False,
+    def _ready(self, directory: str, version: str, *, activated: bool = False,
                reused_existing: bool = False, bytes_downloaded: int = 0,
                behind_advertised_release: bool = False,
                source_error: Optional[str] = None,
                warnings: list[str], started: float) -> BootReport:
         return BootReport(
             readiness=Readiness.READY, version=version,
-            snapshot_dir=str(self.store.path_for(version)),
+            snapshot_dir=str(self.store.path_for(directory)),
             fallback_to_live=False,
             behind_advertised_release=behind_advertised_release,
             activated=activated, reused_existing=reused_existing,
@@ -209,7 +231,8 @@ class SnapshotRuntime:
         """
         if materialized and self.store.is_verified(materialized):
             return self._ready(
-                materialized, reused_existing=True, behind_advertised_release=True,
+                materialized, self.store.version_of(materialized),
+                reused_existing=True, behind_advertised_release=True,
                 source_error=error, started=started,
                 warnings=[
                     *warnings,
