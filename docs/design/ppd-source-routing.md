@@ -524,9 +524,25 @@ including a hostile archive whose **SHA-256 matched its manifest** — digest ch
 cannot catch that.
 
 ### 4.4 Verified versioned directory and atomic activation
-Extract to `staging/<version>.<rand>/`; probe (open DuckDB, `count(*)`, compare
-rows and file count to manifest); write `.verified.json`; `os.replace()` into
-`snapshots/<version>/`; atomically flip `CURRENT` via temp-file + `os.replace()`.
+Extract to `staging/<version>.<rand>/`; verify **structurally** — the archive
+member validation above, plus an exact parquet-file count against the manifest
+and a full file inventory of paths and sizes; write `.verified.json`;
+`os.replace()` into `snapshots/<version>/`; atomically flip `CURRENT` via
+temp-file + `os.replace()`.
+
+**The boot runtime never opens the snapshot.** It does not connect DuckDB, run
+`count(*)`, or check any schema. "Materialized and structurally verified" is a
+weaker claim than "queryable", and reporting the second when only the first was
+established would let a well-formed but unusable snapshot be served.
+**DuckDB, schema and row-count validation are the routing layer's
+responsibility (PR 4), to be performed before it serves anything from the
+snapshot.** The earlier wording here described a DuckDB probe; that was the lab
+harness's behaviour, and at full history it scans every row.
+
+The verification record persists the **validated coverage, provisional, layout
+and provenance fields** carried through from the manifest, so routing can answer
+coverage questions from the materialized snapshot alone — offline, and without
+re-fetching a manifest that may since have rotated.
 **Any failure leaves the previous verified snapshot serving, untouched** —
 verified for corrupt manifest, corrupt bundle, digest mismatch, truncated
 transfer and hostile archive.
@@ -553,7 +569,7 @@ Two consequences, both load-bearing:
 
 | State | Readiness | Behaviour |
 |---|---|---|
-| `ready` | 200 | a verified snapshot is materialized and open on this Machine |
+| `ready` | 200 | a **structurally verified** snapshot is materialized on this Machine — digest, member safety and file inventory checked. **Not** a claim that it is queryable; PR 4 validates DuckDB, schema and row counts before routing to it |
 | `unready` | 503 | nothing materialized; typed `snapshot_unavailable`, and the caller **falls back to the live source** |
 
 There is deliberately no `ready_stale` state. Where the advertised release cannot
@@ -578,8 +594,10 @@ version identify several different snapshots.
 Exclusive `flock()` on `<cache>/.boot.lock` held across download → verify →
 extract → activate. A worker that cannot acquire it **blocks** (bounded by
 `LOCK_WAIT_SECONDS`, default 420 s), then re-reads `CURRENT` and activates from
-cache with **no download**. Lock records PID + boot-id; a stale lock from a dead
-process breaks after `LOCK_STALE_SECONDS` (default 900 s). Staging dirs are
+cache with **no download**. The lock file records a PID for diagnosis only:
+`flock` is released by the kernel when its holder dies, so there is no stale lock
+to break, no `LOCK_STALE_SECONDS`, and no PID consulted to decide whether the
+lock is held. A leftover lock *file* is never a wedged boot. Staging dirs are
 per-attempt (`mkdtemp`) so a broken lock can never produce two writers on one
 path. `flock` is advisory and per-host — correct for multiple workers in one
 machine; it does not coordinate across machines, and one fetch per machine is

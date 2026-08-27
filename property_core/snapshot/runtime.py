@@ -1,9 +1,16 @@
 """Boot-time snapshot orchestration.
 
-One job: at process start, obtain a verified snapshot and make it available, or
-fail closed with a typed error. It fetches, verifies, extracts, activates and
-prunes. It does NOT open, query or route to the snapshot -- reading data from it
-is separate work.
+One job: at process start, obtain a **structurally verified** snapshot and make
+it available, or fail closed with a typed error. It fetches, verifies the
+published digest and length, extracts with member validation, activates and
+prunes.
+
+**READY means materialized and structurally verified, not queryable.** This
+runtime never opens the snapshot, runs a query, or checks a schema or row count.
+DuckDB, schema and row validation are the routing layer's responsibility, to be
+done before it serves anything from the snapshot -- a well-formed archive can
+still be unusable, and reporting it as queryable would be a claim this layer has
+not earned.
 
 **No hot refresh in v1.** Activation happens at process start only. There is
 deliberately no refresh/reload/watch entry point: swapping a live snapshot under
@@ -17,7 +24,7 @@ SPARQL source**.
 
 Failure policy:
 
-1. a verified snapshot matching the advertised release                -> READY
+1. a structurally verified snapshot matching the advertised release   -> READY
 2. the advertised release cannot be fetched, but a snapshot was already
    materialized on THIS Machine (typically by another worker)         -> READY,
    flagged `behind_advertised_release` -- not a durability guarantee
@@ -39,7 +46,12 @@ from property_core.snapshot.archive import ExtractionLimits, safe_extract
 from property_core.snapshot.fetch import DEFAULT_MAX_BUNDLE_BYTES, download_verified
 from property_core.snapshot.lock import DEFAULT_TIMEOUT as LOCK_TIMEOUT
 from property_core.snapshot.lock import LockTimeout, single_flight
-from property_core.snapshot.models import BootReport, Readiness, SnapshotManifest
+from property_core.snapshot.models import (
+    BootReport,
+    Readiness,
+    SnapshotManifest,
+    validate_component,
+)
 from property_core.snapshot.store import DEFAULT_KEEP, SnapshotStore
 
 CURRENT_POINTER_OBJECT = "current.json"
@@ -172,9 +184,10 @@ class SnapshotRuntime:
     # -- steps ----------------------------------------------------------
     def _load_manifest(self) -> SnapshotManifest:
         pointer = json.loads(self.source.read_bytes(CURRENT_POINTER_OBJECT))
-        name = pointer["current_manifest"]
-        if not isinstance(name, str) or "/" in name or name.startswith("."):
-            raise ValueError(f"current.json names an unusable manifest: {name!r}")
+        # The pointer names an object we then fetch, so it gets the same
+        # single-component treatment as every other externally supplied name.
+        name = validate_component(pointer.get("current_manifest"),
+                                  "current_manifest", reserved=False)
         return SnapshotManifest(**json.loads(self.source.read_bytes(name)))
 
     def _install(self, manifest: SnapshotManifest) -> tuple[int, str]:
@@ -208,8 +221,17 @@ class SnapshotRuntime:
                     "version": manifest.snapshot_version,
                     "bundle_sha256": manifest.bundle_sha256,
                     "bundle_bytes": manifest.bundle_bytes,
+                    "bundle_object": manifest.bundle_object,
                     "parquet_files": found,
                     "rows": manifest.rows,
+                    # Carried through so routing can answer coverage questions
+                    # from the materialized snapshot alone, offline.
+                    "coverage_from": manifest.coverage_from,
+                    "coverage_to": manifest.coverage_to,
+                    "provisional_from": manifest.provisional_from,
+                    "layout": manifest.layout,
+                    "duckdb_version": manifest.duckdb_version,
+                    "verification": "structural",
                     "verified_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 },
             )

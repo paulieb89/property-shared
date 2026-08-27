@@ -133,6 +133,15 @@ class BootReport(BaseModel):
 class VerificationRecord(BaseModel):
     """What was verified about a materialized snapshot, and how.
 
+    **Structural verification only.** The boot runtime proves that the bundle
+    matched its published digest and length, that every archive member was safe,
+    and that the unpacked file inventory is exactly what was written. It does
+    NOT open the snapshot, run a query, or check any schema or row count --
+    "materialized and structurally verified" is a weaker claim than "queryable",
+    and conflating the two would let a well-formed but unusable snapshot be
+    reported as ready. DuckDB, schema and row validation belong to the routing
+    layer, before it serves anything from the snapshot.
+
     Strict and validated on the way IN and on the way OUT. Reading it back with
     ad-hoc `int(...)` calls let a malformed value raise out of the readiness
     check and escape boot entirely, which is the opposite of failing closed.
@@ -146,8 +155,23 @@ class VerificationRecord(BaseModel):
     parquet_files: int = Field(gt=0)
     rows: int = Field(ge=0)
     verified_at: str
+
+    #: The validated coverage/provenance fields carried through from the
+    #: manifest. Persisted so a later routing layer can answer coverage
+    #: questions from the materialized snapshot alone, with no network call and
+    #: no second fetch of a manifest that may since have rotated.
+    coverage_from: Optional[str] = None
+    coverage_to: Optional[str] = None
+    provisional_from: Optional[str] = None
+    layout: Optional[str] = None
+    duckdb_version: Optional[str] = None
+    bundle_object: Optional[str] = None
+
     #: Relative POSIX path -> exact byte size, for every file in the snapshot.
     inventory: dict[str, int] = Field(min_length=1)
+
+    #: What PR 3 verified. Structural only -- see the class docstring.
+    verification: str = "structural"
 
     @field_validator("version")
     @classmethod

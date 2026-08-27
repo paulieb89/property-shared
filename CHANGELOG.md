@@ -48,6 +48,13 @@ Not released. No version bump. Two merged/pending PRs against the frozen design 
   single-flight process locking, and readiness states. **Wired to nothing:** it
   is not booted by any request path, does not query a snapshot, and changes no
   response. No hot refresh.
+  **Readiness is structural, not queryable:** the runtime verifies the published
+  digest and length, validates every archive member, and checks an exact file
+  inventory. It never opens the snapshot, connects DuckDB or checks a schema —
+  DuckDB, schema and row validation belong to the routing layer, before it
+  serves anything from the snapshot. The verification record persists the
+  validated coverage, provisional and layout fields so routing can answer
+  coverage questions offline.
   **Ephemeral by design:** both Machines run Fly's default rootfs with no Volume
   and no `persist_rootfs`, so the extracted snapshot is wiped on restart and
   deploy. It is that Machine's read-only query database for its lifetime — one

@@ -30,12 +30,14 @@ from property_core.snapshot.errors import ArchiveRejected, SnapshotExtraMissingE
 class ExtractionLimits:
     """Caps applied while the archive streams past.
 
-    Defaults are sized for a rolling snapshot (tens of files, a few hundred MB)
-    with headroom, not for arbitrary archives.
+    Defaults are sized for a rolling snapshot (an 11-partition snapshot holds
+    ~11 parquet files and unpacks to a few hundred MB) with headroom, not for
+    arbitrary archives. They match the caps published in the governing
+    specification, section 4.3.
     """
 
-    max_members: int = 50_000
-    max_total_bytes: int = 4 * 1024 ** 3
+    max_members: int = 5_000
+    max_total_bytes: int = 2 * 1024 ** 3
     max_member_bytes: int = 2 * 1024 ** 3
 
 

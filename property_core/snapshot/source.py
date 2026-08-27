@@ -12,7 +12,8 @@ import urllib.parse
 import urllib.request
 from typing import IO, Optional, Protocol, runtime_checkable
 
-DEFAULT_TIMEOUT = 30.0
+#: Connect/read timeout, per the governing specification section 4.1.
+DEFAULT_TIMEOUT = 10.0
 #: Small control objects only (current.json, the manifest). The bundle is
 #: NEVER read through this path -- it is streamed.
 MAX_CONTROL_BYTES = 1 * 1024 * 1024

@@ -44,6 +44,35 @@ class BundleVerificationError(PPDError):
     retryable = True
 
 
+class InsufficientDiskSpaceError(PPDError):
+    """Not enough free space to download and unpack the bundle.
+
+    Checked BEFORE the transfer starts: filling the filesystem is worse than not
+    having the snapshot, because it takes the live path down with it.
+    """
+
+    code = "snapshot_insufficient_disk"
+    retryable = True
+
+    def __init__(self, required: int, available: int, path: str = ""):
+        self.required, self.available, self.path = required, available, path
+        super().__init__(
+            f"need {required} bytes free to materialize the snapshot, "
+            f"{available} available" + (f" at {path}" if path else "")
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**super().to_dict(), "required_bytes": self.required,
+                "available_bytes": self.available}
+
+
+class DownloadDeadlineExceeded(PPDError):
+    """The transfer exceeded its total budget or stalled."""
+
+    code = "snapshot_download_deadline"
+    retryable = True
+
+
 class ArchiveRejected(PPDError):
     """An archive member violated a safety rule. Fail closed.
 
