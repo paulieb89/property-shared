@@ -4,7 +4,7 @@
   "title": "UK Property Data",
   "description": "UK property data — Land Registry comps, EPC, Rightmove, rental yields, stamp duty, Companies House",
   "version": "1.14.2",
-  "websiteUrl": "https://bouch.dev/products/property-report",
+  "websiteUrl": "https://bouch.dev/products/property-mcp",
   "repository": {
     "url": "https://github.com/paulieb89/property-shared",
     "source": "github"
