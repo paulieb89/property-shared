@@ -119,7 +119,7 @@ mcp = FastMCP(
         "invoke the `full_property_analysis` prompt — it instructs you to call "
         "property_comps, property_yield, property_epc and rightmove_search and "
         "synthesise. For postcode-only data fetches use property_comps and "
-        "property_yield separately. ppd_transactions for specific property history, "
+        "property_yield separately. ppd_transactions for recent transactions at a postcode (bounded, not a full history), "
         "rightmove_search to browse listings by postcode, rightmove_listing for "
         "full detail on one listing, property_epc for energy certificates, "
         "rental_analysis for rental market figures, stamp_duty for SDLT, "
@@ -562,7 +562,16 @@ def ppd_transactions(
     limit: int = 10,
     property_type: str | None = None,
 ) -> dict:
-    """Raw Land Registry Price Paid transactions for a postcode."""
+    """Land Registry Price Paid transactions for a postcode, most recent first.
+
+    Returns up to `limit` most recent transactions within snapshot coverage
+    (see `coverage_from`/`coverage_to` in the response where present),
+    unfiltered -- includes category-B bulk transfers and commercial sales.
+
+    This is not a complete property history: older sales may exist beyond what
+    is returned. Check `sample_complete` before describing the result as the
+    full record. For clean residential comparable sales, use `property_comps` instead.
+    """
     from property_core import PPDService
     result = PPDService().search_transactions(
         postcode=postcode,

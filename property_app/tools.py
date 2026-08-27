@@ -554,11 +554,15 @@ def ppd_transactions(
         Field(description="Filter by type: F=flat, D=detached, S=semi, T=terraced, O=other. Default None = all"),
     ] = None,
 ) -> dict:
-    """Raw Land Registry Price Paid transactions for a postcode.
+    """Land Registry Price Paid transactions for a postcode, most recent first.
 
-    Returns every recorded transaction at the postcode, unfiltered (includes
-    category-B bulk transfers and commercial sales). For clean residential
-    comparable sales, use property_comps instead.
+    Returns up to `limit` most recent transactions within snapshot coverage
+    (see `coverage_from`/`coverage_to` in the response where present),
+    unfiltered -- includes category-B bulk transfers and commercial sales.
+
+    This is not a complete property history: older sales may exist beyond what
+    is returned. Check `sample_complete` before describing the result as the
+    full record. For clean residential comparable sales, use `search_comps` instead.
     """
     return search_ppd_transactions(
         postcode=postcode,

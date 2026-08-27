@@ -78,6 +78,52 @@ class PPDCoverageError(PPDError):
         }
 
 
+class InvalidPostcodeError(PPDError):
+    """Caller supplied a postcode or prefix outside the allowlisted grammar.
+
+    ``field`` distinguishes an exact postcode from a prefix. They share this
+    type, but a consumer must be able to tell which input was wrong -- and an
+    internally derived prefix that fails validation is a bug in our own
+    derivation, not something to silently repair.
+    """
+
+    code = "invalid_postcode"
+    retryable = False
+
+    def __init__(self, value: str, *, field: str = "postcode", expected: str = ""):
+        self.value = value
+        self.field = field
+        self.expected = expected
+        detail = f"{field} {value!r} is not valid"
+        if expected:
+            detail += f"; expected {expected}"
+        super().__init__(detail)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "error": self.code,
+            "detail": str(self),
+            "field": self.field,
+            "value": self.value,
+            "expected": self.expected,
+            "retryable": self.retryable,
+        }
+
+
+class TransactionNotFoundError(PPDError):
+    """No such transaction upstream. Distinct from a failed lookup."""
+
+    code = "transaction_not_found"
+    retryable = False
+
+    def __init__(self, transaction_id: str, detail: str = ""):
+        self.transaction_id = transaction_id
+        super().__init__(detail or f"no transaction record for {transaction_id}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**super().to_dict(), "transaction_id": self.transaction_id}
+
+
 class SnapshotUnavailableError(PPDError):
     """No verified snapshot is open. Distinct from 'no rows matched'."""
 

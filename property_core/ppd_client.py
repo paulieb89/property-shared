@@ -34,6 +34,13 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 from property_core.models.ppd import PPDTransaction, PPDTransactionRecord
+from property_core.postcode_rules import (
+    matches_prefix,
+    normalise_postcode,
+    normalise_prefix,
+    sparql_prefix,
+)
+from property_core.provenance import TransportEvidence
 
 S3_BASE = "http://prod2.publicdata.landregistry.gov.uk.s3-website-eu-west-1.amazonaws.com"
 LINKED_DATA_BASE = "https://landregistry.data.gov.uk"
@@ -88,6 +95,22 @@ YEARS_WITH_PARTS = {2018, 2019, 2020, 2021, 2022, 2023}
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
+@dataclass(frozen=True)
+class SearchPage:
+    """One page of results plus the evidence needed to judge completeness.
+
+    Internal to the transport and service layers for now: deliberately NOT in
+    ``property_core.__all__`` and not advertised as a stable library contract.
+    ``sparql_search`` remains the compatibility list-returning method.
+    """
+
+    transactions: list["PPDTransaction"]
+    evidence: "TransportEvidence"
+    #: Rows the upstream returned that did not belong to the requested geography.
+    #: Non-zero means the upstream filter was looser than our containment rule.
+    contained_out: int = 0
+
+
 def _validate_iso_date(s: str) -> str:
     """Validate that *s* looks like an ISO date (YYYY-MM-DD). Raises ValueError."""
     if not _ISO_DATE_RE.match(s):
@@ -136,16 +159,50 @@ class PricePaidDataClient:
     # Linked data helpers
     # --------
     def get_transaction_record(self, transaction_id: str, view: str = "all") -> PPDTransactionRecord:
-        """Fetch a transaction record by its UUID from the Linked Data API."""
+        """Fetch a transaction record by its UUID from the Linked Data API.
+
+        Three outcomes, kept strictly distinct:
+
+        * ``primaryTopic`` is an object -> the record.
+        * ``primaryTopic`` is a bare string URI -> the API's stub for an unknown
+          id: ``TransactionNotFoundError``. Previously this reached
+          ``primary.get(...)`` on a ``str`` and leaked ``AttributeError``.
+        * transport or parse failure -> ``UpstreamUnavailableError``.
+
+        A failed lookup is never reported as an absent record.
+        """
+        from property_core.exceptions import (
+            TransactionNotFoundError,
+            UpstreamUnavailableError,
+        )
+
         endpoint = f"{self.linked_data_base}/data/ppi/transaction/{transaction_id}/current.json"
         url = f"{endpoint}?{urllib.parse.urlencode({'_view': view})}"
-        raw = self._fetch_json(url)
-        return PPDTransactionRecord.from_linked_data(raw)
+        try:
+            raw = self._fetch_json(url)
+        except Exception as exc:  # transport, timeout, or unparseable body
+            raise UpstreamUnavailableError(
+                f"transaction lookup failed: {type(exc).__name__}: {exc}"
+            ) from exc
+
+        result = raw.get("result") if isinstance(raw, dict) else None
+        primary = result.get("primaryTopic") if isinstance(result, dict) else None
+        if not isinstance(primary, dict):
+            raise TransactionNotFoundError(transaction_id)
+
+        try:
+            return PPDTransactionRecord.from_linked_data(raw)
+        except AttributeError as exc:
+            # Defence in depth: the shape guard above should make this
+            # unreachable, but an AttributeError must never reach the caller.
+            raise TransactionNotFoundError(
+                transaction_id, f"unusable record shape: {exc}"
+            ) from exc
 
     # --------
     # SPARQL search
     # --------
-    def sparql_search(
+    def search_with_evidence(
         self,
         *,
         postcode: Optional[str] = None,
@@ -169,9 +226,9 @@ class PricePaidDataClient:
         limit: int = 20,
         offset: int = 0,
         order_desc: bool = True,
-    ) -> list[PPDTransaction]:
+    ) -> SearchPage:
         """
-        Search Price Paid transactions via SPARQL.
+        Search Price Paid transactions via SPARQL, with completeness evidence.
 
         Supports postcode exact/prefix search, date/price ranges, address text
         matching (CONTAINS/LCASE), and URI-based filters (applied client-side
@@ -203,14 +260,19 @@ class PricePaidDataClient:
         # --- SPARQL-safe filters (postcode, date, price) ---
 
         # Use VALUES for exact postcode (more efficient than FILTER)
-        if postcode:
-            safe_pc = postcode.strip().upper().replace('"', '').replace('\\', '')
+        if postcode is not None:
+            safe_pc = normalise_postcode(postcode)
             values_clauses.append(f'VALUES ?postcode {{"{safe_pc}"^^xsd:string}}')
 
-        # Use STRSTARTS filter for prefix search (VALUES can't do prefix)
-        if postcode_prefix:
-            safe_prefix = postcode_prefix.upper().replace('"', '').replace('\\', '')
-            filters.append(f'FILTER(STRSTARTS(?postcode, "{safe_prefix}"))')
+        # Use STRSTARTS filter for prefix search (VALUES can't do prefix).
+        # An outcode carries its trailing space -- "B5" alone matches "B50 4AA",
+        # which is Alcester, ~20 miles from inner Birmingham.
+        normalised_prefix = None
+        if postcode_prefix is not None:
+            normalised_prefix = normalise_prefix(postcode_prefix)
+            filters.append(
+                f'FILTER(STRSTARTS(?postcode, "{sparql_prefix(normalised_prefix)}"))'
+            )
 
         if from_date:
             _validate_iso_date(from_date)
@@ -315,7 +377,31 @@ class PricePaidDataClient:
         if new_build is not None:
             results = [t for t in results if t.new_build == new_build]
 
-        return results[:limit]
+        # Defence in depth: even with the delimiter pushed upstream, verify
+        # membership by PARSED geography. A permissive or changed upstream must
+        # not be able to leak a neighbouring outcode into these results.
+        contained_out = 0
+        if normalised_prefix is not None:
+            kept = [t for t in results if matches_prefix(t.postcode, normalised_prefix)]
+            contained_out = len(results) - len(kept)
+            results = kept
+
+        return SearchPage(
+            transactions=results[:limit],
+            evidence=TransportEvidence(
+                raw_bindings_returned=len(bindings), fetch_limit=fetch_limit
+            ),
+            contained_out=contained_out,
+        )
+
+    def sparql_search(self, **kwargs) -> list[PPDTransaction]:
+        """Compatibility wrapper: the rows only.
+
+        Kept as the stable list-returning method for existing callers. The
+        service layer uses :meth:`search_with_evidence`, which additionally
+        reports whether the upstream window was exhausted.
+        """
+        return self.search_with_evidence(**kwargs).transactions
 
     # --------
     # Internals

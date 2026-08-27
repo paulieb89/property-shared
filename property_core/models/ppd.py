@@ -204,8 +204,19 @@ class PPDCompsResponse(BaseModel):
     percentile_75: Optional[int] = None
     min: Optional[int] = None
     max: Optional[int] = None
-    thin_market: bool
+    thin_market: bool = Field(
+        ...,
+        description=(
+            "Whether the BOUNDED RETURNED SAMPLE fell below the thin-market "
+            "threshold. This is a sample indicator, not a whole-market fact: the "
+            "upstream window is limited and filtered client-side, so a true value "
+            "may reflect an incomplete source window rather than a thin market. "
+            "When completeness is unknown a warning says so."
+        ),
+    )
     # Auto-escalation tracking (populated when auto_escalate=True)
+    #: Additive (PR 2). Completeness and containment caveats for this response.
+    warnings: tuple[str, ...] = ()
     escalated_from: Optional[str] = None
     escalated_to: Optional[str] = None
     # EPC-enriched stats (populated when enrich_epc=True on callers)
@@ -247,6 +258,10 @@ class PPDTransactionRecord(BaseModel):
         """
         result = raw.get("result", {}) if isinstance(raw, dict) else {}
         primary = result.get("primaryTopic", {}) if isinstance(result, dict) else {}
+        # The API returns a bare URI string here for an unknown id; every
+        # downstream access assumes a mapping, so normalise rather than raise.
+        if not isinstance(primary, dict):
+            primary = {}
 
         property_type_node = primary.get("propertyType")
         estate_type_node = primary.get("estateType")
