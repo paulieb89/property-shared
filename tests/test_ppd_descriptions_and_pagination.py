@@ -183,3 +183,12 @@ def test_offset_documentation_states_the_instability():
     assert "unstable" in src or "repeat" in src or "omit" in src, (
         "offset parameter is not documented as an unstable cursor"
     )
+
+
+@pytest.mark.parametrize("getter", [_plain_tool, _app_tool],
+                         ids=["plain-server", "mcp-app"])
+def test_ppd_transactions_qualifies_the_unfiltered_claim(getter):
+    """`property_type` does filter the result, so a bare 'unfiltered' is false."""
+    doc = (inspect.getdoc(getter()) or "").lower()
+    assert "unfiltered by default" in doc, doc
+    assert "property_type" in doc, doc

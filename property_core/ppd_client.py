@@ -208,12 +208,14 @@ class PricePaidDataClient:
             # naming the transaction we asked for. An arbitrary string -- "",
             # "garbage", or a URI for a DIFFERENT transaction -- proves nothing
             # about this record's existence and must not become an absence.
-            # Compare structurally and scheme-insensitively: the Linked Data URI
-            # namespace is http:// even though the API is served over https, so a
-            # literal comparison against the request URL never matches.
-            expected_tail = f"/data/ppi/transaction/{transaction_id}/current"
-            candidate = primary.strip().split("://", 1)[-1]
-            if candidate.endswith(expected_tail) and "landregistry" in candidate:
+            # PARSE the URI. A substring check accepted
+            # https://evil.example/landregistry/data/ppi/transaction/<id>/current
+            # and turned an attacker- or proxy-supplied string into "this record
+            # does not exist" -- a false statement about the world.
+            #
+            # The Linked Data URI namespace is http:// even though the API is
+            # served over https, so scheme is allowed to differ; nothing else is.
+            if self._is_not_found_stub(primary, transaction_id):
                 raise TransactionNotFoundError(transaction_id)
             raise UpstreamShapeError(
                 "'primaryTopic' is a string but not the not-found stub for the "
@@ -439,6 +441,37 @@ class PricePaidDataClient:
         reports whether the upstream window was exhausted.
         """
         return self.search_with_evidence(**kwargs).transactions
+
+    #: The one host whose not-found stub we honour.
+    LINKED_DATA_HOST = "landregistry.data.gov.uk"
+
+    @classmethod
+    def _is_not_found_stub(cls, value: str, transaction_id: str) -> bool:
+        """Whether `value` is the Linked Data not-found stub for this transaction.
+
+        Strict by construction: anything we cannot fully account for is not a
+        stub, because the cost of a false positive is telling a caller a
+        transaction does not exist when we do not know that.
+        """
+        try:
+            parts = urllib.parse.urlsplit(value.strip())
+        except ValueError:
+            return False
+        if parts.scheme not in ("http", "https"):
+            return False
+        if parts.username or parts.password:
+            return False
+        if parts.query or parts.fragment:
+            return False
+        if (parts.hostname or "").lower() != cls.LINKED_DATA_HOST:
+            return False
+        try:
+            port = parts.port
+        except ValueError:
+            return False
+        if port not in (None, 80, 443):
+            return False
+        return parts.path == f"/data/ppi/transaction/{transaction_id}/current"
 
     # --------
     # Internals

@@ -295,3 +295,62 @@ def test_other_strings_are_upstream_shape_not_not_found(value):
                       return_value={"result": {"primaryTopic": value}}):
         with pytest.raises(UpstreamShapeError):
             client.get_transaction_record(TXID)
+
+
+# --------------------------------------------------------------------------
+# Final review: the stub check must PARSE the URI, not substring-match it.
+# A malformed response from anywhere must never become "this record does not
+# exist" -- that is a false statement about the world, sourced from an attacker
+# or a broken proxy.
+# --------------------------------------------------------------------------
+
+_PATH = f"/data/ppi/transaction/{TXID}/current"
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        f"https://evil.example/landregistry{_PATH}",
+        f"https://landregistry.data.gov.uk.evil.example{_PATH}",
+        f"https://evil.example/landregistry.data.gov.uk{_PATH}",
+        f"https://landregistry.data.gov.uk@evil.example{_PATH}",
+        f"https://user:pw@landregistry.data.gov.uk{_PATH}",
+        f"https://landregistry.data.gov.uk:8443{_PATH}",
+        f"file://landregistry.data.gov.uk{_PATH}",
+        f"javascript:alert(1)#{_PATH}",
+        f"http://landregistry.data.gov.uk{_PATH}?x=1",
+        f"http://landregistry.data.gov.uk{_PATH}#frag",
+        f"http://landregistry.data.gov.uk/evil{_PATH}",
+        f"http://LANDREGISTRY.DATA.GOV.UK.evil.example{_PATH}",
+    ],
+    ids=["lookalike-path", "subdomain-suffix", "host-in-path", "userinfo-at",
+         "userinfo-creds", "unexpected-port", "bad-scheme", "javascript-scheme",
+         "query", "fragment", "path-prefix", "uppercase-subdomain"],
+)
+def test_spoofed_stub_uris_are_shape_errors_not_not_found(uri):
+    from property_core.exceptions import UpstreamShapeError
+
+    client = PricePaidDataClient()
+    with patch.object(PricePaidDataClient, "_fetch_json",
+                      return_value={"result": {"primaryTopic": uri}}):
+        with pytest.raises(UpstreamShapeError):
+            client.get_transaction_record(TXID)
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        f"http://landregistry.data.gov.uk{_PATH}",
+        f"https://landregistry.data.gov.uk{_PATH}",
+        f"http://landregistry.data.gov.uk:80{_PATH}",
+        f"https://landregistry.data.gov.uk:443{_PATH}",
+        f"  http://landregistry.data.gov.uk{_PATH}  ",
+    ],
+    ids=["http", "https", "default-port-80", "default-port-443", "whitespace"],
+)
+def test_the_genuine_stub_uri_is_still_not_found(uri):
+    client = PricePaidDataClient()
+    with patch.object(PricePaidDataClient, "_fetch_json",
+                      return_value={"result": {"primaryTopic": uri}}):
+        with pytest.raises(TransactionNotFoundError):
+            client.get_transaction_record(TXID)

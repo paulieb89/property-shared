@@ -146,3 +146,93 @@ def test_str_of_toolresult_is_not_a_sufficient_assertion(incomplete_market):
     fn = getattr(yield_dashboard, "fn", yield_dashboard)
     result = asyncio.run(fn(postcode="B5 4BX", months=24))
     assert _content_text(result), "content text must be non-empty to be assertable"
+
+
+# --------------------------------------------------------------------------
+# Final review: the VISUAL tree must carry the caveat too. Text-only means a
+# human reading the dashboard sees an uncaveated median.
+# --------------------------------------------------------------------------
+
+def _tree_text(result) -> str:
+    return str(getattr(result, "structured_content", result))
+
+
+def test_comps_dashboard_visual_tree_shows_the_caveat(incomplete_market):
+    from property_app.dashboards.comps import comps_dashboard
+
+    fn = getattr(comps_dashboard, "fn", comps_dashboard)
+    result = fn(postcode="B5 4BX", months=24)
+    if asyncio.iscoroutine(result):
+        result = asyncio.run(result)
+    assert "incomplete" in _tree_text(result).lower(), (
+        "the comps dashboard renders a median with no visible caveat"
+    )
+
+
+def test_unified_dashboard_visual_tree_shows_the_caveat(incomplete_market):
+    from property_app.dashboards.unified import property_dashboard
+
+    fn = getattr(property_dashboard, "fn", property_dashboard)
+    result = fn(postcode="B5 4BX")
+    if asyncio.iscoroutine(result):
+        result = asyncio.run(result)
+    assert "incomplete" in _tree_text(result).lower(), (
+        "the unified dashboard renders figures with no visible caveat"
+    )
+
+
+def test_unified_dashboard_surfaces_a_yield_only_warning(incomplete_market):
+    """Asymmetric case: the two calls use different limits, so completeness can
+    differ. Reading only comps["warnings"] loses a yield-side caveat entirely.
+    """
+    from property_app.dashboards import unified
+
+    async def _fake(**kwargs):
+        return {
+            "comps": {"count": 3, "median": 250000, "mean": 250000,
+                      "percentile_25": 240000, "percentile_75": 260000,
+                      "thin_market": False, "transactions": [], "warnings": []},
+            "yield_data": {"gross_yield_pct": 6.1, "median_sale_price": 250000,
+                           "sale_count": 3, "median_monthly_rent": 1275,
+                           "rental_count": 4, "thin_market": False,
+                           "yield_assessment": "strong", "data_quality": "good",
+                           "warnings": ["result may be incomplete: yield side only"]},
+            "rental": {"median_rent": 1275, "listing_count": 4,
+                       "thin_market": False, "listings": []},
+        }
+
+    with patch.object(unified, "_fetch_unified", _fake):
+        fn = getattr(unified.property_dashboard, "fn", unified.property_dashboard)
+        result = fn(postcode="B5 4BX")
+        if asyncio.iscoroutine(result):
+            result = asyncio.run(result)
+    blob = (_content_text(result) + " " + _tree_text(result)).lower()
+    assert "yield side only" in blob, "a yield-only caveat was dropped"
+
+
+def test_unified_dashboard_deduplicates_identical_warnings(incomplete_market):
+    """The same caveat from both calls must be shown once, not twice."""
+    from property_app.dashboards import unified
+
+    same = "result may be incomplete: shared caveat"
+
+    async def _fake(**kwargs):
+        return {
+            "comps": {"count": 3, "median": 250000, "mean": 250000,
+                      "percentile_25": 240000, "percentile_75": 260000,
+                      "thin_market": False, "transactions": [], "warnings": [same]},
+            "yield_data": {"gross_yield_pct": 6.1, "median_sale_price": 250000,
+                           "sale_count": 3, "median_monthly_rent": 1275,
+                           "rental_count": 4, "thin_market": False,
+                           "yield_assessment": "strong", "data_quality": "good",
+                           "warnings": [same]},
+            "rental": {"median_rent": 1275, "listing_count": 4,
+                       "thin_market": False, "listings": []},
+        }
+
+    with patch.object(unified, "_fetch_unified", _fake):
+        fn = getattr(unified.property_dashboard, "fn", unified.property_dashboard)
+        result = fn(postcode="B5 4BX")
+        if asyncio.iscoroutine(result):
+            result = asyncio.run(result)
+    assert _content_text(result).lower().count("shared caveat") == 1

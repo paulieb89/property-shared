@@ -557,8 +557,9 @@ def ppd_transactions(
     """Land Registry Price Paid transactions for a postcode, most recent first.
 
     Returns up to `limit` most recent transactions currently available from the
-    live Land Registry source, unfiltered -- includes category-B bulk transfers
-    and commercial sales.
+    live Land Registry source. Unfiltered by default -- category-B bulk transfers
+    and commercial sales are included. Pass `property_type` (F=flat, D=detached,
+    S=semi, T=terraced, O=other) to restrict the result to a single type.
 
     This is a bounded result, not a complete property history: older sales may
     exist beyond what is returned, and the result carries no completeness
