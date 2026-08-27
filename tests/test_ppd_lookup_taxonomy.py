@@ -261,3 +261,37 @@ def test_from_linked_data_rejects_a_malformed_shape_rather_than_emptying_it():
         PPDTransactionRecord.from_linked_data({"result": {"primaryTopic": "http://x"}})
     with pytest.raises((ValueError, TypeError)):
         PPDTransactionRecord.from_linked_data({"result": {}})
+
+
+# --------------------------------------------------------------------------
+# Re-review: only the stub URI for THE REQUESTED transaction proves not-found.
+# An arbitrary string says nothing about whether this record exists.
+# --------------------------------------------------------------------------
+
+_STUB = f"http://landregistry.data.gov.uk/data/ppi/transaction/{TXID}/current"
+
+
+def test_the_exact_stub_uri_for_this_transaction_is_not_found():
+    client = PricePaidDataClient()
+    with patch.object(PricePaidDataClient, "_fetch_json",
+                      return_value={"result": {"primaryTopic": _STUB}}):
+        with pytest.raises(TransactionNotFoundError):
+            client.get_transaction_record(TXID)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "   ", "garbage", "not a uri",
+     "http://landregistry.data.gov.uk/data/ppi/transaction/{OTHER-ID}/current",
+     "https://example.com/", _STUB + "/extra"],
+    ids=["empty", "whitespace", "garbage", "prose", "other-transaction",
+         "unrelated-url", "suffixed"],
+)
+def test_other_strings_are_upstream_shape_not_not_found(value):
+    from property_core.exceptions import UpstreamShapeError
+
+    client = PricePaidDataClient()
+    with patch.object(PricePaidDataClient, "_fetch_json",
+                      return_value={"result": {"primaryTopic": value}}):
+        with pytest.raises(UpstreamShapeError):
+            client.get_transaction_record(TXID)

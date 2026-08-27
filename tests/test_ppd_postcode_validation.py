@@ -133,3 +133,59 @@ def test_a_caller_error_is_not_softened_into_a_subject_lookup_warning():
         with pytest.raises(InvalidPostcodeError):
             PPDService().comps(postcode="NOTAPOSTCODE", address="1 High Street",
                                search_level="sector", auto_escalate=False)
+
+
+# --------------------------------------------------------------------------
+# Re-review: GIR is exactly one postcode. Accepting a nonexistent one is the
+# same defect as rejecting a real one.
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("postcode", ["GIR 1ZZ", "GIR 9AA", "GIR 0AB", "GIR 2AA"])
+def test_nonexistent_gir_postcodes_are_rejected(client, postcode):
+    with patch.object(PricePaidDataClient, "_fetch_sparql", return_value=EMPTY):
+        with pytest.raises(InvalidPostcodeError):
+            client.sparql_search(postcode=postcode, limit=5)
+
+
+@pytest.mark.parametrize("prefix", ["GIR 9", "GIR 1", "GIR 5"])
+def test_nonexistent_gir_sectors_are_rejected(client, prefix):
+    with patch.object(PricePaidDataClient, "_fetch_sparql", return_value=EMPTY):
+        with pytest.raises(InvalidPostcodeError):
+            client.sparql_search(postcode_prefix=prefix, limit=5)
+
+
+def test_the_one_real_gir_postcode_and_its_prefixes_still_work(client):
+    with patch.object(PricePaidDataClient, "_fetch_sparql", return_value=EMPTY):
+        assert client.sparql_search(postcode="GIR 0AA", limit=5) == []
+        assert client.sparql_search(postcode_prefix="GIR", limit=5) == []
+        assert client.sparql_search(postcode_prefix="GIR 0", limit=5) == []
+
+
+def test_transactions_route_has_exactly_one_invalid_postcode_handler():
+    """Re-review found a duplicate that an earlier cleanup claimed to remove."""
+    import inspect
+
+    import app.api.v1.ppd as rest
+
+    src = inspect.getsource(rest.transactions)
+    assert src.count("except InvalidPostcodeError") == 1, src.count(
+        "except InvalidPostcodeError")
+
+
+def test_transaction_id_route_has_no_postcode_handler():
+    """That route takes no postcode; a handler there is dead code."""
+    import inspect
+
+    import app.api.v1.ppd as rest
+
+    assert "InvalidPostcodeError" not in inspect.getsource(rest.transaction_record)
+
+
+def test_rest_yield_maps_caller_error_to_422_not_502():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with patch.object(PricePaidDataClient, "_fetch_sparql", return_value=EMPTY):
+        r = TestClient(app).get("/v1/analysis/yield?postcode=NOTAPOSTCODE")
+    assert r.status_code == 422, f"{r.status_code}: {r.text[:200]}"

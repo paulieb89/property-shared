@@ -108,8 +108,6 @@ def transactions(
         # other ValueErrors (internal bugs) keep surfacing as 502 rather than
         # being misreported as bad input.
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except InvalidPostcodeError as exc:
-        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"PPD search failed: {exc}") from exc
 

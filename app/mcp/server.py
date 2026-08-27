@@ -236,9 +236,11 @@ async def rental_analysis(
 ) -> dict:
     """Rental market analysis and achievable rent estimate.
 
-    auto_escalate is accepted for compatibility but does NOT widen the search
-    area on the live source; it previously widened when fewer than 5 were found
-    (thin market). Response includes thin_market, escalated_from, escalated_to
+    auto_escalate widens the Rightmove search RADIUS when fewer than 5 listings
+    are found (thin market). This is rental-radius escalation and is unaffected
+    by the PPD geography containment: it does not change a postcode's outcode or
+    sector, so it carries none of the limit-dependence that disabled PPD
+    auto-widening. Response includes thin_market, escalated_from, escalated_to
     fields when escalation occurs.
     """
     from property_core import analyze_rentals

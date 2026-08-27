@@ -16,9 +16,12 @@ from property_core.interpret import (
 from property_core.companies_house_client import CompaniesHouseClient
 from property_core.config import ppd_snapshot_enabled
 from property_core.exceptions import (
+    InvalidPostcodeError,
     PPDCoverageError,
     PPDError,
     SnapshotUnavailableError,
+    TransactionNotFoundError,
+    UpstreamShapeError,
     UpstreamUnavailableError,
 )
 from property_core.provenance import (
@@ -89,12 +92,15 @@ __all__ = [
     # Provenance and typed errors (PR 1 foundations; not yet wired to responses)
     "ATTRIBUTION_REF",
     "CompletenessBasis",
+    "InvalidPostcodeError",
     "PPDCoverageError",
     "PPDError",
     "PPDProvenance",
     "SnapshotUnavailableError",
     "SourceKind",
+    "TransactionNotFoundError",
     "TransportEvidence",
+    "UpstreamShapeError",
     "UpstreamUnavailableError",
     # Models
     "BlockAnalysisResponse",

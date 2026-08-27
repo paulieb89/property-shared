@@ -355,4 +355,9 @@ def comps_dashboard(
         f"mean {_fmt_gbp(mean)}, range {_fmt_gbp(p25)}\u2013{_fmt_gbp(p75)}"
     )
 
+    _caveats = list(data.get("warnings") or [])
+    if _caveats:
+        # The LLM reads `content`, not the visual tree. An uncaveated median is
+        # exactly what this warning exists to prevent.
+        text = text + " | NOTE: " + "; ".join(_caveats)
     return ToolResult(content=text, structured_content=view)

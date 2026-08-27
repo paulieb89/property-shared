@@ -1,5 +1,72 @@
 # Changelog
 
+## Unreleased — v1.15.0 (pending): PPD snapshot foundations + live-path correctness containment
+
+Not released. No version bump. Two merged/pending PRs against the frozen design in
+`docs/design/ppd-source-routing.md`.
+
+### Changed — behavioural, read before upgrading
+
+- **PPD auto-escalation no longer widens the search area on the live source.**
+  `auto_escalate` is still accepted, but `comps` (and everything derived from it —
+  `/v1/ppd/comps`, `property_comps`, `search_comps`, `/v1/analysis/yield`,
+  `calculate_yield`, the dashboards) now returns the **requested, narrower**
+  geography plus a warning explaining why. The only exhaustion evidence available
+  on the live path is `raw_bindings_returned < fetch_limit`, and `fetch_limit`
+  derives from the caller's presentation limit — so the same data at `limit=4` and
+  `limit=5` could produce different geography. The previous widening was a
+  page-size and filtering artefact, not a market judgement. **Callers relying on
+  automatic widening will see fewer, closer comparables.** Snapshot routing may
+  re-enable it later on limit-independent evidence. *Rental-radius escalation is a
+  separate mechanism and is unaffected.*
+- **District searches no longer leak neighbouring outcodes.** `STRSTARTS(?postcode,
+  "B5")` matched `B50 4AA` — Alcester, ~20 miles from inner Birmingham — silently
+  mixing two districts into comparable sales. Results for outcode searches will
+  change where a longer neighbouring outcode exists (`B5`/`B50`, `N1`/`N10`,
+  `E1`/`E17`, `B1`/`B15`).
+- **Malformed postcodes now return a typed 422** on `/v1/ppd/transactions`,
+  `/comps`, `/address-search`, `/blocks` and `/v1/analysis/yield`, instead of
+  reaching SPARQL and returning an empty `200` that read as "no sales here".
+- **`GET /v1/ppd/transaction/{id}`** returns **404** only for the observed
+  Linked Data not-found stub, **502** for a malformed-but-successful upstream
+  response, and no longer leaks `AttributeError`. Previously every non-object
+  `primaryTopic` — including missing, null, list and arbitrary strings — was
+  reported as 404, asserting a transaction does not exist when we did not know.
+- **`offset > 0` now returns a warning** that offset pagination is unstable and
+  may repeat or omit rows across pages.
+- **`comps` distinguishes a failed subject-property lookup from no sale history.**
+  A failure warns; a genuine no-match does not. Previously both were a silent
+  `null`.
+- Both `ppd_transactions` tool descriptions no longer claim "every recorded
+  transaction"; they state a bounded, most-recent result that is not a complete
+  history.
+
+### Added
+
+- `warnings` on `PPDCompsResponse`, `YieldAnalysis` and `MarketAnalysis`, carried
+  through REST, both MCP servers, the CLI, the HTML report and the comps, yield
+  and unified dashboards — including each dashboard's LLM-facing text, not only
+  its visual tree. A derived figure is never presented without the caveat
+  attached to the data it came from.
+- Provenance and evidence models (`PPDProvenance`, `TransportEvidence`,
+  `SourceKind`, `CompletenessBasis`) and the typed error taxonomy
+  (`PPDError`, `PPDCoverageError`, `InvalidPostcodeError`,
+  `TransactionNotFoundError`, `UpstreamShapeError`, `SnapshotUnavailableError`,
+  `UpstreamUnavailableError`), all exported from `property_core`. Provenance is
+  **not yet wired into any response**.
+- Optional `snapshot` extra (`duckdb==1.5.5`) and `PPD_SNAPSHOT_ENABLED`
+  (default **off**). The published library gains no required dependency.
+- `docs/design/ppd-source-routing.md` — the frozen specification governing this
+  work.
+
+### Fixed
+
+- `record_status` filtering stays disabled, but its documented rationale was
+  factually wrong: `lrppi:recordStatus` **does** exist on the SPARQL transaction
+  and binds to `.../ppi/add`. The honest reason is that it is not yet supported
+  under the verified binding and performance contract.
+
+
 ## v1.14.2 (2026-08-26) — MCP server card version; inferred-GBP warning ordering
 
 Two small corrections found by dogfooding v1.14.1 in production. No behaviour change to any tool, endpoint or data value.

@@ -77,3 +77,19 @@ def test_exceptions_are_protocol_neutral():
     src = inspect.getsource(exc_mod)
     for token in ("422", "502", "503", "404", "status_code", "HTTPException"):
         assert token not in src, f"{token!r} leaks a transport concern into core"
+
+
+def test_every_exception_raised_by_public_methods_is_publicly_exported():
+    """A caller cannot catch what they cannot import.
+
+    These are raised by public library methods (`sparql_search`,
+    `get_transaction_record`), so they belong in the package's public surface
+    alongside the PR 1 taxonomy.
+    """
+    import property_core
+
+    for name in ("PPDError", "PPDCoverageError", "SnapshotUnavailableError",
+                 "UpstreamUnavailableError", "InvalidPostcodeError",
+                 "TransactionNotFoundError", "UpstreamShapeError"):
+        assert name in property_core.__all__, f"{name} missing from __all__"
+        assert hasattr(property_core, name), f"{name} not importable from property_core"

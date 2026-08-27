@@ -390,4 +390,7 @@ async def property_dashboard(
     if gross_yield is not None:
         text_parts.append(f"  Yield: {fmt_pct(gross_yield)} gross ({assessment}), data quality: {quality}")
 
+    _caveats = list((comps or {}).get("warnings") or [])
+    if _caveats:
+        text_parts.append("  NOTE: " + "; ".join(_caveats))
     return ToolResult(content="\n".join(text_parts), structured_content=app)

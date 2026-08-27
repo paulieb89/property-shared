@@ -204,10 +204,21 @@ class PricePaidDataClient:
 
         primary = result["primaryTopic"]
         if isinstance(primary, str):
-            # The ONE shape observed to mean "no such record": the API returns a
-            # bare URI stub. Every other invalid shape is an upstream problem and
-            # must not be reported as an absence.
-            raise TransactionNotFoundError(transaction_id)
+            # The ONE shape observed to mean "no such record": a bare URI stub
+            # naming the transaction we asked for. An arbitrary string -- "",
+            # "garbage", or a URI for a DIFFERENT transaction -- proves nothing
+            # about this record's existence and must not become an absence.
+            # Compare structurally and scheme-insensitively: the Linked Data URI
+            # namespace is http:// even though the API is served over https, so a
+            # literal comparison against the request URL never matches.
+            expected_tail = f"/data/ppi/transaction/{transaction_id}/current"
+            candidate = primary.strip().split("://", 1)[-1]
+            if candidate.endswith(expected_tail) and "landregistry" in candidate:
+                raise TransactionNotFoundError(transaction_id)
+            raise UpstreamShapeError(
+                "'primaryTopic' is a string but not the not-found stub for the "
+                "requested transaction"
+            )
         if not isinstance(primary, dict):
             raise UpstreamShapeError(
                 f"'primaryTopic' is {type(primary).__name__}, expected an object or the "

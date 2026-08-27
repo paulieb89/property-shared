@@ -215,4 +215,9 @@ async def yield_dashboard(
         f"data quality: {quality}"
     )
 
+    _caveats = list(data.get('warnings') or [])
+    if _caveats:
+        # The LLM reads `content`, not the visual tree. A caveat that
+        # only reaches the structured view is invisible to it.
+        text = text + " | NOTE: " + "; ".join(_caveats)
     return ToolResult(content=text, structured_content=view)
