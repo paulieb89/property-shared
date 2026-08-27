@@ -354,3 +354,49 @@ def test_the_genuine_stub_uri_is_still_not_found(uri):
                       return_value={"result": {"primaryTopic": uri}}):
         with pytest.raises(TransactionNotFoundError):
             client.get_transaction_record(TXID)
+
+
+# --------------------------------------------------------------------------
+# Final: validate the complete authority, not host/userinfo/port separately.
+# Piecewise checks left gaps: an empty "@" gives a falsy username, "host:"
+# parses to port None, and 80/443 were accepted for either scheme.
+# --------------------------------------------------------------------------
+
+_HOST = "landregistry.data.gov.uk"
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        f"http://{_HOST}:443{_PATH}",
+        f"https://{_HOST}:80{_PATH}",
+        f"http://@{_HOST}{_PATH}",
+        f"http://:@{_HOST}{_PATH}",
+        f"http://{_HOST}:{_PATH}",
+    ],
+    ids=["http-with-443", "https-with-80", "empty-userinfo-at",
+         "empty-userinfo-colon-at", "explicit-empty-port"],
+)
+def test_malformed_authority_is_not_a_stub(uri):
+    from property_core.exceptions import UpstreamShapeError
+
+    client = PricePaidDataClient()
+    with patch.object(PricePaidDataClient, "_fetch_json",
+                      return_value={"result": {"primaryTopic": uri}}):
+        with pytest.raises(UpstreamShapeError):
+            client.get_transaction_record(TXID)
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [f"http://{_HOST}{_PATH}", f"http://{_HOST}:80{_PATH}",
+     f"https://{_HOST}{_PATH}", f"https://{_HOST}:443{_PATH}",
+     f"https://{_HOST.upper()}{_PATH}"],
+    ids=["http-default", "http-80", "https-default", "https-443", "uppercase-host"],
+)
+def test_scheme_appropriate_authorities_are_still_stubs(uri):
+    client = PricePaidDataClient()
+    with patch.object(PricePaidDataClient, "_fetch_json",
+                      return_value={"result": {"primaryTopic": uri}}):
+        with pytest.raises(TransactionNotFoundError):
+            client.get_transaction_record(TXID)

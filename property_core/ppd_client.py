@@ -445,31 +445,34 @@ class PricePaidDataClient:
     #: The one host whose not-found stub we honour.
     LINKED_DATA_HOST = "landregistry.data.gov.uk"
 
+    #: Exact authorities accepted, per scheme. Validating the netloc as a whole
+    #: rather than host/userinfo/port separately means there is no gap between
+    #: the checks: userinfo (even empty, "@" or ":@"), an explicit empty port
+    #: ("host:"), and a cross-scheme port (http://host:443) all fail simply by
+    #: not being in this set.
+    _STUB_AUTHORITIES = {
+        "http": frozenset({LINKED_DATA_HOST, f"{LINKED_DATA_HOST}:80"}),
+        "https": frozenset({LINKED_DATA_HOST, f"{LINKED_DATA_HOST}:443"}),
+    }
+
     @classmethod
     def _is_not_found_stub(cls, value: str, transaction_id: str) -> bool:
         """Whether `value` is the Linked Data not-found stub for this transaction.
 
-        Strict by construction: anything we cannot fully account for is not a
-        stub, because the cost of a false positive is telling a caller a
-        transaction does not exist when we do not know that.
+        Strict by construction: anything not fully accounted for is not a stub,
+        because the cost of a false positive is telling a caller a transaction
+        does not exist when we do not know that.
         """
         try:
             parts = urllib.parse.urlsplit(value.strip())
         except ValueError:
             return False
-        if parts.scheme not in ("http", "https"):
+        allowed = cls._STUB_AUTHORITIES.get(parts.scheme)
+        if allowed is None:
             return False
-        if parts.username or parts.password:
+        if parts.netloc.lower() not in allowed:
             return False
         if parts.query or parts.fragment:
-            return False
-        if (parts.hostname or "").lower() != cls.LINKED_DATA_HOST:
-            return False
-        try:
-            port = parts.port
-        except ValueError:
-            return False
-        if port not in (None, 80, 443):
             return False
         return parts.path == f"/data/ppi/transaction/{transaction_id}/current"
 
