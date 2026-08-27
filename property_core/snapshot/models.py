@@ -12,15 +12,19 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class Readiness(str, Enum):
-    """What a caller may assume about the snapshot right now."""
+    """What a caller may assume about the snapshot right now.
 
-    #: No verified snapshot is open. Callers get a typed error, never empty data.
+    Two states only. There is deliberately no "serving a stale cache" state:
+    the snapshot is materialized into an ephemeral filesystem that does not
+    survive a restart or deploy, so a cached snapshot is not a dependable
+    fallback. When no snapshot is materialized the caller uses the live source.
+    """
+
+    #: No snapshot is materialized. Callers get a typed error and fall back to
+    #: the live source -- never empty data.
     UNREADY = "unready"
-    #: A verified snapshot is open and matches the advertised release.
+    #: A verified snapshot is materialized and open on this Machine.
     READY = "ready"
-    #: A verified snapshot is open, but a refresh failed. Serving is preferred to
-    #: becoming unavailable; the staleness is reported, never hidden.
-    READY_STALE = "ready_stale"
 
 
 class SnapshotManifest(BaseModel):
@@ -71,9 +75,17 @@ class BootReport(BaseModel):
     readiness: Readiness = Readiness.UNREADY
     version: Optional[str] = None
     snapshot_dir: Optional[str] = None
-    stale: bool = False
+    #: True when this boot produced no snapshot and the caller must use the live
+    #: source. The explicit contract, rather than something inferred from a null.
+    fallback_to_live: bool = True
+    #: True when the advertised release could not be fetched but a snapshot
+    #: materialized earlier in THIS Machine's lifetime was adopted. Not a
+    #: durability guarantee -- see property_core.snapshot.store.
+    behind_advertised_release: bool = False
     activated: bool = False
-    used_cache: bool = False
+    #: Reused a materialization already present on this Machine, typically
+    #: produced by another worker in the same boot.
+    reused_existing: bool = False
     bytes_downloaded: int = Field(0, ge=0)
     source_error: Optional[str] = None
     warnings: tuple[str, ...] = ()
@@ -81,4 +93,4 @@ class BootReport(BaseModel):
 
     @property
     def ready(self) -> bool:
-        return self.readiness in (Readiness.READY, Readiness.READY_STALE)
+        return self.readiness is Readiness.READY

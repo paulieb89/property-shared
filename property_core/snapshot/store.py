@@ -1,15 +1,30 @@
-"""On-disk snapshot store: staging, atomic activation, retention.
+"""Ephemeral boot materialization of a snapshot.
+
+**No durability claim.** Both production Machines run on Fly's default root
+filesystem with no Volume and no `persist_rootfs`, so everything here is wiped on
+restart and on deploy. What this store provides is a *materialization*: a
+verified snapshot unpacked once per Machine lifetime and shared by the workers on
+that Machine, serving as their read-only query database.
+
+What it deliberately does NOT provide:
+
+* **Retention across restarts.** Exactly one active snapshot is kept. Retaining a
+  "previous" version would imply a rollback path that does not survive the very
+  events -- restart, deploy -- a rollback is for.
+* **A cache to fall back on.** A snapshot is not available after a restart, so it
+  cannot be the answer to a source outage. That answer is the live source.
 
 Layout under the store root:
 
-    snapshots/<version>/           a verified, extracted snapshot
+    snapshots/<version>/           a verified, materialized snapshot
     snapshots/<version>/.verified.json
     staging/<version>.<rand>/      an attempt in progress; never served
     CURRENT                        the active version, flipped atomically
 
-The serving snapshot is never mutated in place. A new one is staged, verified,
+The active snapshot is never mutated in place. A new one is staged, verified,
 then moved into place with a single rename, and only then does the pointer flip.
-Any failure leaves the previous snapshot exactly as it was.
+Any failure leaves whatever was active exactly as it was, for the remainder of
+this Machine's lifetime.
 """
 
 from __future__ import annotations
@@ -23,9 +38,10 @@ from pathlib import Path
 from typing import Any, Iterator, Optional
 
 VERIFIED_RECORD = ".verified.json"
-#: Current plus one previous. Retaining the previous makes rollback a pointer
-#: flip rather than a re-download.
-DEFAULT_KEEP = 2
+#: One active snapshot. Not "current plus previous": the filesystem does not
+#: survive a restart, so a retained previous version buys nothing and would
+#: misrepresent the store as durable.
+DEFAULT_KEEP = 1
 
 
 class SnapshotStore:
@@ -115,7 +131,11 @@ class SnapshotStore:
 
     # -- retention ------------------------------------------------------
     def prune(self, keep: int = DEFAULT_KEEP) -> list[str]:
-        """Retain the current version plus the most recent others; drop the rest."""
+        """Drop every materialization except the active one.
+
+        `keep` is retained as a parameter for tests and for a future durable
+        store; production uses the default of one.
+        """
         current = self.current_version()
         others = sorted((v for v in self.versions() if v != current), reverse=True)
         retain = {v for v in (current, *others[: max(0, keep - 1)]) if v is not None}

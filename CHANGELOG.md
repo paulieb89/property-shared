@@ -45,9 +45,15 @@ Not released. No version bump. Two merged/pending PRs against the frozen design 
 
 - **Snapshot boot runtime** (`property_core.snapshot`) — streamed verified
   download, hardened archive extraction, staging with atomic activation,
-  single-flight process locking, readiness states, and current+previous
-  retention. **Wired to nothing:** it is not booted by any request path, does not
-  query a snapshot, and changes no response. No hot refresh.
+  single-flight process locking, and readiness states. **Wired to nothing:** it
+  is not booted by any request path, does not query a snapshot, and changes no
+  response. No hot refresh.
+  **Ephemeral by design:** both Machines run Fly's default rootfs with no Volume
+  and no `persist_rootfs`, so the extracted snapshot is wiped on restart and
+  deploy. It is that Machine's read-only query database for its lifetime — one
+  active snapshot, no retention of a previous version, and no durability claim.
+  When no snapshot is materialized the caller **falls back to the live SPARQL
+  source**, not to a cache. No Volume or persistent-rootfs change is made here.
 - **Rollout gate G3 recorded:** the boot runtime needs `duckdb` and `zstandard`,
   which live only in the optional `snapshot` extra. Neither production image
   installs it (`--extra api` / `--extra apps`), which is correct while the flag

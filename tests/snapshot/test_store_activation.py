@@ -1,4 +1,9 @@
-"""Staging, atomic activation, retention, and failure leaving the prior snapshot."""
+"""Staging, atomic activation, and single-snapshot materialization.
+
+The store is ephemeral: both Machines run Fly's default rootfs with no Volume
+and no persist_rootfs, so nothing here survives a restart or deploy. It keeps
+exactly one active snapshot and makes no durability claim.
+"""
 
 from __future__ import annotations
 
@@ -60,17 +65,37 @@ def test_interrupted_activation_does_not_leave_a_half_version(store_root):
     assert store.staging_residue() == []
 
 
-def test_retention_keeps_current_and_previous_only(store_root):
+def test_only_the_active_snapshot_is_kept(store_root):
+    """One materialization. Retaining a 'previous' would imply a rollback path
+    that does not survive the restart or deploy a rollback is for."""
     store = SnapshotStore(store_root)
     for v in ("v1", "v2", "v3", "v4"):
         _activate(store, v)
         store.prune()
     assert store.current_version() == "v4"
-    kept = sorted(store.versions())
-    assert kept == ["v3", "v4"], kept
+    assert sorted(store.versions()) == ["v4"]
 
 
-def test_retention_never_removes_the_current_version(store_root):
+def test_the_store_makes_no_durability_claim(store_root):
+    """A wiped filesystem is indistinguishable from a first boot.
+
+    Simulates the restart/deploy that Fly's default rootfs performs: the store
+    must come back empty and unverified, not half-present.
+    """
+    import shutil
+
+    store = SnapshotStore(store_root)
+    _activate(store, "v1")
+    assert store.is_verified("v1")
+
+    shutil.rmtree(store_root)                      # the Machine restarted
+    fresh = SnapshotStore(store_root)
+    assert fresh.current_version() is None
+    assert fresh.versions() == []
+    assert not fresh.is_verified("v1")
+
+
+def test_pruning_never_removes_the_active_version(store_root):
     store = SnapshotStore(store_root)
     _activate(store, "v1")
     store.prune()
@@ -78,13 +103,15 @@ def test_retention_never_removes_the_current_version(store_root):
     assert store.is_verified("v1")
 
 
-def test_rollback_is_a_pointer_flip_to_the_retained_previous(store_root):
+def test_no_previous_version_survives_pruning(store_root):
+    """The counterpart of the removed rollback test: after pruning there is
+    nothing to roll back to, and the store does not pretend otherwise."""
     store = SnapshotStore(store_root)
     _activate(store, "v1")
     _activate(store, "v2")
     store.prune()
-    store.set_current("v1")
-    assert store.current_version() == "v1"
+    assert sorted(store.versions()) == ["v2"]
+    assert not store.is_verified("v1")
 
 
 def test_an_unverified_directory_is_not_treated_as_verified(store_root):

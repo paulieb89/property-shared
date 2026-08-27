@@ -457,7 +457,7 @@ never encodes "outside the snapshot" or "the source failed."
 | No rows in coverage, probe failed | 0 | `snapshot` | 200 / ok | `older_records_exist: null` + warning |
 | Requested dates precede coverage | — | — | **422** | `ppd_coverage_error` + structured ranges |
 | No verified snapshot open | — | — | **503** | `snapshot_unavailable` |
-| Snapshot serving, refresh failed | n | `snapshot` | 200 | `stale_source: true` + warning |
+| Snapshot behind the advertised release | n | `snapshot` | 200 | `behind_advertised_release: true` + warning (same-Machine only) |
 | Live upstream failed | — | — | **502** | `upstream_unavailable` |
 
 MCP tools surface rows 4, 5 and 7 as **tool errors** carrying the typed code —
@@ -534,16 +534,37 @@ transfer and hostile archive.
 The readiness probe counts Parquet files on the **filesystem**, never via
 `count(DISTINCT filename)` (a Phase 3 defect: it scans every row).
 
-### 4.5 States
+### 4.5 States (ephemeral materialization)
+
+**The materialization is ephemeral.** Both production Machines run on Fly's
+default root filesystem — `fly.toml` and `fly.app.toml` declare no `[mounts]`, no
+Volume and no `persist_rootfs` — so the extracted snapshot is **wiped on every
+restart and deploy**. It is that Machine's read-only query database for that
+Machine's lifetime, and nothing more. The single-flight lock remains meaningful:
+it coordinates the workers sharing one Machine.
+
+Two consequences, both load-bearing:
+
+* **No retention across restarts.** Exactly **one** active snapshot is kept.
+  Retaining a "previous" version would imply a rollback path that does not
+  survive the restart or deploy a rollback exists for.
+* **A snapshot is not a fallback for a source outage.** After a restart there is
+  none. **The fallback is the live SPARQL source.**
 
 | State | Readiness | Behaviour |
 |---|---|---|
-| `ready` | 200 | verified snapshot open, `stale_source: false` |
-| `ready_stale` | 200 | serving verified cache, refresh failed, `stale_source: true` + warning |
-| `unready` | 503 | no verified snapshot; typed `snapshot_unavailable` |
+| `ready` | 200 | a verified snapshot is materialized and open on this Machine |
+| `unready` | 503 | nothing materialized; typed `snapshot_unavailable`, and the caller **falls back to the live source** |
 
-Startup with a cached snapshot matching the advertised manifest skips the download
-(Phase 3: **0.81 s, 0 bytes**).
+There is deliberately no `ready_stale` state. Where the advertised release cannot
+be fetched but a snapshot was already materialized on this Machine — typically by
+another worker in the same boot — it is adopted and flagged
+`behind_advertised_release`. A same-lifetime convenience, **not a durability
+guarantee**.
+
+Startup where this Machine already materialized the advertised version skips the
+download (measured in the lab: **0.81 s, 0 bytes**) — same Machine, not across a
+restart.
 
 ### 4.6 Process-safe single-flight
 Exclusive `flock()` on `<cache>/.boot.lock` held across download → verify →
@@ -557,10 +578,17 @@ machine; it does not coordinate across machines, and one fetch per machine is
 intended.
 
 ### 4.7 Cleanup
-Retain **current and previous** verified versions; delete older after successful
-activation (rollback becomes a `CURRENT` flip). Staging dirs and temp bundles
-deleted on every exit path. Before download, require `bundle_bytes * 2.5` free
-disk, else fail closed with a typed error.
+Retain **only the active** version; delete the rest after a successful
+activation. Retention of a previous version was removed once the filesystem was
+confirmed ephemeral: it cannot enable a rollback across the very events a
+rollback exists for, and keeping it would misrepresent the store as durable.
+Staging dirs and temp bundles deleted on every exit path. Before download,
+require `bundle_bytes * 2.5` free disk, else fail closed with a typed error.
+
+**Introducing a Volume or `persist_rootfs` is out of scope for the runtime PR.**
+If durable retention becomes desirable it is a deployment change with its own
+review, and this policy would be revisited alongside it — never assumed by the
+runtime.
 
 ### 4.8 Build-stage authorisation limits
 

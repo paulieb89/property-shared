@@ -1,4 +1,8 @@
-"""Boot orchestration: readiness, stale fallback, typed errors, inertness."""
+"""Boot orchestration: readiness, live fallback, typed errors.
+
+The materialization is ephemeral (Fly default rootfs, no Volume), so a snapshot
+is never a fallback for a source outage -- the live source is.
+"""
 
 from __future__ import annotations
 
@@ -96,7 +100,7 @@ def test_restart_with_a_verified_cache_downloads_nothing(store_root):
     report = runtime(store_root, source).boot()
     assert report.readiness is Readiness.READY
     assert report.bytes_downloaded == 0
-    assert report.used_cache is True
+    assert report.reused_existing is True
     assert not any(r.endswith(".tar") for r in source.reads), source.reads
 
 
@@ -124,28 +128,36 @@ def test_a_failed_update_leaves_the_previous_snapshot_serving(store_root, broken
 
     report = runtime(store_root, bad).boot()
     store = SnapshotStore(store_root)
-    assert report.readiness is Readiness.READY_STALE
+    # Same Machine, so v1 is still unpacked and is adopted -- flagged as behind
+    # the advertised release, which is not a durability guarantee.
+    assert report.readiness is Readiness.READY
+    assert report.behind_advertised_release is True
     assert store.current_version() == "v1"
     assert "v2" not in store.versions()
     assert store.staging_residue() == []
     assert report.source_error
 
 
-def test_source_outage_with_a_verified_cache_serves_it_stale(store_root):
+def test_source_outage_on_a_machine_that_already_materialized_adopts_it(store_root):
+    """Legitimate only because this Machine has not restarted. Not a cache."""
     source, _ = make_source()
     runtime(store_root, source).boot()
     down = FakeSource({}, fail=OSError("connection refused"))
     report = runtime(store_root, down).boot()
-    assert report.readiness is Readiness.READY_STALE
-    assert report.stale is True
-    assert report.warnings
+    assert report.readiness is Readiness.READY
+    assert report.behind_advertised_release is True
+    assert report.fallback_to_live is False
+    assert any("advertised release" in w for w in report.warnings), report.warnings
 
 
-def test_source_outage_with_no_cache_stays_unready(store_root):
+def test_source_outage_after_a_restart_hands_off_to_the_live_source(store_root):
+    """The production case: the rootfs was wiped, so there is nothing to adopt."""
     down = FakeSource({}, fail=OSError("connection refused"))
     report = runtime(store_root, down).boot()
     assert report.readiness is Readiness.UNREADY
     assert report.version is None
+    assert report.fallback_to_live is True
+    assert any("live source" in w for w in report.warnings), report.warnings
 
 
 def test_unready_runtime_raises_the_typed_error_never_empty_data(store_root):
@@ -159,13 +171,20 @@ def test_unready_runtime_raises_the_typed_error_never_empty_data(store_root):
     assert "results" not in payload and "count" not in payload
 
 
-def test_a_stale_runtime_is_usable_and_says_so(store_root):
+def test_an_adopted_materialization_is_usable_and_says_so(store_root):
     source, _ = make_source()
     runtime(store_root, source).boot()
     rt = runtime(store_root, FakeSource({}, fail=OSError("down")))
     rt.boot()
     assert rt.require_ready() is not None
-    assert rt.readiness is Readiness.READY_STALE
+    assert rt.readiness is Readiness.READY
+    assert rt.report.behind_advertised_release is True
+
+
+def test_there_is_no_stale_readiness_state():
+    """Removed deliberately: an ephemeral store cannot promise a stale cache."""
+    assert not hasattr(Readiness, "READY_STALE")
+    assert {r.value for r in Readiness} == {"unready", "ready"}
 
 
 # --- concurrency -----------------------------------------------------------
@@ -193,11 +212,11 @@ def test_concurrent_starters_download_once(store_root):
 
 # --- retention -------------------------------------------------------------
 
-def test_boot_prunes_to_current_plus_previous(store_root):
+def test_boot_keeps_only_the_active_materialization(store_root):
     for v in ("v1", "v2", "v3"):
         source, _ = make_source(v)
         runtime(store_root, source).boot()
-    assert sorted(SnapshotStore(store_root).versions()) == ["v2", "v3"]
+    assert sorted(SnapshotStore(store_root).versions()) == ["v3"]
 
 
 # --- guardrails ------------------------------------------------------------

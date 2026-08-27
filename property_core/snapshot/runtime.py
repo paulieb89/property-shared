@@ -9,14 +9,22 @@ is separate work.
 deliberately no refresh/reload/watch entry point: swapping a live snapshot under
 load is untested and out of scope.
 
-Failure policy, in order of preference:
+**The materialization is ephemeral.** Both Machines run on Fly's default root
+filesystem with no Volume and no `persist_rootfs`, so nothing here survives a
+restart or deploy. A snapshot is therefore not a cache to fall back on: after a
+restart there is none. The fallback for an unavailable boot-fetch is the **live
+SPARQL source**.
 
-1. a verified snapshot matching the advertised release          -> READY
-2. a verified snapshot we already had, when the source is broken -> READY_STALE
-3. nothing verified                                              -> UNREADY
+Failure policy:
 
-Serving something stale and saying so beats going unavailable; serving something
-unverified never happens.
+1. a verified snapshot matching the advertised release                -> READY
+2. the advertised release cannot be fetched, but a snapshot was already
+   materialized on THIS Machine (typically by another worker)         -> READY,
+   flagged `behind_advertised_release` -- not a durability guarantee
+3. nothing materialized                                               -> UNREADY,
+   `fallback_to_live=True`; the caller uses the live source
+
+Serving something unverified never happens.
 """
 
 from __future__ import annotations
@@ -65,8 +73,9 @@ class SnapshotRuntime:
     def require_ready(self) -> str:
         """The active snapshot directory, or a typed error.
 
-        Never returns an empty result to stand in for an unavailable snapshot:
-        "no snapshot" and "no matching rows" are different facts.
+        The typed error is the caller's signal to use the **live source**, not to
+        return nothing: "no snapshot" and "no matching rows" are different facts,
+        and only one of them is about the data.
         """
         if not self._report.ready or not self._report.snapshot_dir:
             raise SnapshotUnavailableError(
@@ -78,19 +87,20 @@ class SnapshotRuntime:
     def boot(self) -> BootReport:
         started = time.perf_counter()
         warnings: list[str] = []
-        cached = self.store.current_version()
+        materialized = self.store.current_version()
 
         try:
             manifest = self._load_manifest()
         except Exception as exc:
-            self._report = self._fall_back(
-                cached, self._describe(exc), warnings, started)
+            self._report = self._degrade(
+                materialized, self._describe(exc), warnings, started)
             return self._report
 
-        # Already holding exactly this release, verified: nothing to fetch.
-        if cached == manifest.snapshot_version and self.store.is_verified(cached):
-            self._report = self._ready(cached, used_cache=True, warnings=warnings,
-                                       started=started)
+        # This Machine already materialized exactly this release: nothing to fetch.
+        if (materialized == manifest.snapshot_version
+                and self.store.is_verified(materialized)):
+            self._report = self._ready(materialized, reused_existing=True,
+                                       warnings=warnings, started=started)
             return self._report
 
         try:
@@ -101,17 +111,13 @@ class SnapshotRuntime:
                 # again would be pure waste.
                 current = self.store.current_version()
                 if current == manifest.snapshot_version and self.store.is_verified(current):
-                    self._report = self._ready(current, used_cache=True,
+                    self._report = self._ready(current, reused_existing=True,
                                                warnings=warnings, started=started)
                     return self._report
 
                 downloaded = self._install(manifest)
-        except LockTimeout as exc:
-            self._report = self._fall_back(
-                self.store.current_version(), self._describe(exc), warnings, started)
-            return self._report
-        except Exception as exc:
-            self._report = self._fall_back(
+        except (LockTimeout, Exception) as exc:
+            self._report = self._degrade(
                 self.store.current_version(), self._describe(exc), warnings, started)
             return self._report
 
@@ -179,31 +185,41 @@ class SnapshotRuntime:
         return {"total_ms": round((time.perf_counter() - started) * 1000, 1)}
 
     def _ready(self, version: str, *, activated: bool = False,
-               used_cache: bool = False, bytes_downloaded: int = 0,
+               reused_existing: bool = False, bytes_downloaded: int = 0,
+               behind_advertised_release: bool = False,
+               source_error: Optional[str] = None,
                warnings: list[str], started: float) -> BootReport:
         return BootReport(
             readiness=Readiness.READY, version=version,
             snapshot_dir=str(self.store.path_for(version)),
-            activated=activated, used_cache=used_cache,
-            bytes_downloaded=bytes_downloaded, warnings=tuple(warnings),
-            timings_ms=self._elapsed(started),
+            fallback_to_live=False,
+            behind_advertised_release=behind_advertised_release,
+            activated=activated, reused_existing=reused_existing,
+            bytes_downloaded=bytes_downloaded, source_error=source_error,
+            warnings=tuple(warnings), timings_ms=self._elapsed(started),
         )
 
-    def _fall_back(self, cached: Optional[str], error: str,
-                   warnings: list[str], started: float) -> BootReport:
-        """Serve a verified cached snapshot if we have one; otherwise stay unready."""
-        if cached and self.store.is_verified(cached):
-            warnings = [
-                *warnings,
-                f"serving cached snapshot {cached}; refresh failed ({error})",
-            ]
-            return BootReport(
-                readiness=Readiness.READY_STALE, version=cached,
-                snapshot_dir=str(self.store.path_for(cached)),
-                stale=True, used_cache=True, source_error=error,
-                warnings=tuple(warnings), timings_ms=self._elapsed(started),
+    def _degrade(self, materialized: Optional[str], error: str,
+                 warnings: list[str], started: float) -> BootReport:
+        """Adopt an existing same-Machine materialization, or hand off to live.
+
+        Adopting one is NOT a durability guarantee: it exists only because this
+        Machine has not restarted since another worker unpacked it. After a
+        restart there is nothing here, and the answer is the live source.
+        """
+        if materialized and self.store.is_verified(materialized):
+            return self._ready(
+                materialized, reused_existing=True, behind_advertised_release=True,
+                source_error=error, started=started,
+                warnings=[
+                    *warnings,
+                    f"using snapshot {materialized} already materialized on this "
+                    f"machine; the advertised release could not be fetched ({error})",
+                ],
             )
         return BootReport(
-            readiness=Readiness.UNREADY, source_error=error,
-            warnings=tuple(warnings), timings_ms=self._elapsed(started),
+            readiness=Readiness.UNREADY, fallback_to_live=True, source_error=error,
+            warnings=(*warnings,
+                      f"no snapshot materialized; using the live source ({error})"),
+            timings_ms=self._elapsed(started),
         )
