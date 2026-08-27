@@ -43,6 +43,14 @@ Not released. No version bump. Two merged/pending PRs against the frozen design 
 
 ### Added
 
+- **Snapshot boot runtime** (`property_core.snapshot`) — streamed verified
+  download, hardened archive extraction, staging with atomic activation,
+  single-flight process locking, readiness states, and current+previous
+  retention. **Wired to nothing:** it is not booted by any request path, does not
+  query a snapshot, and changes no response. No hot refresh.
+- `zstandard` added to the optional `snapshot` extra. The bundle is `.tar.zst`;
+  Python 3.11 has no stdlib zstd and neither production image installs the `zstd`
+  binary, so without a reader the runtime could not open a real bundle.
 - `warnings` on `PPDCompsResponse`, `YieldAnalysis` and `MarketAnalysis`, carried
   through REST, both MCP servers, the CLI, the HTML report and the comps, yield
   and unified dashboards — including each dashboard's LLM-facing text, not only
