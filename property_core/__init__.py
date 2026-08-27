@@ -14,6 +14,20 @@ from property_core.interpret import (
     generate_insights,
 )
 from property_core.companies_house_client import CompaniesHouseClient
+from property_core.config import ppd_snapshot_enabled
+from property_core.exceptions import (
+    PPDCoverageError,
+    PPDError,
+    SnapshotUnavailableError,
+    UpstreamUnavailableError,
+)
+from property_core.provenance import (
+    ATTRIBUTION_REF,
+    CompletenessBasis,
+    PPDProvenance,
+    SourceKind,
+    TransportEvidence,
+)
 from property_core.epc_client import EPCClient
 from property_core.enrichment import compute_enriched_stats, enrich_comps_with_epc
 from property_core.models.block import BlockAnalysisResponse, BlockBuilding
@@ -71,6 +85,17 @@ __all__ = [
     "fetch_listings",
     "generate_insights",
     "match_epc_address",
+    "ppd_snapshot_enabled",
+    # Provenance and typed errors (PR 1 foundations; not yet wired to responses)
+    "ATTRIBUTION_REF",
+    "CompletenessBasis",
+    "PPDCoverageError",
+    "PPDError",
+    "PPDProvenance",
+    "SnapshotUnavailableError",
+    "SourceKind",
+    "TransportEvidence",
+    "UpstreamUnavailableError",
     # Models
     "BlockAnalysisResponse",
     "BlockBuilding",
