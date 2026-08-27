@@ -179,6 +179,13 @@
         {% endif %}
 
         {% if report.market_analysis %}
+            {% if report.market_analysis.warnings %}
+            <div class="market-warnings" style="margin: 0.75rem 0; padding: 0.75rem 1rem; background: #fffbeb; border-left: 3px solid #f59e0b; font-size: 0.8125rem; color: var(--gray-700);">
+                {% for w in report.market_analysis.warnings %}
+                <div>&#9888; {{ w }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
         <div class="card">
             <h2>Market Analysis ({{ report.market_analysis.period_months }} months)</h2>
             <div class="stat-grid">

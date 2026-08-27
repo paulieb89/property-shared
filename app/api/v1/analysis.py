@@ -6,6 +6,8 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from property_core.exceptions import InvalidPostcodeError
+
 from property_core.models.report import RentalAnalysis, YieldAnalysis
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
@@ -18,13 +20,23 @@ async def yield_analysis(
     search_level: str = Query("sector", description="postcode|sector|district"),
     property_type: Optional[str] = Query(None, description="D/S/T/F/O, or ALL for firehose"),
     radius: float = Query(0.5, ge=0.1, description="Rental search radius (miles)"),
-    auto_escalate: bool = Query(True, description="Widen PPD search on thin markets (default true)"),
+    auto_escalate: bool = Query(
+        True,
+        description=(
+            "Compatibility parameter. PPD auto-widening is CONTAINED on the live "
+            "source: it no longer widens postcode->sector->district, because the "
+            "only available exhaustion evidence derives from the presentation "
+            "limit. The requested area is returned with a warning."
+        ),
+    ),
 ) -> YieldAnalysis:
     """Calculate gross rental yield for a UK postcode.
 
     Combines Land Registry sales (median price) with Rightmove rentals (median rent).
-    Auto-escalates the PPD search from postcode→sector→district on thin markets so
-    thin postcodes still return useful data. Pass auto_escalate=false to opt out.
+    auto_escalate is accepted for compatibility but does NOT widen the PPD search
+    area on the live source; see the parameter description and the response
+    `warnings`. (Rental-radius escalation is a separate mechanism and still
+    applies.)
     """
     from property_core import calculate_yield
 
@@ -37,6 +49,9 @@ async def yield_analysis(
             radius=radius,
             auto_escalate=auto_escalate,
         )
+    except InvalidPostcodeError as exc:
+        # Caller error, not an upstream failure.
+        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Yield analysis failed: {exc}") from exc
 
@@ -66,5 +81,8 @@ async def rental_analysis(
             building_type=building_type,
             auto_escalate=auto_escalate,
         )
+    except InvalidPostcodeError as exc:
+        # Caller error, not an upstream failure.
+        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Rental analysis failed: {exc}") from exc

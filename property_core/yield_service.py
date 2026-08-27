@@ -43,7 +43,8 @@ async def calculate_yield(
         property_type: Filter comps by type: F=flat, D=detached, S=semi, T=terraced (default all).
         radius: Rightmove rental search radius in miles.
         rightmove_delay: Per-request delay in seconds (default from env or 0.6).
-        auto_escalate: Widen PPD search area on thin markets (postcode→sector→
+        auto_escalate: Compatibility parameter; does NOT widen on the live source.
+            Previously widened (postcode→sector→
             district). Default True. Set False for strict-locality only.
 
     Returns:
@@ -67,6 +68,7 @@ async def calculate_yield(
     if not comps.median or comps.thin_market:
         return YieldAnalysis(
             postcode=postcode,
+            warnings=tuple(comps.warnings),
             median_sale_price=comps.median,
             sale_count=comps.count,
             thin_market=comps.thin_market,
@@ -98,6 +100,7 @@ async def calculate_yield(
         except Exception:
             return YieldAnalysis(
                 postcode=postcode,
+                warnings=tuple(comps.warnings),
                 median_sale_price=comps.median,
                 sale_count=comps.count,
                 thin_market=comps.thin_market,
@@ -111,6 +114,7 @@ async def calculate_yield(
     if not active:
         return YieldAnalysis(
             postcode=postcode,
+            warnings=tuple(comps.warnings),
             median_sale_price=comps.median,
             sale_count=comps.count,
             thin_market=comps.thin_market,
@@ -126,6 +130,9 @@ async def calculate_yield(
 
     return YieldAnalysis(
         postcode=postcode,
+        # The yield divides rent by the comps median, so an incomplete sales
+        # window makes this figure equally uncertain. The caveat travels with it.
+        warnings=tuple(comps.warnings),
         median_sale_price=comps.median,
         sale_count=comps.count,
         median_monthly_rent=median_rent,

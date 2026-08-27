@@ -44,11 +44,34 @@ def _txn(
     )
 
 
+def _page(rows: list[PPDTransaction]) -> "SearchPage":
+    """A page whose upstream window was NOT saturated, so evidence is 'exhausted'.
+
+    These tests are about filter push-down, not completeness; an exhausted page
+    keeps them free of completeness warnings.
+    """
+    from property_core.ppd_client import SearchPage
+    from property_core.provenance import TransportEvidence
+
+    rows = list(rows)
+    return SearchPage(
+        transactions=rows,
+        evidence=TransportEvidence(raw_bindings_returned=len(rows), fetch_limit=1000),
+    )
+
+
 def _service_with(mock_results: list[PPDTransaction]) -> tuple[PPDService, MagicMock]:
-    """Build a PPDService whose client.sparql_search is a MagicMock returning
-    the provided list of transactions."""
+    """Build a PPDService whose client returns the provided transactions.
+
+    comps() calls `search_with_evidence` (the evidence-returning seam); the
+    subject-property lookup still uses `sparql_search`. Both are mocked, and the
+    same MagicMock is exposed as `client.sparql_search` so existing assertions
+    about pushed-down kwargs keep reading naturally.
+    """
     client = MagicMock()
-    client.sparql_search = MagicMock(return_value=list(mock_results))
+    seam = MagicMock(return_value=_page(mock_results))
+    client.search_with_evidence = seam
+    client.sparql_search = seam
     return PPDService(client=client), client
 
 
@@ -216,16 +239,22 @@ def test_filter_outliers_noop_with_fewer_than_four_prices():
 # ---------------------------------------------------------------------------
 
 
-def test_auto_escalate_threads_new_params():
-    """Recursive escalation preserves transaction_category, property_type, filter_outliers."""
-    # The escalation chain is postcode -> sector -> district. Each level may
-    # be thin; the recursive call inherits auto_escalate=True, so we need a
-    # mock value for each level.
+def test_auto_escalate_no_longer_widens_and_still_threads_params():
+    """PR 2: live auto-escalation is disabled, so the chain is a single call.
+
+    Previously this asserted three calls (postcode -> sector -> district).
+    Widening needs proof the narrower search was exhausted, and the only
+    available evidence derives from the caller's presentation limit -- so the
+    geography would still move with page size. The caller now gets the requested
+    area plus a warning. Parameter threading is still asserted on the one call.
+    """
     client = MagicMock()
-    client.sparql_search = MagicMock(side_effect=[[], [], [_txn(tid="01", price=200_000)]])
+    seam = MagicMock(return_value=_page([]))
+    client.search_with_evidence = seam
+    client.sparql_search = seam
     service = PPDService(client=client)
 
-    service.comps(
+    resp = service.comps(
         postcode="NG1 2NS",
         search_level="postcode",
         property_type="ALL",
@@ -234,9 +263,10 @@ def test_auto_escalate_threads_new_params():
         auto_escalate=True,
     )
 
-    # Three sparql_search calls: postcode, sector, district.
-    assert client.sparql_search.call_count == 3
-    for call in client.sparql_search.call_args_list:
-        # property_type="ALL" must NOT leak into SPARQL as the literal string.
-        assert call.kwargs["property_type"] is None
-        assert call.kwargs["transaction_category"] is None
+    assert seam.call_count == 1, "escalation issued extra upstream requests"
+    assert resp.query.search_level == "postcode"
+    assert resp.escalated_from is None and resp.escalated_to is None
+    assert any("escalat" in w.lower() for w in resp.warnings), resp.warnings
+    # property_type="ALL" must NOT leak into SPARQL as the literal string.
+    assert seam.call_args.kwargs["property_type"] is None
+    assert seam.call_args.kwargs["transaction_category"] is None

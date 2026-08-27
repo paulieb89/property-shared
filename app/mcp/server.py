@@ -119,7 +119,7 @@ mcp = FastMCP(
         "invoke the `full_property_analysis` prompt — it instructs you to call "
         "property_comps, property_yield, property_epc and rightmove_search and "
         "synthesise. For postcode-only data fetches use property_comps and "
-        "property_yield separately. ppd_transactions for specific property history, "
+        "property_yield separately. ppd_transactions for recent transactions at a postcode (bounded, not a full history), "
         "rightmove_search to browse listings by postcode, rightmove_listing for "
         "full detail on one listing, property_epc for energy certificates, "
         "rental_analysis for rental market figures, stamp_duty for SDLT, "
@@ -207,7 +207,8 @@ async def property_yield(
             or "district".
         property_type: Filter sales by type. None (default) = residential set
             (F+D+S+T). Pass "F"/"D"/"S"/"T"/"O" for one type, "ALL" for firehose.
-        auto_escalate: Widen the PPD search area on thin markets — postcode→
+        auto_escalate: Compatibility parameter. Does NOT widen the search area on
+            the live source (see `warnings`); previously postcode→
             sector→district. Default True. Set False for strict-locality only.
 
     Returns:
@@ -235,8 +236,11 @@ async def rental_analysis(
 ) -> dict:
     """Rental market analysis and achievable rent estimate.
 
-    auto_escalate widens the search area when fewer than 5 listings are found
-    (thin market). Response includes thin_market, escalated_from, escalated_to
+    auto_escalate widens the Rightmove search RADIUS when fewer than 5 listings
+    are found (thin market). This is rental-radius escalation and is unaffected
+    by the PPD geography containment: it does not change a postcode's outcode or
+    sector, so it carries none of the limit-dependence that disabled PPD
+    auto-widening. Response includes thin_market, escalated_from, escalated_to
     fields when escalation occurs.
     """
     from property_core import analyze_rentals
@@ -562,7 +566,17 @@ def ppd_transactions(
     limit: int = 10,
     property_type: str | None = None,
 ) -> dict:
-    """Raw Land Registry Price Paid transactions for a postcode."""
+    """Land Registry Price Paid transactions for a postcode, most recent first.
+
+    Returns up to `limit` most recent transactions currently available from the
+    live Land Registry source. Unfiltered by default -- category-B bulk transfers
+    and commercial sales are included. Pass `property_type` (F=flat, D=detached,
+    S=semi, T=terraced, O=other) to restrict the result to a single type.
+
+    This is a bounded result, not a complete property history: older sales may
+    exist beyond what is returned, and the result carries no completeness
+    guarantee. For clean residential comparable sales, use `property_comps` instead.
+    """
     from property_core import PPDService
     result = PPDService().search_transactions(
         postcode=postcode,

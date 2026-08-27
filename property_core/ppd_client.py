@@ -34,6 +34,13 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 from property_core.models.ppd import PPDTransaction, PPDTransactionRecord
+from property_core.postcode_rules import (
+    matches_prefix,
+    normalise_postcode,
+    normalise_prefix,
+    sparql_prefix,
+)
+from property_core.provenance import TransportEvidence
 
 S3_BASE = "http://prod2.publicdata.landregistry.gov.uk.s3-website-eu-west-1.amazonaws.com"
 LINKED_DATA_BASE = "https://landregistry.data.gov.uk"
@@ -71,21 +78,41 @@ RECORD_STATUS_URIS: Dict[str, str] = {
 class UnsupportedRecordStatusFilterError(ValueError):
     """Raised when record_status filtering is requested on the SPARQL search path.
 
-    SPARQL search returns PPDTransaction rows, which have no record_status field
-    (it lives on PPDTransactionRecord, from the Linked Data endpoint). Filtering
-    previously dereferenced the missing attribute and crashed with AttributeError
-    on the first returned row.
+    SPARQL search returns PPDTransaction rows, which carry no record_status
+    field. Filtering previously dereferenced the missing attribute and crashed
+    with AttributeError on the first returned row.
 
-    Implementing this properly needs the record-status triple shape verified
-    against the live Land Registry ontology first — the URIs in
-    RECORD_STATUS_URIS look like rdf:type nodes rather than a literal predicate,
-    so it is deliberately rejected rather than guessed at.
+    **Honest reason it stays disabled.** An earlier version of this docstring
+    said the predicate exists only on the Linked Data endpoint and that the URI
+    mapping was an unverified guess. Both claims were wrong: live evidence showed
+    ``lrppi:recordStatus`` does exist on the SPARQL transaction and binds to
+    ``.../ppi/add``. It remains rejected because it is not yet supported under
+    the verified search and performance contract — the binding is not part of the
+    required-binding chain this query is tuned around, and adding it has not been
+    validated for the 503/timeout behaviour the rest of the filter set was shaped
+    by. Rejecting is a scope decision, not an ontology unknown.
     """
 
 # The Land Registry site currently splits some recent years into two files.
 YEARS_WITH_PARTS = {2018, 2019, 2020, 2021, 2022, 2023}
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+@dataclass(frozen=True)
+class SearchPage:
+    """One page of results plus the evidence needed to judge completeness.
+
+    Internal to the transport and service layers for now: deliberately NOT in
+    ``property_core.__all__`` and not advertised as a stable library contract.
+    ``sparql_search`` remains the compatibility list-returning method.
+    """
+
+    transactions: list["PPDTransaction"]
+    evidence: "TransportEvidence"
+    #: Rows the upstream returned that did not belong to the requested geography.
+    #: Non-zero means the upstream filter was looser than our containment rule.
+    contained_out: int = 0
 
 
 def _validate_iso_date(s: str) -> str:
@@ -136,16 +163,83 @@ class PricePaidDataClient:
     # Linked data helpers
     # --------
     def get_transaction_record(self, transaction_id: str, view: str = "all") -> PPDTransactionRecord:
-        """Fetch a transaction record by its UUID from the Linked Data API."""
+        """Fetch a transaction record by its UUID from the Linked Data API.
+
+        Three outcomes, kept strictly distinct:
+
+        * ``primaryTopic`` is an object -> the record.
+        * ``primaryTopic`` is a bare string URI -> the API's stub for an unknown
+          id: ``TransactionNotFoundError``. Previously this reached
+          ``primary.get(...)`` on a ``str`` and leaked ``AttributeError``.
+        * transport or parse failure -> ``UpstreamUnavailableError``.
+
+        A failed lookup is never reported as an absent record.
+        """
+        from property_core.exceptions import (
+            TransactionNotFoundError,
+            UpstreamShapeError,
+            UpstreamUnavailableError,
+        )
+
         endpoint = f"{self.linked_data_base}/data/ppi/transaction/{transaction_id}/current.json"
         url = f"{endpoint}?{urllib.parse.urlencode({'_view': view})}"
-        raw = self._fetch_json(url)
-        return PPDTransactionRecord.from_linked_data(raw)
+        try:
+            raw = self._fetch_json(url)
+        except Exception as exc:  # transport, timeout, or unparseable body
+            raise UpstreamUnavailableError(
+                f"transaction lookup failed: {type(exc).__name__}: {exc}"
+            ) from exc
+
+        if not isinstance(raw, dict):
+            raise UpstreamShapeError(
+                f"upstream returned {type(raw).__name__}, expected a JSON object"
+            )
+        result = raw.get("result")
+        if not isinstance(result, dict):
+            raise UpstreamShapeError(
+                f"upstream 'result' is {type(result).__name__}, expected an object"
+            )
+        if "primaryTopic" not in result:
+            raise UpstreamShapeError("upstream response has no 'primaryTopic'")
+
+        primary = result["primaryTopic"]
+        if isinstance(primary, str):
+            # The ONE shape observed to mean "no such record": a bare URI stub
+            # naming the transaction we asked for. An arbitrary string -- "",
+            # "garbage", or a URI for a DIFFERENT transaction -- proves nothing
+            # about this record's existence and must not become an absence.
+            # PARSE the URI. A substring check accepted
+            # https://evil.example/landregistry/data/ppi/transaction/<id>/current
+            # and turned an attacker- or proxy-supplied string into "this record
+            # does not exist" -- a false statement about the world.
+            #
+            # The Linked Data URI namespace is http:// even though the API is
+            # served over https, so scheme is allowed to differ; nothing else is.
+            if self._is_not_found_stub(primary, transaction_id):
+                raise TransactionNotFoundError(transaction_id)
+            raise UpstreamShapeError(
+                "'primaryTopic' is a string but not the not-found stub for the "
+                "requested transaction"
+            )
+        if not isinstance(primary, dict):
+            raise UpstreamShapeError(
+                f"'primaryTopic' is {type(primary).__name__}, expected an object or the "
+                "bare-URI not-found stub"
+            )
+
+        try:
+            return PPDTransactionRecord.from_linked_data(raw)
+        except (AttributeError, TypeError, ValueError) as exc:
+            # A parse failure on a well-shaped object is our problem, never an
+            # absence. AttributeError in particular must never become a 404.
+            raise UpstreamShapeError(
+                f"unusable record shape: {type(exc).__name__}: {exc}"
+            ) from exc
 
     # --------
     # SPARQL search
     # --------
-    def sparql_search(
+    def search_with_evidence(
         self,
         *,
         postcode: Optional[str] = None,
@@ -169,9 +263,9 @@ class PricePaidDataClient:
         limit: int = 20,
         offset: int = 0,
         order_desc: bool = True,
-    ) -> list[PPDTransaction]:
+    ) -> SearchPage:
         """
-        Search Price Paid transactions via SPARQL.
+        Search Price Paid transactions via SPARQL, with completeness evidence.
 
         Supports postcode exact/prefix search, date/price ranges, address text
         matching (CONTAINS/LCASE), and URI-based filters (applied client-side
@@ -192,7 +286,9 @@ class PricePaidDataClient:
         if record_status is not None:
             raise UnsupportedRecordStatusFilterError(
                 "record_status filtering is not supported on SPARQL search: results are "
-                "PPDTransaction rows, which do not carry a record status. Use "
+                "PPDTransaction rows, which do not carry a record status. The predicate "
+                "does exist upstream (lrppi:recordStatus), but is not yet supported under "
+                "this search's verified binding and performance contract. Use "
                 "PricePaidDataClient.get_transaction_record(transaction_id) / "
                 "PPDService.transaction_record() to read record_status for a known transaction."
             )
@@ -203,14 +299,19 @@ class PricePaidDataClient:
         # --- SPARQL-safe filters (postcode, date, price) ---
 
         # Use VALUES for exact postcode (more efficient than FILTER)
-        if postcode:
-            safe_pc = postcode.strip().upper().replace('"', '').replace('\\', '')
+        if postcode is not None:
+            safe_pc = normalise_postcode(postcode)
             values_clauses.append(f'VALUES ?postcode {{"{safe_pc}"^^xsd:string}}')
 
-        # Use STRSTARTS filter for prefix search (VALUES can't do prefix)
-        if postcode_prefix:
-            safe_prefix = postcode_prefix.upper().replace('"', '').replace('\\', '')
-            filters.append(f'FILTER(STRSTARTS(?postcode, "{safe_prefix}"))')
+        # Use STRSTARTS filter for prefix search (VALUES can't do prefix).
+        # An outcode carries its trailing space -- "B5" alone matches "B50 4AA",
+        # which is Alcester, ~20 miles from inner Birmingham.
+        normalised_prefix = None
+        if postcode_prefix is not None:
+            normalised_prefix = normalise_prefix(postcode_prefix)
+            filters.append(
+                f'FILTER(STRSTARTS(?postcode, "{sparql_prefix(normalised_prefix)}"))'
+            )
 
         if from_date:
             _validate_iso_date(from_date)
@@ -315,7 +416,65 @@ class PricePaidDataClient:
         if new_build is not None:
             results = [t for t in results if t.new_build == new_build]
 
-        return results[:limit]
+        # Defence in depth: even with the delimiter pushed upstream, verify
+        # membership by PARSED geography. A permissive or changed upstream must
+        # not be able to leak a neighbouring outcode into these results.
+        contained_out = 0
+        if normalised_prefix is not None:
+            kept = [t for t in results if matches_prefix(t.postcode, normalised_prefix)]
+            contained_out = len(results) - len(kept)
+            results = kept
+
+        return SearchPage(
+            transactions=results[:limit],
+            evidence=TransportEvidence(
+                raw_bindings_returned=len(bindings), fetch_limit=fetch_limit
+            ),
+            contained_out=contained_out,
+        )
+
+    def sparql_search(self, **kwargs) -> list[PPDTransaction]:
+        """Compatibility wrapper: the rows only.
+
+        Kept as the stable list-returning method for existing callers. The
+        service layer uses :meth:`search_with_evidence`, which additionally
+        reports whether the upstream window was exhausted.
+        """
+        return self.search_with_evidence(**kwargs).transactions
+
+    #: The one host whose not-found stub we honour.
+    LINKED_DATA_HOST = "landregistry.data.gov.uk"
+
+    #: Exact authorities accepted, per scheme. Validating the netloc as a whole
+    #: rather than host/userinfo/port separately means there is no gap between
+    #: the checks: userinfo (even empty, "@" or ":@"), an explicit empty port
+    #: ("host:"), and a cross-scheme port (http://host:443) all fail simply by
+    #: not being in this set.
+    _STUB_AUTHORITIES = {
+        "http": frozenset({LINKED_DATA_HOST, f"{LINKED_DATA_HOST}:80"}),
+        "https": frozenset({LINKED_DATA_HOST, f"{LINKED_DATA_HOST}:443"}),
+    }
+
+    @classmethod
+    def _is_not_found_stub(cls, value: str, transaction_id: str) -> bool:
+        """Whether `value` is the Linked Data not-found stub for this transaction.
+
+        Strict by construction: anything not fully accounted for is not a stub,
+        because the cost of a false positive is telling a caller a transaction
+        does not exist when we do not know that.
+        """
+        try:
+            parts = urllib.parse.urlsplit(value.strip())
+        except ValueError:
+            return False
+        allowed = cls._STUB_AUTHORITIES.get(parts.scheme)
+        if allowed is None:
+            return False
+        if parts.netloc.lower() not in allowed:
+            return False
+        if parts.query or parts.fragment:
+            return False
+        return parts.path == f"/data/ppi/transaction/{transaction_id}/current"
 
     # --------
     # Internals

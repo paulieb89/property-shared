@@ -289,12 +289,22 @@ only `source_exhausted is True` may authorise escalation or support
 `sample_complete=True`. `None` is never treated as `False` for permission
 purposes and never as `True`.
 
-**Escalate only when both hold:**
+**On the live source, escalation is DISABLED outright.** `fetch_limit` is derived
+from the caller's presentation limit, so `source_exhausted` is itself
+limit-dependent: the same data at `limit=4` and `limit=5` could yield different
+evidence and therefore different geography. Evidence of that shape cannot
+authorise widening. Live comps return the **requested, narrower** geography with
+an explicit warning; some callers consequently see a narrower area than before,
+because the previous widening was a page-size artefact rather than a market
+judgement.
+
+Snapshot routing may re-enable escalation in PR 4 using limit-independent
+deterministic evidence, and only then would both of these need to hold:
 
 1. `source_exhausted` **is `True`** (not `False`, not `None`); and
 2. the **eligible matching count** (post-filter) is below `thin_market_threshold`.
 
-**When `source_exhausted` is `false` or unknown:**
+**On the live source, and whenever `source_exhausted` is `false` or unknown:**
 
 * **do not escalate;**
 * **preserve the narrower geography;**
@@ -726,10 +736,12 @@ None are proposed. Any of them stops for review.
     escalation.
 42. `limit=3, thin_market_threshold=5` on a dense sector → **geography
     unchanged**; presentation limit never widens sector→district.
-43. `source_exhausted: true` **and** eligible count below threshold → escalation
-    still fires (containment does not disable genuine thin-market widening).
-43b. `source_exhausted: true` and eligible count at/above threshold → no
-    escalation.
+43. **Live never escalates, even with `source_exhausted: true`** — the evidence
+    is limit-derived, so it cannot authorise widening. The requested geography is
+    returned with a warning.
+43b. **Decisive regression:** same fixture and window at `limit=4` vs `limit=5`
+    → identical `search_level`, no escalation either way, the warning present
+    exactly once, and no additional upstream request.
 43c. `raw_bindings_returned` and `fetch_limit` are propagated from the transport
     layer to the decision point — asserted directly, not via the row list.
 44. `record_status` still raises `UnsupportedRecordStatusFilterError`; corrected
@@ -876,12 +888,14 @@ To be written in the implementation PR, under a new minor version.
   a failure now emits a warning instead of a silent `null`.
 * **Malformed `postcode`/`postcode_prefix` now returns a typed 422** instead of
   being passed through to SPARQL.
-* **Auto-escalation now requires transport-layer proof of exhaustion**
-  (`raw_bindings_returned < fetch_limit`). Neither a small `limit` nor a short
-  post-filter list widens sector→district any more, so some callers will see a
-  narrower geography than before — the previous behaviour was a page-size and
-  filtering artefact, not a market judgement. Where exhaustion cannot be proven,
-  a completeness warning is emitted instead.
+* **Auto-escalation is disabled on the live source.** `auto_escalate` remains
+  accepted for compatibility but no longer widens sector→district: the only
+  available evidence (`raw_bindings_returned < fetch_limit`) derives from the
+  caller's presentation limit, so the geography would still move with page size.
+  **Callers will see a narrower geography than before** — the previous widening
+  was a page-size and filtering artefact, not a market judgement — plus a warning
+  explaining why. Snapshot routing may re-enable it in PR 4 on limit-independent
+  evidence.
 * **`sample_complete` is no longer inferred from counts.** It defaults `false`
   and is `true` only on positive adapter evidence, so some responses that
   previously looked complete are now correctly marked incomplete.

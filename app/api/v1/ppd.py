@@ -14,6 +14,11 @@ from app.schemas.ppd import (
 )
 from property_core.block_service import analyze_blocks
 from property_core.models.block import BlockAnalysisResponse
+from property_core.exceptions import (
+    InvalidPostcodeError,
+    TransactionNotFoundError,
+    UpstreamUnavailableError,
+)
 from property_core.ppd_client import UnsupportedRecordStatusFilterError
 from property_core.ppd_service import PPDService
 
@@ -56,7 +61,16 @@ def transactions(
     ),
     new_build: Optional[bool] = None,
     limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(
+        0,
+        ge=0,
+        description=(
+            "Row offset. NOTE: offset pagination is unstable and incomplete -- "
+            "the upstream ordering is not guaranteed total across pages, so deep "
+            "offsets may repeat or omit rows. A warning is returned whenever "
+            "offset > 0."
+        ),
+    ),
     order_desc: bool = True,
     include_raw: bool = Query(False, description="Include raw SPARQL bindings"),
 ) -> PPDSearchResponse:
@@ -86,6 +100,9 @@ def transactions(
             include_raw=include_raw,
         )
         return PPDSearchResponse(**result)
+    except InvalidPostcodeError as exc:
+        # Caller error, not an upstream failure.
+        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
     except UnsupportedRecordStatusFilterError as exc:
         # Caller error, not an upstream failure — deliberately narrow so that
         # other ValueErrors (internal bugs) keep surfacing as 502 rather than
@@ -137,6 +154,9 @@ def address_search(
         return PPDSearchResponse(**result)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except InvalidPostcodeError as exc:
+        # Caller error, not an upstream failure.
+        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"PPD address search failed: {exc}") from exc
 
@@ -173,7 +193,7 @@ async def comps(
     search_level: Literal["postcode", "sector", "district"] = "sector",
     address: Optional[str] = Query(None, description="Subject property address for context"),
     enrich_epc: bool = Query(False, description="Enrich comps with EPC floor area and price/sqft"),
-    auto_escalate: bool = Query(True, description="Auto-widen search area if fewer than 5 results (default true)"),
+    auto_escalate: bool = Query(True, description="Compatibility parameter. Auto-widening is CONTAINED on the live source: it no longer widens postcode->sector->district, because the only available exhaustion evidence derives from the presentation limit and so would make geography depend on page size. The requested area is returned with a warning."),
 ) -> PPDCompsResponse:
     """Get comparable sales summary for a postcode (sector/district supported).
 
@@ -181,7 +201,8 @@ async def comps(
     - transaction_category defaults to 'A' (standard sales); pass 'all' for the firehose.
     - property_type defaults to the residential set (F+D+S+T); pass 'ALL' to disable type filtering.
     - filter_outliers defaults to false; opt in for IQR-trimmed stats AND transaction list.
-    - auto_escalate widens search from postcode->sector->district on thin markets.
+    - auto_escalate is accepted for compatibility but does NOT widen the search
+      area on the live source; see the parameter description and `warnings`.
 
     If address is provided, returns subject_property with its transaction history.
     If enrich_epc is True, attaches EPC floor area and price-per-sqft to each comp.
@@ -206,6 +227,9 @@ async def comps(
             address=address,
             auto_escalate=auto_escalate,
         )
+    except InvalidPostcodeError as exc:
+        # Caller error, not an upstream failure.
+        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"PPD comps failed: {exc}") from exc
 
@@ -235,6 +259,10 @@ def transaction_record(
             include_raw=include_raw,
         )
         return PPDTransactionRecordResponse(**result)
+    except TransactionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.to_dict()) from exc
+    except UpstreamUnavailableError as exc:
+        raise HTTPException(status_code=502, detail=exc.to_dict()) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=502,
@@ -259,6 +287,9 @@ def blocks(
             min_transactions=min_transactions,
             search_level=search_level,
         )
+    except InvalidPostcodeError as exc:
+        # Caller error, not an upstream failure.
+        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=502,

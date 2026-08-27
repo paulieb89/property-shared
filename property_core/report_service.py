@@ -260,6 +260,7 @@ class PropertyReportService:
                 )
 
             market_analysis = MarketAnalysis(
+                warnings=tuple(result.warnings),
                 postcode_sector=_get_postcode_sector(postcode),
                 search_radius="sector",
                 period_months=months,

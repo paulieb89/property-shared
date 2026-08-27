@@ -15,6 +15,17 @@ import json
 from contextlib import contextmanager
 from unittest.mock import patch
 
+def _lit(v):
+    return {"type": "literal", "value": str(v)}
+
+
+def _uri(v):
+    return {"type": "uri", "value": v}
+
+
+_PT = "http://landregistry.data.gov.uk/def/common/"
+_TC = "http://landregistry.data.gov.uk/def/ppi/"
+
 FIXTURE_ROWS = [
     {
         "transaction_id": "{AAAAAAAA-0000-0000-0000-000000000001}",
@@ -43,10 +54,35 @@ FIXTURE_ROWS = [
 ]
 
 
-def _transactions():
-    from property_core.models.ppd import PPDTransaction
+def _bindings():
+    """The fixture as raw SPARQL bindings.
 
-    return [PPDTransaction(**row) for row in FIXTURE_ROWS]
+    Patching `_fetch_sparql` -- the real transport boundary -- rather than a
+    service-level method means the golden exercises the actual parsing,
+    filtering and containment path, and does not silently stop covering it when
+    an internal call site is refactored.
+    """
+    type_uri = {"F": "flat-maisonette", "D": "detached", "S": "semi-detached",
+                "T": "terraced", "O": "otherPropertyType"}
+    estate_uri = {"F": "freehold", "L": "leasehold"}
+    cat_uri = {"A": "standardPricePaidTransaction", "B": "additionalPricePaidTransaction"}
+    out = []
+    for r in FIXTURE_ROWS:
+        out.append({
+            "transactionId": _lit(r["transaction_id"]),
+            "pricePaid": _lit(r["price"]),
+            "transactionDate": _lit(r["date"]),
+            "postcode": _lit(r["postcode"]),
+            "propertyType": _uri(_PT + type_uri[r["property_type"]]),
+            "estateType": _uri(_PT + estate_uri[r["estate_type"]]),
+            "transactionCategory": _uri(_TC + cat_uri[r["transaction_category"]]),
+            "newBuild": _lit("true" if r["new_build"] else "false"),
+            "paon": _lit(r["paon"]), "saon": _lit(r["saon"] or ""),
+            "street": _lit(r["street"]), "town": _lit(r["town"]),
+            "county": _lit(r["county"]), "locality": _lit(r["locality"] or ""),
+            "district": _lit(r["district"]),
+        })
+    return {"results": {"bindings": out}}
 
 
 #: Credentials that would otherwise make a captured response depend on the
@@ -66,13 +102,13 @@ def deterministic_ppd():
     def _no_network(*a, **k):  # pragma: no cover - only fires on regression
         raise AssertionError("golden inertness test attempted a network connection")
 
-    rows = _transactions()
+    payload = _bindings()
     # patch.dict with no overrides snapshots os.environ and restores it on exit;
     # the vars are then removed inside the block. (Passing {var: None} does not
     # work -- os.environ values must be strings.)
     with patch.dict(os.environ), patch(
-        "property_core.ppd_client.PricePaidDataClient.sparql_search",
-        return_value=rows,
+        "property_core.ppd_client.PricePaidDataClient._fetch_sparql",
+        return_value=payload,
     ), patch.object(socket.socket, "connect", _no_network):
         for var in AMBIENT_CREDENTIAL_VARS:
             os.environ.pop(var, None)

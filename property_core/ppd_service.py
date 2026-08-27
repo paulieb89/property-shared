@@ -11,6 +11,7 @@ from datetime import date, timedelta
 from statistics import mean, median, quantiles
 from typing import Any, Dict, List, Optional
 
+from property_core.exceptions import InvalidPostcodeError
 from property_core.models.ppd import (
     PPDCompsQuery,
     PPDCompsResponse,
@@ -92,6 +93,14 @@ class PPDService:
         if limit > MAX_LIMIT:
             warnings.append(f"limit capped to {MAX_LIMIT}")
             limit = MAX_LIMIT
+        if offset > 0:
+            # The upstream ordering is not guaranteed total across pages, so a
+            # deep offset can repeat or omit rows. Keyset paging is the correct
+            # mechanism; introducing it is out of scope here.
+            warnings.append(
+                "offset pagination is unstable and incomplete: results may repeat "
+                "or omit rows across pages"
+            )
 
         results = self.client.sparql_search(
             postcode=postcode,
@@ -210,8 +219,10 @@ class PPDService:
         * ``filter_outliers=False`` — opt in to a 1.5*IQR price filter; when
           enabled, outlier transactions are dropped from BOTH the stats and
           the returned transaction list (needs >=4 prices, otherwise no-op).
-        * ``auto_escalate=True`` — widen postcode→sector→district when the
-          result set is below ``thin_market_threshold``.
+        * ``auto_escalate=True`` — **compatibility parameter only.** Widening is
+          disabled on the live source: the exhaustion evidence available here
+          derives from the presentation limit, so geography would move with
+          page size. The requested area is returned with a warning instead.
 
         If address is provided, also returns subject_property with its
         transaction history.
@@ -261,7 +272,7 @@ class PPDService:
         # 3. Fetch transactions via SPARQL (client handles post-fetch filtering)
         from_date = (date.today() - timedelta(days=months * 30)).isoformat()
 
-        transactions = self.client.sparql_search(
+        page = self.client.search_with_evidence(
             postcode=exact_postcode,
             postcode_prefix=prefix,
             from_date=from_date,
@@ -270,6 +281,27 @@ class PPDService:
             limit=limit,
             order_desc=True,
         )
+        transactions = page.transactions
+        warnings: list[str] = []
+
+        # Completeness. `source_exhausted` is tri-state; only True proves the
+        # upstream window was not truncated. It is derived from a fetch limit
+        # that itself scales with the caller's presentation limit, so it is
+        # reported but never used to widen geography on the live path.
+        # Containment and exhaustion are independent facts and are reported
+        # separately. An earlier version reported containment only inside the
+        # exhausted branch while calling the page "saturated" -- a contradiction
+        # that meant the message could never appear when it was true.
+        if page.contained_out:
+            warnings.append(
+                f"{page.contained_out} out-of-area row(s) returned by the upstream "
+                "were removed by geography containment"
+            )
+        if page.evidence.source_exhausted is not True:
+            warnings.append(
+                "result may be incomplete: the upstream window was not exhausted, "
+                "so thin_market reflects the returned sample rather than the market"
+            )
 
         # 4. Apply residential post-filter when property_type=None.
         # transaction_category filtering happens server-side via SPARQL above.
@@ -279,7 +311,21 @@ class PPDService:
         # 5. Subject property matching
         subject_property = None
         if address:
-            subject_property = self._find_subject_property(postcode, address)
+            try:
+                subject_property = self._subject_property_lookup(postcode, address)
+            except InvalidPostcodeError:
+                # Caller error. Must surface as 422, not be softened into a
+                # warning that reads like an upstream hiccup.
+                raise
+            except Exception as exc:  # noqa: BLE001
+                # A failed lookup is NOT an absent history. Comps still succeeds
+                # (the resilience the old bare `except` provided), but the caller
+                # is told the history was never checked.
+                subject_property = None
+                warnings.append(
+                    "subject property lookup unavailable "
+                    f"({type(exc).__name__}); sale history not checked"
+                )
             if subject_property and subject_property.transaction_history:
                 subject_ids = {t.transaction_id for t in subject_property.transaction_history}
                 transactions = [t for t in transactions if t.transaction_id not in subject_ids]
@@ -345,37 +391,34 @@ class PPDService:
             min=min(prices) if prices else None,
             max=max(prices) if prices else None,
             thin_market=count < thin_market_threshold,
+            warnings=tuple(warnings),
             transactions=transactions,
             subject_property=subject_property,
             subject_price_percentile=subject_price_percentile,
             subject_vs_median_pct=subject_vs_median_pct,
         )
 
-        # Auto-escalate to wider search area if thin market.
-        # Preserve caller's intent for property_type / transaction_category /
-        # filter_outliers — pass them through verbatim.
+        # Auto-escalation is DISABLED on the live path (PR 2).
+        #
+        # Widening sector -> district needs proof that the narrower search was
+        # exhausted. The only available evidence is `raw_bindings_returned <
+        # fetch_limit`, and `fetch_limit` is derived from the caller's
+        # presentation limit -- so the evidence, and therefore the geography,
+        # would still change with page size. That is the defect being contained,
+        # not a fix for it. Snapshot routing may re-enable escalation in PR 4
+        # using limit-independent deterministic evidence.
         if auto_escalate and response.thin_market:
             next_level = {"postcode": "sector", "sector": "district"}.get(search_level)
             if next_level:
-                wider = self.comps(
-                    postcode=postcode,
-                    property_type=property_type,
-                    transaction_category=transaction_category,
-                    filter_outliers=filter_outliers,
-                    months=months,
-                    limit=limit,
-                    search_level=next_level,
-                    address=address,
-                    auto_escalate=True,
-                    thin_market_threshold=thin_market_threshold,
+                response.warnings = response.warnings + (
+                    "auto-escalation not applied: live-source completeness cannot "
+                    f"establish safe escalation from {search_level} to {next_level}; "
+                    "returning the requested area",
                 )
-                wider.escalated_from = search_level
-                wider.escalated_to = wider.query.search_level
-                return wider
 
         return response
 
-    def _find_subject_property(
+    def _subject_property_lookup(
         self, postcode: str, address: str
     ) -> Optional[SubjectProperty]:
         """Search for a specific property by postcode and address.
@@ -399,17 +442,16 @@ class PPDService:
         words = address_clean.split()
         street = " ".join(words[1:]) if len(words) > 1 else None
 
-        try:
-            transactions = self.client.sparql_search(
-                postcode=postcode,
-                paon=paon,
-                street=street,
-                limit=50,
-                order_desc=True,
-            )
-        except Exception:
-            # Upstream failure — don't break the whole comps request
-            return None
+        # Deliberately NOT wrapped in a bare except: an upstream failure must
+        # reach comps() so it can be reported as "not checked" rather than
+        # silently rendered as "no history".
+        transactions = self.client.sparql_search(
+            postcode=postcode,
+            paon=paon,
+            street=street,
+            limit=50,
+            order_desc=True,
+        )
 
         if not transactions:
             return None

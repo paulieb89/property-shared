@@ -147,11 +147,18 @@ async def yield_dashboard(
     sale_count = data.get("sale_count", 0)
     rental_count = data.get("rental_count", 0)
 
+    # A caveat the UI drops is a caveat the user never sees. The yield divides
+    # rent by the comps median, so an incomplete sales window makes this figure
+    # uncertain -- say so next to the number, not only in the payload.
+    caveats = list(data.get("warnings") or [])
+
     view = Column(
         children=[
             # Header
             Heading(f"Yield Analysis \u2014 {postcode.upper()}", level=2),
             Muted(f"{search_level} \u00b7 {months} months \u00b7 {radius}mi radius"),
+
+            *([Muted("\u26a0 " + " \u00b7 ".join(caveats))] if caveats else []),
 
             Separator(),
 
@@ -208,4 +215,9 @@ async def yield_dashboard(
         f"data quality: {quality}"
     )
 
+    _caveats = list(data.get('warnings') or [])
+    if _caveats:
+        # The LLM reads `content`, not the visual tree. A caveat that
+        # only reaches the structured view is invisible to it.
+        text = text + " | NOTE: " + "; ".join(_caveats)
     return ToolResult(content=text, structured_content=view)

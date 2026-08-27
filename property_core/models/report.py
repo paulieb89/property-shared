@@ -25,7 +25,14 @@ class SaleHistory(BaseModel):
 
 
 class MarketAnalysis(BaseModel):
-    """Area market analysis from comparable sales."""
+    """Area market analysis from comparable sales.
+
+    ``warnings`` carries any completeness caveat from the comps window these
+    figures were derived from. A median computed over an incomplete window makes
+    every number below it equally uncertain, so the caveat travels with them.
+    """
+
+    warnings: tuple[str, ...] = ()
     postcode_sector: str  # e.g., "SW1A 1"
     search_radius: str  # "postcode", "sector", "district"
     period_months: int
@@ -86,7 +93,15 @@ class RentalAnalysis(BaseModel):
 
 
 class YieldAnalysis(BaseModel):
-    """Combined sale + rental yield analysis for a postcode."""
+    """Combined sale + rental yield analysis for a postcode.
+
+    ``warnings`` carries any completeness caveat from the underlying comps: the
+    yield divides rent by the comps median, so an incomplete sales window makes
+    the yield equally uncertain. A derived figure must never be presented
+    without the caveat attached to the data it came from.
+    """
+
+    warnings: tuple[str, ...] = ()
     postcode: str
     median_sale_price: Optional[int] = None
     sale_count: int = 0

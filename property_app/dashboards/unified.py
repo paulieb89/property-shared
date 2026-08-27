@@ -158,6 +158,12 @@ async def property_dashboard(
     p25 = comps.get("percentile_25")
     p75 = comps.get("percentile_75")
     txns = comps.get("transactions", [])
+    # Both calls can carry completeness caveats and they use different limits,
+    # so gather from both. dict.fromkeys preserves order while de-duplicating.
+    _completeness_caveats = list(dict.fromkeys(
+        [*(comps.get("warnings") or []), *(yield_data.get("warnings") or [])]
+    ))
+
     thin_comps = comps.get("thin_market", False)
 
     gross_yield = yield_data.get("gross_yield_pct")
@@ -263,6 +269,15 @@ async def property_dashboard(
                             with CardContent():
                                 Metric(label="Sales", value=str(count))
                                 Metric(label="Rentals", value=str(rental_count))
+
+                    # Completeness caveats from BOTH calls. The comps and yield
+                    # requests use different limits, so their completeness can
+                    # differ -- reading only comps["warnings"] silently dropped a
+                    # yield-side caveat. Order-preserving dedup so an identical
+                    # caveat from both is shown once.
+                    for _w in _completeness_caveats:
+                        with Alert(variant="warning"):
+                            Muted("\u26a0 " + _w)
 
                     # Alerts
                     if thin_comps:
@@ -390,4 +405,6 @@ async def property_dashboard(
     if gross_yield is not None:
         text_parts.append(f"  Yield: {fmt_pct(gross_yield)} gross ({assessment}), data quality: {quality}")
 
+    if _completeness_caveats:
+        text_parts.append("  NOTE: " + "; ".join(_completeness_caveats))
     return ToolResult(content="\n".join(text_parts), structured_content=app)

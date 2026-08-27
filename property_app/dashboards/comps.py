@@ -274,6 +274,19 @@ def comps_dashboard(
             ),
         ]
 
+    # Completeness caveats. A median shown without its caveat is exactly the
+    # uncaveated figure these warnings exist to prevent, so it is rendered in the
+    # visual tree as well as in the LLM-facing text below.
+    completeness_alert = []
+    _caveat_list = list(data.get("warnings") or [])
+    if _caveat_list:
+        completeness_alert = [
+            Alert(
+                children=[Muted("\u26a0 " + w) for w in _caveat_list],
+                variant="warning",
+            ),
+        ]
+
     # Thin market alert
     thin_market_alert = []
     if data.get("thin_market"):
@@ -335,6 +348,7 @@ def comps_dashboard(
         children=[
             Heading(f"Comparable Sales \u2014 {postcode.upper()}", level=2),
             Muted(f"{search_level} \u00b7 {months} months \u00b7 Land Registry"),
+            *completeness_alert,
             Separator(),
             Tabs(children=[
                 Tab(title="Overview", children=[
@@ -355,4 +369,9 @@ def comps_dashboard(
         f"mean {_fmt_gbp(mean)}, range {_fmt_gbp(p25)}\u2013{_fmt_gbp(p75)}"
     )
 
+    _caveats = list(data.get("warnings") or [])
+    if _caveats:
+        # The LLM reads `content`, not the visual tree. An uncaveated median is
+        # exactly what this warning exists to prevent.
+        text = text + " | NOTE: " + "; ".join(_caveats)
     return ToolResult(content=text, structured_content=view)

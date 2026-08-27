@@ -204,8 +204,19 @@ class PPDCompsResponse(BaseModel):
     percentile_75: Optional[int] = None
     min: Optional[int] = None
     max: Optional[int] = None
-    thin_market: bool
+    thin_market: bool = Field(
+        ...,
+        description=(
+            "Whether the BOUNDED RETURNED SAMPLE fell below the thin-market "
+            "threshold. This is a sample indicator, not a whole-market fact: the "
+            "upstream window is limited and filtered client-side, so a true value "
+            "may reflect an incomplete source window rather than a thin market. "
+            "When completeness is unknown a warning says so."
+        ),
+    )
     # Auto-escalation tracking (populated when auto_escalate=True)
+    #: Additive (PR 2). Completeness and containment caveats for this response.
+    warnings: tuple[str, ...] = ()
     escalated_from: Optional[str] = None
     escalated_to: Optional[str] = None
     # EPC-enriched stats (populated when enrich_epc=True on callers)
@@ -246,7 +257,20 @@ class PPDTransactionRecord(BaseModel):
         property_type, estate_type, transaction_category from nested nodes.
         """
         result = raw.get("result", {}) if isinstance(raw, dict) else {}
-        primary = result.get("primaryTopic", {}) if isinstance(result, dict) else {}
+        # Reject rather than normalise. Emptying a malformed shape produced a
+        # blank record that looked like a real answer; translating the one
+        # observed bare-URI stub into "not found" is the CLIENT's job, because
+        # only it knows that stub means an unknown id.
+        if not isinstance(result, dict):
+            raise ValueError(
+                f"linked data 'result' is {type(result).__name__}, expected an object"
+            )
+        primary = result.get("primaryTopic")
+        if not isinstance(primary, dict):
+            raise ValueError(
+                f"linked data 'primaryTopic' is {type(primary).__name__}, "
+                "expected an object"
+            )
 
         property_type_node = primary.get("propertyType")
         estate_type_node = primary.get("estateType")
