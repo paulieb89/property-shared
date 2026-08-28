@@ -1,0 +1,294 @@
+"""Boot-time snapshot orchestration.
+
+One job: at process start, obtain a **structurally verified** snapshot and make
+it available, or fail closed with a typed error. It fetches, verifies the
+published digest and length, extracts with member validation, activates and
+prunes.
+
+**READY means materialized and structurally verified, not queryable.** This
+runtime never opens the snapshot, runs a query, or checks a schema or row count.
+DuckDB, schema and row validation are the routing layer's responsibility, to be
+done before it serves anything from the snapshot -- a well-formed archive can
+still be unusable, and reporting it as queryable would be a claim this layer has
+not earned.
+
+**No hot refresh in v1.** Activation happens at process start only. There is
+deliberately no refresh/reload/watch entry point: swapping a live snapshot under
+load is untested and out of scope.
+
+**The materialization is ephemeral.** Both Machines run on Fly's default root
+filesystem with no Volume and no `persist_rootfs`, so nothing here survives a
+restart or deploy. A snapshot is therefore not a cache to fall back on: after a
+restart there is none. The fallback for an unavailable boot-fetch is the **live
+SPARQL source**.
+
+Failure policy:
+
+1. a structurally verified snapshot matching the advertised release   -> READY
+2. the advertised release cannot be fetched, but a snapshot was already
+   materialized on THIS Machine (typically by another worker)         -> READY,
+   flagged `behind_advertised_release` -- not a durability guarantee
+3. nothing materialized                                               -> UNREADY,
+   `fallback_to_live=True`; the caller uses the live source
+
+Serving something unverified never happens.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+from typing import Optional
+
+from property_core.exceptions import SnapshotUnavailableError
+from property_core.snapshot.archive import ExtractionLimits, safe_extract
+from property_core.snapshot.fetch import DEFAULT_MAX_BUNDLE_BYTES, download_verified
+from property_core.snapshot.lock import DEFAULT_TIMEOUT as LOCK_TIMEOUT
+from property_core.snapshot.lock import LockTimeout, single_flight
+from property_core.snapshot.models import (
+    BootReport,
+    Readiness,
+    SnapshotManifest,
+    validate_component,
+)
+from property_core.snapshot.store import DEFAULT_KEEP, SnapshotStore
+
+CURRENT_POINTER_OBJECT = "current.json"
+
+
+class SnapshotRuntime:
+    """Owns one snapshot store and the boot sequence that fills it."""
+
+    def __init__(self, *, source, store: SnapshotStore,
+                 extraction_limits: Optional[ExtractionLimits] = None,
+                 max_bundle_bytes: int = DEFAULT_MAX_BUNDLE_BYTES,
+                 lock_timeout: float = LOCK_TIMEOUT,
+                 keep_versions: int = DEFAULT_KEEP):
+        self.source = source
+        self.store = store
+        self.extraction_limits = extraction_limits or ExtractionLimits()
+        self.max_bundle_bytes = max_bundle_bytes
+        self.lock_timeout = lock_timeout
+        self.keep_versions = keep_versions
+        self._report = BootReport()
+
+    # -- state ----------------------------------------------------------
+    @property
+    def readiness(self) -> Readiness:
+        return self._report.readiness
+
+    @property
+    def report(self) -> BootReport:
+        return self._report
+
+    def require_ready(self) -> str:
+        """The active snapshot directory, or a typed error.
+
+        The typed error is the caller's signal to use the **live source**, not to
+        return nothing: "no snapshot" and "no matching rows" are different facts,
+        and only one of them is about the data.
+        """
+        if not self._report.ready or not self._report.snapshot_dir:
+            raise SnapshotUnavailableError(
+                self._report.source_error or "no verified snapshot is open"
+            )
+        return self._report.snapshot_dir
+
+    # -- boot -----------------------------------------------------------
+    def boot(self) -> BootReport:
+        started = time.perf_counter()
+        warnings: list[str] = []
+        materialized = self.store.current_version()
+
+        try:
+            manifest = self._load_manifest()
+        except Exception as exc:
+            self._report = self._degrade(
+                materialized, self._describe(exc), warnings, started)
+            return self._report
+
+        # This Machine already materialized exactly this release, same bytes.
+        # A same-version/different-digest conflict is a publisher error: keep
+        # serving what we have and report it, rather than letting it escape boot.
+        try:
+            if self._already_materialized(materialized, manifest):
+                self._report = self._ready(materialized, manifest.snapshot_version,
+                                           reused_existing=True, warnings=warnings,
+                                           started=started)
+                return self._report
+        except ValueError as exc:
+            self._report = self._degrade(
+                materialized, self._describe(exc), warnings, started)
+            return self._report
+
+        try:
+            with single_flight(self.store.root / ".boot.lock",
+                               timeout=self.lock_timeout):
+                # RELOAD the manifest under the lock. The copy read before
+                # waiting may name an older release than the holder has since
+                # activated, and installing it would be a downgrade.
+                manifest = self._load_manifest()
+
+                current = self.store.current_version()
+                try:
+                    if self._already_materialized(current, manifest):
+                        self._report = self._ready(current, manifest.snapshot_version,
+                                                   reused_existing=True,
+                                                   warnings=warnings, started=started)
+                        return self._report
+                except ValueError as exc:
+                    self._report = self._degrade(
+                        current, self._describe(exc), warnings, started)
+                    return self._report
+
+                downloaded, directory = self._install(manifest)
+        except (LockTimeout, Exception) as exc:
+            self._report = self._degrade(
+                self.store.current_version(), self._describe(exc), warnings, started)
+            return self._report
+
+        self.store.prune(self.keep_versions)
+        self._report = self._ready(directory, manifest.snapshot_version,
+                                   activated=True, bytes_downloaded=downloaded,
+                                   warnings=warnings, started=started)
+        return self._report
+
+    def _already_materialized(self, directory: Optional[str],
+                              manifest: SnapshotManifest) -> bool:
+        """Whether this Machine already holds exactly this release, same bytes.
+
+        Version equality alone is not enough: a release republished under the
+        same version with different contents would otherwise be ignored forever,
+        leaving us serving bytes the publisher has replaced.
+        """
+        if not directory or directory != manifest.snapshot_version:
+            return False
+        if not self.store.is_verified(directory):
+            return False
+        record = self.store.verified_record(directory)
+        if record is None:
+            return False
+        if record.bundle_sha256 != manifest.bundle_sha256:
+            # Same version, different bytes. Published versions are immutable, so
+            # this is a publisher error, not something to paper over by
+            # re-materialising: fail closed and say which digests disagree.
+            raise ValueError(
+                f"version {manifest.snapshot_version!r} is already materialized "
+                f"from digest {record.bundle_sha256[:16]}..., but the manifest "
+                f"now declares {manifest.bundle_sha256[:16]}...; a changed bundle "
+                f"requires a new published version"
+            )
+        return True
+
+    # -- steps ----------------------------------------------------------
+    def _load_manifest(self) -> SnapshotManifest:
+        pointer = json.loads(self.source.read_bytes(CURRENT_POINTER_OBJECT))
+        # The pointer names an object we then fetch, so it gets the same
+        # single-component treatment as every other externally supplied name.
+        name = validate_component(pointer.get("current_manifest"),
+                                  "current_manifest", reserved=False)
+        return SnapshotManifest(**json.loads(self.source.read_bytes(name)))
+
+    def _install(self, manifest: SnapshotManifest) -> tuple[int, str]:
+        """Download, verify, extract and activate. Raises on any failure."""
+        with self.store.stage(manifest.snapshot_version) as staging:
+            # Keep the published object's extension: the archive format is a
+            # property of the object, and extraction dispatches on it.
+            bundle = staging.parent / f"{staging.name}-{Path(manifest.bundle_object).name}"
+            try:
+                result = download_verified(
+                    self.source, manifest, bundle,
+                    max_bytes=self.max_bundle_bytes)
+                extract_into = staging / "unpacked"
+                stats = safe_extract(bundle, extract_into, self.extraction_limits)
+            finally:
+                # The bundle is large and is never needed again once unpacked.
+                Path(bundle).unlink(missing_ok=True)
+
+            # EXACT, not "at least": an archive with more parquet files than the
+            # manifest declares is as much a mismatch as one with fewer, and an
+            # archive with none is not a snapshot at all.
+            found = self._count_parquet(extract_into)
+            if found != manifest.parquet_files:
+                raise ValueError(
+                    f"archive holds {found} parquet file(s), manifest declares "
+                    f"{manifest.parquet_files}"
+                )
+            directory = self.store.activate(
+                extract_into, manifest.snapshot_version,
+                {
+                    "version": manifest.snapshot_version,
+                    "bundle_sha256": manifest.bundle_sha256,
+                    "bundle_bytes": manifest.bundle_bytes,
+                    "bundle_object": manifest.bundle_object,
+                    "parquet_files": found,
+                    "rows": manifest.rows,
+                    # Carried through so routing can answer coverage questions
+                    # from the materialized snapshot alone, offline.
+                    "coverage_from": manifest.coverage_from,
+                    "coverage_to": manifest.coverage_to,
+                    "provisional_from": manifest.provisional_from,
+                    "layout": manifest.layout,
+                    "duckdb_version": manifest.duckdb_version,
+                    "verification": "structural",
+                    "verified_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                },
+            )
+        return result.bytes_written, directory.name
+
+    @staticmethod
+    def _count_parquet(directory: Path) -> int:
+        import os
+
+        return sum(1 for _r, _d, files in os.walk(directory)
+                   for f in files if f.endswith(".parquet"))
+
+    # -- outcomes -------------------------------------------------------
+    @staticmethod
+    def _describe(exc: Exception) -> str:
+        return f"{type(exc).__name__}: {str(exc)[:200]}"
+
+    def _elapsed(self, started: float) -> dict[str, float]:
+        return {"total_ms": round((time.perf_counter() - started) * 1000, 1)}
+
+    def _ready(self, directory: str, version: str, *, activated: bool = False,
+               reused_existing: bool = False, bytes_downloaded: int = 0,
+               behind_advertised_release: bool = False,
+               source_error: Optional[str] = None,
+               warnings: list[str], started: float) -> BootReport:
+        return BootReport(
+            readiness=Readiness.READY, version=version,
+            snapshot_dir=str(self.store.path_for(directory)),
+            fallback_to_live=False,
+            behind_advertised_release=behind_advertised_release,
+            activated=activated, reused_existing=reused_existing,
+            bytes_downloaded=bytes_downloaded, source_error=source_error,
+            warnings=tuple(warnings), timings_ms=self._elapsed(started),
+        )
+
+    def _degrade(self, materialized: Optional[str], error: str,
+                 warnings: list[str], started: float) -> BootReport:
+        """Adopt an existing same-Machine materialization, or hand off to live.
+
+        Adopting one is NOT a durability guarantee: it exists only because this
+        Machine has not restarted since another worker unpacked it. After a
+        restart there is nothing here, and the answer is the live source.
+        """
+        if materialized and self.store.is_verified(materialized):
+            return self._ready(
+                materialized, materialized,
+                reused_existing=True, behind_advertised_release=True,
+                source_error=error, started=started,
+                warnings=[
+                    *warnings,
+                    f"using snapshot {materialized} already materialized on this "
+                    f"machine; the advertised release could not be fetched ({error})",
+                ],
+            )
+        return BootReport(
+            readiness=Readiness.UNREADY, fallback_to_live=True, source_error=error,
+            warnings=(*warnings,
+                      f"no snapshot materialized; using the live source ({error})"),
+            timings_ms=self._elapsed(started),
+        )

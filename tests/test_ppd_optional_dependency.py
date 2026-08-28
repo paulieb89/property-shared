@@ -97,9 +97,15 @@ def test_new_pr1_modules_import_without_duckdb():
 # --------------------------------------------------------------------------
 
 def test_pyproject_declares_the_snapshot_extra():
+    """DuckDB is pinned in the extra.
+
+    Asserts membership rather than exact list equality: the extra legitimately
+    grew a zstd reader when the boot runtime landed, and pinning the whole list
+    would make every future addition look like a regression.
+    """
     data = tomllib.loads((REPO / "pyproject.toml").read_text())
-    extras = data["project"]["optional-dependencies"]
-    assert extras["snapshot"] == ["duckdb==1.5.5"], extras.get("snapshot")
+    extra = data["project"]["optional-dependencies"]["snapshot"]
+    assert "duckdb==1.5.5" in extra, extra
 
 
 def test_duckdb_is_not_a_required_dependency():

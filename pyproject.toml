@@ -45,10 +45,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# DuckDB is needed only to read a local PPD snapshot. It is deliberately NOT
-# a required dependency: library and CLI consumers on the live SPARQL path
-# must not pay for a ~59 MB native wheel they never load.
-snapshot = ["duckdb==1.5.5"]
+# Needed only to read a local PPD snapshot. Deliberately NOT required
+# dependencies: library and CLI consumers on the live SPARQL path must not pay
+# for a ~59 MB native wheel they never load.
+#
+# zstandard reads the .tar.zst bundle. Python 3.11 has no stdlib zstd (it
+# arrives in 3.14) and neither production image installs the zstd binary, so
+# without this the runtime cannot open a real bundle at all. The extractor falls
+# back to a `zstd` binary if one is present, but does not rely on it.
+snapshot = ["duckdb==1.5.5", "zstandard==0.25.0"]
 planning = [
   "playwright>=1.57.0",
   "openai>=1.83.0,<2",

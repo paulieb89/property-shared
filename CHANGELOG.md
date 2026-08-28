@@ -43,6 +43,41 @@ Not released. No version bump. Two merged/pending PRs against the frozen design 
 
 ### Added
 
+- **Snapshot boot runtime** (`property_core.snapshot`) — streamed verified
+  download, hardened archive extraction, staging with atomic activation,
+  single-flight process locking, and readiness states. **Wired to nothing:** it
+  is not booted by any request path, does not query a snapshot, and changes no
+  response. No hot refresh.
+  **Readiness is structural, not queryable:** the runtime verifies the published
+  digest and length, validates every archive member, and checks an exact file
+  inventory. It never opens the snapshot, connects DuckDB or checks a schema —
+  DuckDB, schema and row validation belong to the routing layer, before it
+  serves anything from the snapshot. The verification record persists the
+  validated coverage, provisional and layout fields so routing can answer
+  coverage questions offline.
+  **Ephemeral by design:** both Machines run Fly's default rootfs with no Volume
+  and no `persist_rootfs`, so the extracted snapshot is wiped on restart and
+  deploy. It is that Machine's read-only query database for its lifetime — one
+  active snapshot, no retention of a previous version, and no durability claim.
+  When no snapshot is materialized the caller **falls back to the live SPARQL
+  source**, not to a cache. No Volume or persistent-rootfs change is made here.
+- **Rollout gate G3 recorded:** the boot runtime needs `duckdb` and `zstandard`,
+  which live only in the optional `snapshot` extra. Neither production image
+  installs it (`--extra api` / `--extra apps`), which is correct while the flag
+  is off because the runtime is never booted. G3 requires all four of: both
+  Dockerfiles installing `--extra snapshot` unconditionally *before* routing is
+  introduced; built-image smoke tests importing both packages in the actual
+  image; flag-on with either dependency unavailable failing closed with snapshot
+  readiness false; and the production flag staying off until those checks plus
+  G1 and G2 pass. Requirements 2 and 3 belong to PR 4 / the rollout.
+  A repository-config lint ships here as a **secondary guard only** — it reads
+  checked-in Dockerfiles and fly configs, so it cannot see the flag being enabled
+  by a Fly secret or injected environment. Both packages stay optional and stay
+  together; neither becomes a required dependency. The Dockerfiles are
+  deliberately unchanged.
+- `zstandard` added to the optional `snapshot` extra. The bundle is `.tar.zst`;
+  Python 3.11 has no stdlib zstd and neither production image installs the `zstd`
+  binary, so without a reader the runtime could not open a real bundle.
 - `warnings` on `PPDCompsResponse`, `YieldAnalysis` and `MarketAnalysis`, carried
   through REST, both MCP servers, the CLI, the HTML report and the comps, yield
   and unified dashboards — including each dashboard's LLM-facing text, not only

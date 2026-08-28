@@ -457,7 +457,7 @@ never encodes "outside the snapshot" or "the source failed."
 | No rows in coverage, probe failed | 0 | `snapshot` | 200 / ok | `older_records_exist: null` + warning |
 | Requested dates precede coverage | — | — | **422** | `ppd_coverage_error` + structured ranges |
 | No verified snapshot open | — | — | **503** | `snapshot_unavailable` |
-| Snapshot serving, refresh failed | n | `snapshot` | 200 | `stale_source: true` + warning |
+| Snapshot behind the advertised release | n | `snapshot` | 200 | `behind_advertised_release: true` + warning (same-Machine only) |
 | Live upstream failed | — | — | **502** | `upstream_unavailable` |
 
 MCP tools surface rows 4, 5 and 7 as **tool errors** carrying the typed code —
@@ -505,9 +505,31 @@ one undifferentiated label.
 * Bundle **streamed** to a temp file in 1 MiB chunks, SHA-256 incremental. **The
   body is never held in memory** — verified at scale: a 945.5 MiB bundle booted at
   199.5 MB peak RSS.
-* Limits: `MAX_BUNDLE_BYTES` **1 GiB** (~4.8x margin over 214 MiB); connect
-  timeout 10 s; total download deadline 300 s; stall timeout 60 s. Any breach
-  aborts and deletes the temp file.
+* Limits: `MAX_BUNDLE_BYTES` **1 GiB** (~4.8x margin over 214 MiB); socket
+  timeout **10 s**; total download deadline **300 s**; stall detection
+  **60 s**. Any breach aborts and deletes the temp file. Both time budgets are
+  checked after **every** read, the one returning EOF included — checking only
+  on a non-empty chunk let a read that blocked past the budget and then returned
+  EOF finish successfully.
+* **One socket timeout, not separate connect and read timeouts.**
+  `urlopen(timeout=...)` takes a single value covering connection setup and every
+  blocking socket operation, so advertising two was a fiction: passing a second
+  value to the bundle request simply changed that connection's timeout as well.
+  `HttpObjectSource(socket_timeout=...)` is used for both control and bundle
+  requests, and is the only real interrupt in this design.
+* **Transport timeouts are translated into the typed taxonomy.** A socket
+  timeout surfaces as `DownloadDeadlineExceeded` with the original
+  `TimeoutError` preserved as its cause, so callers handle one taxonomy rather
+  than a bare `builtins.TimeoutError` escaping from urllib.
+* **What the time budgets do and do not promise.** Neither is an interrupt.
+  `read()` is synchronous, so elapsed time can only be inspected once it
+  returns: a read that blocks for ten minutes is *detected* after ten minutes,
+  not aborted at 60 s. The bundle stream uses `read1`, which returns after one
+  underlying socket read, so the 300 s budget is evaluated at real intervals
+  rather than being deferred behind a single `read(n)` that loops internally.
+  The 60 s value remains the backstop for sources that cannot honour a socket
+  timeout — a local file, a test double — and for a connection that dribbles
+  rather than going silent.
 * `Content-Length` mismatch = interrupted transfer, not a valid object.
 
 ### 4.2 Verify
@@ -524,9 +546,25 @@ including a hostile archive whose **SHA-256 matched its manifest** — digest ch
 cannot catch that.
 
 ### 4.4 Verified versioned directory and atomic activation
-Extract to `staging/<version>.<rand>/`; probe (open DuckDB, `count(*)`, compare
-rows and file count to manifest); write `.verified.json`; `os.replace()` into
-`snapshots/<version>/`; atomically flip `CURRENT` via temp-file + `os.replace()`.
+Extract to `staging/<version>.<rand>/`; verify **structurally** — the archive
+member validation above, plus an exact parquet-file count against the manifest
+and a full file inventory of paths and sizes; write `.verified.json`;
+`os.replace()` into `snapshots/<version>/`; atomically flip `CURRENT` via
+temp-file + `os.replace()`.
+
+**The boot runtime never opens the snapshot.** It does not connect DuckDB, run
+`count(*)`, or check any schema. "Materialized and structurally verified" is a
+weaker claim than "queryable", and reporting the second when only the first was
+established would let a well-formed but unusable snapshot be served.
+**DuckDB, schema and row-count validation are the routing layer's
+responsibility (PR 4), to be performed before it serves anything from the
+snapshot.** The earlier wording here described a DuckDB probe; that was the lab
+harness's behaviour, and at full history it scans every row.
+
+The verification record persists the **validated coverage, provisional, layout
+and provenance fields** carried through from the manifest, so routing can answer
+coverage questions from the materialized snapshot alone — offline, and without
+re-fetching a manifest that may since have rotated.
 **Any failure leaves the previous verified snapshot serving, untouched** —
 verified for corrupt manifest, corrupt bundle, digest mismatch, truncated
 transfer and hostile archive.
@@ -534,33 +572,71 @@ transfer and hostile archive.
 The readiness probe counts Parquet files on the **filesystem**, never via
 `count(DISTINCT filename)` (a Phase 3 defect: it scans every row).
 
-### 4.5 States
+### 4.5 States (ephemeral materialization)
+
+**The materialization is ephemeral.** Both production Machines run on Fly's
+default root filesystem — `fly.toml` and `fly.app.toml` declare no `[mounts]`, no
+Volume and no `persist_rootfs` — so the extracted snapshot is **wiped on every
+restart and deploy**. It is that Machine's read-only query database for that
+Machine's lifetime, and nothing more. The single-flight lock remains meaningful:
+it coordinates the workers sharing one Machine.
+
+Two consequences, both load-bearing:
+
+* **No retention across restarts.** Exactly **one** active snapshot is kept.
+  Retaining a "previous" version would imply a rollback path that does not
+  survive the restart or deploy a rollback exists for.
+* **A snapshot is not a fallback for a source outage.** After a restart there is
+  none. **The fallback is the live SPARQL source.**
 
 | State | Readiness | Behaviour |
 |---|---|---|
-| `ready` | 200 | verified snapshot open, `stale_source: false` |
-| `ready_stale` | 200 | serving verified cache, refresh failed, `stale_source: true` + warning |
-| `unready` | 503 | no verified snapshot; typed `snapshot_unavailable` |
+| `ready` | 200 | a **structurally verified** snapshot is materialized on this Machine — digest, member safety and file inventory checked. **Not** a claim that it is queryable; PR 4 validates DuckDB, schema and row counts before routing to it |
+| `unready` | 503 | nothing materialized; typed `snapshot_unavailable`, and the caller **falls back to the live source** |
 
-Startup with a cached snapshot matching the advertised manifest skips the download
-(Phase 3: **0.81 s, 0 bytes**).
+There is deliberately no `ready_stale` state. Where the advertised release cannot
+be fetched but a snapshot was already materialized on this Machine — typically by
+another worker in the same boot — it is adopted and flagged
+`behind_advertised_release`. A same-lifetime convenience, **not a durability
+guarantee**.
+
+Startup where this Machine already materialized the advertised version skips the
+download (measured in the lab: **0.81 s, 0 bytes**) — same Machine, not across a
+restart.
+
+**Published versions are immutable.** One `snapshot_version` names one set of
+bytes. If a manifest advertises a version already materialized here under a
+*different* `bundle_sha256`, the runtime **fails closed**: it keeps serving what
+it has, reports the digest conflict, and does not re-materialise. Publishing
+changed bytes requires a **new version**. Version directories are never replaced
+in place and never carry generation suffixes — those made a single published
+version identify several different snapshots.
 
 ### 4.6 Process-safe single-flight
 Exclusive `flock()` on `<cache>/.boot.lock` held across download → verify →
 extract → activate. A worker that cannot acquire it **blocks** (bounded by
 `LOCK_WAIT_SECONDS`, default 420 s), then re-reads `CURRENT` and activates from
-cache with **no download**. Lock records PID + boot-id; a stale lock from a dead
-process breaks after `LOCK_STALE_SECONDS` (default 900 s). Staging dirs are
+cache with **no download**. The lock file records a PID for diagnosis only:
+`flock` is released by the kernel when its holder dies, so there is no stale lock
+to break, no `LOCK_STALE_SECONDS`, and no PID consulted to decide whether the
+lock is held. A leftover lock *file* is never a wedged boot. Staging dirs are
 per-attempt (`mkdtemp`) so a broken lock can never produce two writers on one
 path. `flock` is advisory and per-host — correct for multiple workers in one
 machine; it does not coordinate across machines, and one fetch per machine is
 intended.
 
 ### 4.7 Cleanup
-Retain **current and previous** verified versions; delete older after successful
-activation (rollback becomes a `CURRENT` flip). Staging dirs and temp bundles
-deleted on every exit path. Before download, require `bundle_bytes * 2.5` free
-disk, else fail closed with a typed error.
+Retain **only the active** version; delete the rest after a successful
+activation. Retention of a previous version was removed once the filesystem was
+confirmed ephemeral: it cannot enable a rollback across the very events a
+rollback exists for, and keeping it would misrepresent the store as durable.
+Staging dirs and temp bundles deleted on every exit path. Before download,
+require `bundle_bytes * 2.5` free disk, else fail closed with a typed error.
+
+**Introducing a Volume or `persist_rootfs` is out of scope for the runtime PR.**
+If durable retention becomes desirable it is a deployment change with its own
+review, and this policy would be revisited alongside it — never assumed by the
+runtime.
 
 ### 4.8 Build-stage authorisation limits
 
@@ -589,6 +665,28 @@ settled by this specification.
 Observed-release state (last-seen ETag, last-ingested release, first-observed
 timestamp) is recorded so the 7-day alert is measured from **observation**, not
 from build time.
+
+---
+
+### 4.10 Lifespan wiring (governing rule for PR 4)
+
+Where the runtime is started is part of the design, not an implementation
+detail, so it is fixed here before PR 4 begins.
+
+* **Boot once per server process, through the FastMCP lifespan.** Not per
+  request, not lazily on first use.
+* **Where the MCP app is mounted alongside FastAPI, combine the two lifespans
+  explicitly.** Mounting does not chain them; a lifespan that is never awaited
+  is a boot that never happens.
+* **Runtime state is process-scoped, never MCP session state.** Session state is
+  client- and session-scoped, while the materialization belongs to the process
+  and the Machine — storing it per session would re-boot per client and leak
+  across reconnects.
+* **Retain the filesystem single-flight lock** across workers on the same
+  Machine. Lifespan wiring coordinates nothing between processes.
+* **A startup failure leaves the server available on the live fallback.** Boot
+  returning `UNREADY` is a normal outcome, not a startup error: the process must
+  come up and serve from the live source.
 
 ---
 
@@ -855,7 +953,40 @@ The two facts Phase 3 could not evidence are now **blocking gates**, not caveats
   count and re-derive the RSS budget for that count, **or** explicitly pin the
   app to one worker and record that as a deployment constraint.
 
-**If either gate fails or cannot be measured, stop before enabling the flag.**
+* **G3 — the snapshot extra is installed in both production images, and proven
+  to be.** The boot runtime imports `duckdb` and `zstandard`, which live only in
+  the optional `snapshot` extra. Neither image installs it today
+  (`--extra api` / `--extra apps`), which is correct while the flag is off
+  because the runtime is never booted. Both packages stay optional and stay
+  together in that one extra; neither becomes a required `property_core`
+  dependency.
+
+  G3 passes only when all four hold:
+
+  1. **Both production Dockerfiles install `--extra snapshot` unconditionally**,
+     landed *before* routing is introduced — not alongside it, so the dependency
+     change can be deployed and observed on its own.
+  2. **Built-image smoke tests import both `duckdb` and `zstandard`** in the
+     actual built image. Reading the Dockerfile is not evidence that the wheel
+     resolved, installed and imports on that platform.
+  3. **Flag-on with either dependency unavailable fails closed**: the runtime
+     raises the typed `snapshot_extra_missing` error, snapshot readiness stays
+     **false**, and the live source continues to serve. A missing optional
+     dependency must never take the service down or silently half-enable it.
+  4. **The production flag is not enabled until those image checks, G1 and G2
+     all pass.**
+
+  **What the repository test does NOT cover.** `tests/snapshot/test_rollout_prerequisites.py`
+  is a **repository-config lint**, not enforcement of G3. It reads the checked-in
+  Dockerfiles and fly configs and nothing else, so it cannot see the flag being
+  enabled by a **Fly secret** (`fly secrets set PPD_SNAPSHOT_ENABLED=1`), by
+  machine environment, or by any deploy-time injection — on those paths it stays
+  green while the feature is on and the dependencies are missing. It is kept as a
+  cheap secondary guard for the ordinary mistake of enabling the flag in
+  checked-in config without adding the extra. Requirements 2 and 3 are what
+  actually enforce G3, and both belong to PR 4 / the rollout.
+
+**If any gate fails or cannot be measured, stop before enabling the flag.**
 No estimate substitutes for the measurement.
 
 Once both pass: enable for `comps`/`yield`/`report`/`blocks` on `property-shared`
