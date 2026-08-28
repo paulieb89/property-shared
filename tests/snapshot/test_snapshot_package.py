@@ -190,3 +190,59 @@ def test_publishing_the_same_version_twice_is_refused(released, tmp_path):
     with pytest.raises(VersionAlreadyPublished):
         package_release(built, dist_dir=release.dist_dir, version=release.version,
                         source={}, facts={})
+
+
+# -- candidate, then promotion ----------------------------------------------
+
+def test_packaging_writes_into_a_candidate_directory(released):
+    _, release = released
+    assert release.candidate_dir.name == f"candidate-{release.version}"
+    assert release.candidate_dir.parent == release.dist_dir
+    assert release.bundle_path.parent == release.candidate_dir
+    assert release.manifest_path.parent == release.candidate_dir
+
+
+def test_packaging_leaves_the_dist_root_empty(released):
+    _, release = released
+    assert sorted(p.name for p in release.dist_dir.iterdir()) == [
+        release.candidate_dir.name]
+
+
+def test_the_candidate_carries_its_own_pointer_so_it_can_be_booted(released):
+    _, release = released
+    pointer = json.loads((release.candidate_dir / "current.json").read_text())
+    assert pointer == {"current_manifest": release.manifest_path.name}
+
+
+def test_promotion_moves_the_release_into_the_dist_root(released):
+    from tools.ppd_snapshot.package import promote_release
+
+    _, release = released
+    promoted = promote_release(release)
+    assert sorted(p.name for p in release.dist_dir.iterdir()) == sorted([
+        "current.json", release.manifest_path.name, release.bundle_path.name,
+        release.report_path.name])
+    assert promoted.bundle_path.parent == release.dist_dir
+    assert not release.candidate_dir.exists()
+
+
+def test_promotion_writes_the_pointer_last(released, monkeypatch):
+    """A pointer is a promise that what it names is there.
+
+    If promotion dies half way, the dist root may hold a partial release -- but
+    it must never hold a `current.json` naming a manifest that was not moved.
+    """
+    from tools.ppd_snapshot import package as pkg
+
+    _, release = released
+    real_move = pkg.shutil.move
+
+    def _fail_on_manifest(src, dst, *args, **kwargs):
+        if "manifest" in str(dst):
+            raise OSError("disk went away")
+        return real_move(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(pkg.shutil, "move", _fail_on_manifest)
+    with pytest.raises(OSError):
+        pkg.promote_release(release)
+    assert not (release.dist_dir / "current.json").exists()

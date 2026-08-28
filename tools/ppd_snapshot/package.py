@@ -21,8 +21,10 @@ manifest purely so the whole boot path can be exercised offline through
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
+import shutil
 import tarfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -61,6 +63,9 @@ class VersionAlreadyPublished(RuntimeError):
 class PackagedRelease:
     version: str
     dist_dir: Path
+    #: Where the release is assembled. A bundle sitting in the dist root is a
+    #: bundle someone can publish, so nothing arrives there until it has booted.
+    candidate_dir: Path
     bundle_path: Path
     manifest_path: Path
     current_path: Path
@@ -155,15 +160,18 @@ def package_release(built: BuildResult, *, dist_dir: Path, version: str,
     validate_component(version, "snapshot_version")
     dist_dir = Path(dist_dir)
     dist_dir.mkdir(parents=True, exist_ok=True)
+    candidate_dir = dist_dir / f"candidate-{version}"
 
-    bundle_path = dist_dir / f"snapshot-{version}.tar.zst"
-    manifest_path = dist_dir / f"manifest-{version}.json"
-    report_path = dist_dir / f"build-report-{version}.json"
-    for existing in (bundle_path, manifest_path):
+    bundle_path = candidate_dir / f"snapshot-{version}.tar.zst"
+    manifest_path = candidate_dir / f"manifest-{version}.json"
+    report_path = candidate_dir / f"build-report-{version}.json"
+    for existing in (bundle_path, manifest_path,
+                     dist_dir / bundle_path.name, dist_dir / manifest_path.name):
         if existing.exists():
             raise VersionAlreadyPublished(
                 f"{existing.name} already exists; a changed snapshot requires a "
                 f"new version, never a rewritten one")
+    candidate_dir.mkdir(parents=True, exist_ok=True)
 
     bundle_bytes, bundle_sha256 = write_bundle(built.snapshot_dir, bundle_path)
 
@@ -184,7 +192,10 @@ def package_release(built: BuildResult, *, dist_dir: Path, version: str,
     )
     manifest_path.write_text(json.dumps(manifest.model_dump(), indent=2) + "\n")
 
-    current_path = dist_dir / "current.json"
+    # The candidate gets its own pointer so the whole boot path can be
+    # exercised against it. The pointer in the dist root is written only at
+    # promotion, and only last.
+    current_path = candidate_dir / "current.json"
     current_path.write_text(
         json.dumps({"current_manifest": manifest_path.name}, indent=2) + "\n")
 
@@ -216,8 +227,43 @@ def package_release(built: BuildResult, *, dist_dir: Path, version: str,
     report_path.write_text(json.dumps(report, indent=2) + "\n")
 
     return PackagedRelease(
-        version=version, dist_dir=dist_dir, bundle_path=bundle_path,
+        version=version, dist_dir=dist_dir, candidate_dir=candidate_dir,
+        bundle_path=bundle_path,
         manifest_path=manifest_path, current_path=current_path,
         report_path=report_path, bundle_bytes=bundle_bytes,
         bundle_sha256=bundle_sha256, parquet_files=built.parquet_files,
         rows=built.rows)
+
+
+def promote_release(release: PackagedRelease) -> PackagedRelease:
+    """Move a booted candidate into the dist root, writing the pointer last.
+
+    `current.json` is a promise that what it names is present. Writing it before
+    the manifest and bundle have landed would publish that promise ahead of the
+    thing it describes, so a promotion interrupted half way leaves a partial
+    directory and **no pointer** -- which reads as "nothing published", the only
+    honest state to be in.
+    """
+    dist_dir = release.dist_dir
+    moved: dict[str, Path] = {}
+    for path in (release.bundle_path, release.manifest_path, release.report_path):
+        target = dist_dir / path.name
+        if target.exists():
+            raise VersionAlreadyPublished(
+                f"{target.name} is already published; a changed snapshot "
+                f"requires a new version")
+        shutil.move(str(path), str(target))
+        moved[path.name] = target
+
+    current_path = dist_dir / "current.json"
+    current_path.write_text(
+        json.dumps({"current_manifest": release.manifest_path.name},
+                   indent=2) + "\n")
+    shutil.rmtree(release.candidate_dir, ignore_errors=True)
+
+    return dataclasses.replace(
+        release,
+        bundle_path=moved[release.bundle_path.name],
+        manifest_path=moved[release.manifest_path.name],
+        report_path=moved[release.report_path.name],
+        current_path=current_path)

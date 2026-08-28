@@ -23,9 +23,34 @@ runbook.
 
 | Input | Where it comes from |
 |---|---|
-| `pp-complete.csv` | HM Land Registry public open data, unauthenticated. ~5.5 GB |
+| `pp-complete.csv` | HM Land Registry public open data, unauthenticated, over **HTTPS**: `https://price-paid-data.publicdata.landregistry.gov.uk/pp-complete.csv` (the [GOV.UK single-file page](https://www.gov.uk/government/statistical-data-sets/price-paid-data-single-file)). ~5.5 GB |
 | The release's `ETag` / `Last-Modified` / `Content-Length` | recorded by `check-release` into the release-state file |
+| The **source receipt** | written by `receipt`: the SHA-256 and byte length computed from the file, alongside the validators of the release it was fetched for |
 | `--coverage-to` | the release's declared coverage end, stated by the operator |
+
+The plaintext S3 *website* endpoint used during the lab phase is not used: over
+HTTP both the validators this pipeline trusts and the 5.5 GB body are open to
+tampering in transit, and the receipt would then faithfully bind the build to
+whatever arrived.
+
+### The source receipt
+
+Every gate after the build checks the snapshot against *itself*, so an
+internally consistent snapshot of the **wrong file** passes all of them. A
+131-byte stale CSV once built, validated and booted `READY` while the release
+record described a 999,999,999-byte release under a different ETag.
+
+The receipt is the binding, and refuses in three directions:
+
+* **file vs release** — writing a receipt refuses unless the file's length is
+  the length the observed release declares;
+* **file vs receipt** — every build recomputes SHA-256 and length, so a file
+  edited or replaced since is refused (including an edit that preserves length);
+* **receipt vs latest observation** — if `ETag`, `Last-Modified` or
+  `Content-Length` have moved, the file on disk is a previous release and the
+  build refuses.
+
+There is no default and no override: a missing receipt is a refusal.
 
 `--coverage-to` and the release record are kept **independent on purpose**: the
 coverage gate checks that the operator's declaration matches the end implied by
@@ -39,20 +64,31 @@ Deriving one from the other would make the gate say nothing.
 uv run --extra snapshot python -m tools.ppd_snapshot check-release \
     --state ~/ppd-snapshot/release-state.json
 
-# 2. Build, validate, package, verify the digest, and boot the result
-#    through the real runtime and adapter. Stops before packaging if a gate fails.
+# 2. Bind the downloaded CSV to that release. Refuses if it is not that file.
+uv run --extra snapshot python -m tools.ppd_snapshot receipt \
+    --csv           ~/ppd-snapshot/pp-complete.csv \
+    --release-state ~/ppd-snapshot/release-state.json \
+    --receipt       ~/ppd-snapshot/receipt.json
+
+# 3. Verify the source, build, validate, package into a candidate, boot it
+#    through the real runtime and adapter, and only then promote. Stops before
+#    packaging if a gate fails, and before promotion if the boot fails.
 uv run --extra snapshot python -m tools.ppd_snapshot all \
     --csv  ~/ppd-snapshot/pp-complete.csv \
     --work ~/ppd-snapshot/work \
     --dist ~/ppd-snapshot/dist \
     --coverage-to 2026-06-30 \
-    --release-state ~/ppd-snapshot/release-state.json \
+    --release-state  ~/ppd-snapshot/release-state.json \
+    --source-receipt ~/ppd-snapshot/receipt.json \
     --memory 4GB
 
-# 3. Re-run the gates against an existing snapshot directory.
+# 4. Re-run the gates against an existing snapshot directory. Without
+#    --rows and --eligible-source-rows the reconciliation gate cannot run, and
+#    an unrunnable gate is reported as skipped and exits non-zero.
 uv run --extra snapshot python -m tools.ppd_snapshot validate \
     --snapshot ~/ppd-snapshot/work/snapshot \
-    --coverage-to 2026-06-30 --source-coverage-end 2026-06-30
+    --coverage-to 2026-06-30 --source-coverage-end 2026-06-30 \
+    --rows 10394935 --eligible-source-rows 10394935
 ```
 
 `--memory` is the DuckDB limit, not a peak-RSS promise; DuckDB spills to
@@ -62,11 +98,21 @@ gets slower, not less correct.
 ## Outputs
 
 ```
-dist/current.json                          {"current_manifest": "manifest-<version>.json"}
+dist/candidate-<version>/                  assembled here, booted from here, never published from here
+dist/current.json                          written LAST, at promotion
 dist/manifest-<version>.json               exactly the eleven SnapshotManifest fields
 dist/snapshot-<version>.tar.zst            eleven year=YYYY/data.parquet members, nothing else
 dist/build-report-<version>.json           provenance, timings, per-year rows, boot-check result
 ```
+
+**Nothing reaches the dist root until it has booted.** A bundle sitting beside a
+`current.json` is a release someone can publish, so the pipeline assembles into
+`candidate-<version>/`, boots *that* directory through the real runtime, and
+promotes only on `READY`. Promotion moves the bundle, then the manifest, then
+the report, and writes `current.json` last: a pointer is a promise that what it
+names is present, so an interrupted promotion leaves a partial directory and no
+pointer, which reads as "nothing published". A failed boot leaves the candidate
+in place for diagnosis and the dist root untouched.
 
 The published manifest carries **only** what
 `property_core.snapshot.models.SnapshotManifest` declares. That model is frozen
@@ -86,12 +132,21 @@ The gates in `validate.py` check what the build *declared* against what it
 |---|---|
 | `partitions` | exactly the eleven expected years, one `data.parquet` each, nothing else in the tree |
 | `schema` | every partition on its own terms against `property_core.snapshot.schema.REQUIRED_COLUMNS`, names **and** types — per file, never over the union, because `union_by_name` hides a partition missing a column |
+| `required_values` | no row has a NULL `transaction_id`, `price` or `transfer_date`. `TRY_CAST` turns an unparseable value into NULL, which every count-based gate then waves through — the snapshot would serve a sale with no price |
+| `reconciliation` | the rows the **source** held for this window, counted from the staged source with its own predicate, equal the rows the snapshot wrote. Every other count comes from the artifact, so a row lost between reading and writing is invisible to all of them |
 | `rows` | the declared count, the union count and the sum of the parts agree |
 | `uniqueness` | `transaction_id` is a key across the whole window |
 | `coverage` | the bounds are the intended partition boundary and the release's declared end, and every row falls **inside** them |
 | `guarantee` | the window still answers a 120-month request — what makes eleven partitions load-bearing rather than ten |
 | `provisional` | the boundary is the computed month and lies inside the window |
 | `ordering` | each partition is in `transfer_date DESC, transaction_id ASC`, checked by physical row number |
+
+The build itself **fails closed** before any of this: a source row whose
+`transfer_date` does not parse stops the build outright — it can be neither
+placed in the window nor shown to be outside it, so dropping it would be
+deciding silently — and an unparseable `price` or a blank `transaction_id`
+*inside* the window stops it too. Rows outside the window are not the
+snapshot's problem and are not policed.
 
 **Coverage is a declaration about the source release, not a measurement of the
 rows.** `min(transfer_date) == coverage_from` is deliberately *not* required: a
@@ -121,7 +176,11 @@ queryability validation. `all` exits non-zero unless that ends in `READY`.
 
 Halt and report; there is no override flag for any of these.
 
-* Any gate fails, or the boot check does not end `READY`.
+* Any gate fails, or the boot check does not end `READY` (nothing is promoted).
+* The CSV does not match its receipt, or the receipt does not match the latest
+  observed release — including a release that has moved on since the download.
+* A source row inside the window has an unparseable `price` or no
+  `transaction_id`, or any source row has an unparseable `transfer_date`.
 * The recorded `ETag` differs from the release the CSV was fetched from — a fresh
   5.5 GB download is a cost decision, not something the pipeline should make.
 * `transaction_id` is not unique within the window, or the row count disagrees.
@@ -141,6 +200,8 @@ no deployed system touched). Source: the HM Land Registry release fetched on
 | Declared coverage | `2016-01-01` … `2026-06-30`, `provisional_from` `2026-03-01` |
 | Source rows | 31,430,611 |
 | Rows in the eleven-year window | **10,394,935** |
+| Eligible source rows (counted from the source) | 10,394,935 — equal, so nothing was lost between reading and writing |
+| Source rows with a malformed required value | 0 (`transfer_date` anywhere, `price`/`transaction_id` in window) |
 | Distinct `transaction_id` | 10,394,935 — equal, so the key holds |
 | Rows with no parseable date | 0 |
 | Partitions | 11 (`year=2016` … `year=2026`) |
@@ -166,6 +227,14 @@ object storage, can produce that.
 Two independent full builds from the same CSV produced **byte-identical Parquet
 files and a byte-identical bundle** — the same sha256 `50f802b2…9072c` — and
 identical logical content digests.
+
+The fail-closed source checks were added after that build and re-run against the
+same CSV using the shipped predicates: **zero** rows with a malformed required
+value, and an eligible source count of 10,394,935 — exactly the published row
+count. The artifact's content and size are therefore unchanged by that work, and
+the build was not re-run. The per-partition content digests recorded in the
+build report predate the switch to the length-prefixed encoding and are not
+comparable across that change; the bundle digest is.
 
 **Observed twice on one machine; not a guarantee.** Nothing here establishes that
 DuckDB 1.5.5 or zstd promise byte-reproducible output, so the pipeline does not

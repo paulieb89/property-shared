@@ -54,9 +54,15 @@ from tools.ppd_snapshot.build import (
 #: The order gates run in. Data gates are skipped when the schema gate fails,
 #: because a query over a defective partition reports a defect of its own and
 #: would bury the real one.
-GATE_ORDER = ("partitions", "schema", "rows", "uniqueness", "coverage",
-              "guarantee", "provisional", "ordering")
-_DATA_GATES = frozenset({"rows", "uniqueness", "coverage", "ordering"})
+GATE_ORDER = ("partitions", "schema", "required_values", "rows",
+              "reconciliation", "uniqueness", "coverage", "guarantee",
+              "provisional", "ordering")
+_DATA_GATES = frozenset({"required_values", "rows", "reconciliation",
+                         "uniqueness", "coverage", "ordering"})
+
+
+class _Skip(str):
+    """A gate that could not run. Not a pass -- the report says so."""
 
 
 @dataclass(frozen=True)
@@ -106,6 +112,10 @@ class DeclaredSnapshot:
     provisional_from: date
     rows: int
     parquet_files: int
+    #: Eligible rows counted from the source, independently of what was written.
+    #: None means the source was not available to compare against, which is a
+    #: skipped gate rather than a passing one.
+    eligible_source_rows: Optional[int] = None
 
     def replace(self, **changes: Any) -> "DeclaredSnapshot":
         return dataclasses.replace(self, **changes)
@@ -195,6 +205,49 @@ def _gate_schema(declared: DeclaredSnapshot, ctx: _Context) -> Optional[str]:
     return "; ".join(problems) or None
 
 
+def _gate_required_values(declared: DeclaredSnapshot,
+                          ctx: _Context) -> Optional[str]:
+    """No row may be missing a value the service has to have.
+
+    `TRY_CAST` turns an unparseable price or date into NULL, which every other
+    gate then waves through: the row count is right, the schema is right, and
+    the snapshot serves a sale with no price. Required means required.
+    """
+    total, no_id, no_price, no_date = ctx.connection.execute(
+        f"SELECT count(*), "
+        f"       count(*) FILTER (WHERE transaction_id IS NULL "
+        f"                           OR trim(transaction_id) = ''), "
+        f"       count(*) FILTER (WHERE price IS NULL), "
+        f"       count(*) FILTER (WHERE transfer_date IS NULL) "
+        f"FROM {_scan(ctx.files.values())}").fetchone()
+    problems = []
+    for count, column in ((no_id, "transaction_id"), (no_price, "price"),
+                          (no_date, "transfer_date")):
+        if int(count):
+            problems.append(f"{int(count)} of {int(total)} row(s) have no "
+                            f"{column}")
+    return "; ".join(problems) or None
+
+
+def _gate_reconciliation(declared: DeclaredSnapshot,
+                         ctx: _Context) -> Optional[str]:
+    """What the source held against what the snapshot wrote.
+
+    Every other count is taken from the artifact, so a row lost between reading
+    the CSV and writing the Parquet is invisible to all of them: the snapshot is
+    perfectly consistent with itself and quietly short.
+    """
+    if declared.eligible_source_rows is None:
+        return _Skip("no source row count was supplied, so the snapshot cannot "
+                     "be reconciled with what it was built from")
+    written = int(ctx.connection.execute(
+        f"SELECT count(*) FROM {_scan(ctx.files.values())}").fetchone()[0])
+    if written != declared.eligible_source_rows:
+        return (f"the source held {declared.eligible_source_rows} eligible "
+                f"row(s) but the snapshot holds {written}")
+    return None
+
+
 def _gate_rows(declared: DeclaredSnapshot, ctx: _Context) -> Optional[str]:
     total = int(ctx.connection.execute(
         f"SELECT count(*) FROM {_scan(ctx.files.values())}").fetchone()[0])
@@ -212,13 +265,12 @@ def _gate_rows(declared: DeclaredSnapshot, ctx: _Context) -> Optional[str]:
 
 
 def _gate_uniqueness(declared: DeclaredSnapshot, ctx: _Context) -> Optional[str]:
-    total, distinct, blank = ctx.connection.execute(
-        f"SELECT count(*), count(DISTINCT transaction_id), "
-        f"count(*) FILTER (WHERE transaction_id IS NULL OR transaction_id = '') "
+    # A missing id is the required-values gate's business; this one is only
+    # about the id being a key.
+    total, distinct = ctx.connection.execute(
+        f"SELECT count(*), count(DISTINCT transaction_id) "
         f"FROM {_scan(ctx.files.values())}").fetchone()
     problems = []
-    if int(blank):
-        problems.append(f"{int(blank)} row(s) carry no transaction_id")
     if int(total) != int(distinct):
         problems.append(f"{int(total)} row(s) carry only {int(distinct)} distinct "
                         f"transaction_id(s)")
@@ -237,8 +289,7 @@ def _gate_coverage(declared: DeclaredSnapshot, ctx: _Context) -> Optional[str]:
 
     outside = int(ctx.connection.execute(
         f"SELECT count(*) FROM {_scan(ctx.files.values())} "
-        f"WHERE transfer_date IS NULL "
-        f"   OR transfer_date < DATE {_quote(declared.coverage_from)} "
+        f"WHERE transfer_date < DATE {_quote(declared.coverage_from)} "
         f"   OR transfer_date > DATE {_quote(declared.coverage_to)}").fetchone()[0])
     if outside:
         problems.append(f"{outside} row(s) fall outside the declared window "
@@ -248,8 +299,11 @@ def _gate_coverage(declared: DeclaredSnapshot, ctx: _Context) -> Optional[str]:
         path = ctx.files[year]
         misfiled = int(ctx.connection.execute(
             f"SELECT count(*) FROM read_parquet({_quote(path)}) "
+            # A NULL date is the required-values gate's business, so it is not
+            # counted here as well: one fault, one gate.
             f"WHERE year IS DISTINCT FROM {year} "
-            f"   OR EXTRACT(year FROM transfer_date) IS DISTINCT FROM {year}"
+            f"   OR (transfer_date IS NOT NULL "
+            f"       AND EXTRACT(year FROM transfer_date) IS DISTINCT FROM {year})"
         ).fetchone()[0])
         if misfiled:
             problems.append(
@@ -329,15 +383,21 @@ def content_digests(directory: Path | str,
             year = path.parent.name[len("year="):]
             columns = [str(row[0]) for row in con.execute(
                 f"DESCRIBE SELECT * FROM read_parquet({_quote(path)})").fetchall()]
-            # NULL is rendered explicitly: `concat_ws` skips NULLs, so without
-            # this a row of (a, NULL, b) and one of (a, b, NULL) would digest
-            # identically.
+            # Length-prefixed, so the encoding is injective. Joining fields
+            # with a separator is not: `paon="A|B", saon="C"` and
+            # `paon="A", saon="B|C"` are different properties that a delimiter
+            # join renders as the same string, and the digest then stops
+            # distinguishing them. A NULL gets its own marker for the same
+            # reason -- it is a distinct value, not an empty one.
             rendered = ", ".join(
-                f"coalesce(CAST({name} AS VARCHAR), '~NULL~')" for name in columns)
+                f"CASE WHEN {name} IS NULL THEN 'N:' ELSE concat("
+                f"  CAST(length(CAST({name} AS VARCHAR)) AS VARCHAR), ':', "
+                f"  CAST({name} AS VARCHAR)) END"
+                for name in columns)
             digests[year] = str(con.execute(
                 f"SELECT coalesce(md5(string_agg(row_text, chr(10) "
                 f"                              ORDER BY rn)), '') FROM ("
-                f"  SELECT file_row_number AS rn, concat_ws('|', {rendered}) "
+                f"  SELECT file_row_number AS rn, concat({rendered}) "
                 f"         AS row_text "
                 f"  FROM read_parquet({_quote(path)}, file_row_number=true))"
             ).fetchone()[0])
@@ -398,8 +458,11 @@ def validate_snapshot(declared: DeclaredSnapshot, *, source_coverage_end: date,
             detail = globals()[f"_gate_{name}"](declared, ctx)
             if name == "schema" and detail:
                 schema_failed = True
-            results.append(GateResult(name, "fail" if detail else "pass",
-                                      detail or ""))
+            if isinstance(detail, _Skip):
+                results.append(GateResult(name, "skipped", str(detail)))
+            else:
+                results.append(GateResult(name, "fail" if detail else "pass",
+                                          detail or ""))
         facts = {} if schema_failed else _facts(ctx, declared)
     finally:
         ctx.connection.close()

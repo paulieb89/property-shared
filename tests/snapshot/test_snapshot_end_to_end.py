@@ -30,7 +30,11 @@ from property_core.snapshot.runtime import SnapshotRuntime  # noqa: E402
 from property_core.snapshot.source import LocalDirectorySource  # noqa: E402
 from property_core.snapshot.store import SnapshotStore  # noqa: E402
 from tools.ppd_snapshot.build import BuildRequest, build_snapshot  # noqa: E402
-from tools.ppd_snapshot.package import package_release, snapshot_version  # noqa: E402
+from tools.ppd_snapshot.package import (  # noqa: E402
+    package_release,
+    promote_release,
+    snapshot_version,
+)
 from tests.snapshot.build_fixtures import csv_row, write_source_csv  # noqa: E402
 
 COVERAGE_TO = date(2026, 6, 30)
@@ -54,7 +58,9 @@ def published(tmp_path: Path):
         built, dist_dir=tmp_path / "dist",
         version=snapshot_version(datetime(2026, 8, 28, 10, 15, tzinfo=timezone.utc)),
         source={"file": "pp.csv"}, facts={})
-    return release
+    # Promoted, because a published release is what the runtime is pointed at.
+    # The candidate stage is exercised by the CLI tests.
+    return promote_release(release)
 
 
 def boot(release, tmp_path: Path):

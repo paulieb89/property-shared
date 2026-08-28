@@ -35,15 +35,23 @@ from tools.ppd_snapshot.build import (
 )
 from tools.ppd_snapshot.package import (
     package_release,
+    promote_release,
     snapshot_version,
     verify_bundle,
 )
 from tools.ppd_snapshot.release_check import (
     DEFAULT_URL,
+    ReleaseObservation,
     check_release,
     declared_coverage_end,
     describe,
     record_ingested,
+)
+from tools.ppd_snapshot.source_receipt import (
+    SourceMismatch,
+    load_receipt,
+    verify_source,
+    write_receipt,
 )
 from tools.ppd_snapshot.validate import DeclaredSnapshot, validate_snapshot
 
@@ -60,6 +68,7 @@ def _declared(built: BuildResult) -> DeclaredSnapshot:
         provisional_from=built.provisional_from,
         rows=built.rows,
         parquet_files=built.parquet_files,
+        eligible_source_rows=built.eligible_source_rows,
     )
 
 
@@ -68,6 +77,29 @@ def _print_report(report) -> None:
         mark = {"pass": "ok  ", "fail": "FAIL", "skipped": "skip"}[gate.status]
         line = f"  [{mark}] {gate.name}"
         print(line if not gate.detail else f"{line} -- {gate.detail}")
+
+
+def _release_state(path: Optional[str]) -> dict:
+    if not path or not Path(path).is_file():
+        return {}
+    try:
+        state = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _observed(state: dict) -> Optional[ReleaseObservation]:
+    """The release as most recently observed, or nothing.
+
+    Nothing is a refusal upstream, never a default: a build that cannot say
+    which release is published now cannot claim the file it holds is that one.
+    """
+    if not state:
+        return None
+    return ReleaseObservation(
+        etag=state.get("etag"), last_modified=state.get("last_modified"),
+        content_length=state.get("content_length"))
 
 
 def _source_end(args) -> Optional[date]:
@@ -79,14 +111,8 @@ def _source_end(args) -> Optional[date]:
     explicit = _iso(getattr(args, "source_coverage_end", None))
     if explicit:
         return explicit
-    state_path = getattr(args, "release_state", None)
-    if not state_path or not Path(state_path).is_file():
-        return None
-    try:
-        state = json.loads(Path(state_path).read_text())
-    except (OSError, ValueError):
-        return None
-    return declared_coverage_end(state.get("last_modified"))
+    return declared_coverage_end(
+        _release_state(getattr(args, "release_state", None)).get("last_modified"))
 
 
 # -- commands ----------------------------------------------------------------
@@ -95,6 +121,39 @@ def _cmd_check_release(args) -> int:
     check = check_release(args.url, args.state)
     print(describe(check))
     return 0
+
+
+def _cmd_receipt(args) -> int:
+    observation = _observed(_release_state(args.release_state))
+    if observation is None:
+        print("refusing: no release observation is recorded; run check-release "
+              "first so the file can be bound to a release")
+        return 2
+    try:
+        receipt = write_receipt(Path(args.csv), observation, Path(args.receipt))
+    except SourceMismatch as exc:
+        print(f"refusing to write a receipt: {exc}")
+        return 2
+    print(f"receipt written for {receipt.file}: {receipt.bytes} bytes, "
+          f"sha256 {receipt.sha256}, ETag {receipt.etag}")
+    return 0
+
+
+def load_receipt_or_none(args):
+    """Refuse unless the CSV, its receipt and the observed release agree.
+
+    Every gate after this point checks the snapshot against itself, so an
+    internally consistent snapshot of the wrong file passes all of them. This is
+    the only check that looks at what was read.
+    """
+    try:
+        receipt = load_receipt(args.source_receipt)
+        verify_source(Path(args.csv), receipt,
+                      _observed(_release_state(args.release_state)))
+    except SourceMismatch as exc:
+        print(f"refusing to build: {exc}")
+        return None
+    return receipt
 
 
 def _cmd_build(args) -> int:
@@ -137,6 +196,7 @@ def _cmd_validate(args) -> int:
         provisional_from=provisional_boundary(coverage_to),
         rows=args.rows if args.rows is not None else _count(directory),
         parquet_files=len(list(directory.glob("year=*/data.parquet"))),
+        eligible_source_rows=args.eligible_source_rows,
     )
     report = validate_snapshot(declared, source_coverage_end=source_end,
                                today=_iso(args.today) or date.today())
@@ -210,9 +270,16 @@ def _cmd_all(args) -> int:
               "unknown; pass --source-coverage-end or --release-state")
         return 2
 
+    receipt = load_receipt_or_none(args)
+    if receipt is None:
+        return 2
+    print(f"source verified: {Path(args.csv).name} matches its receipt and the "
+          f"observed release")
+
     built = _build(args)
     print(f"built {built.rows} row(s) into {built.parquet_files} partition(s) "
-          f"at {built.snapshot_dir}")
+          f"at {built.snapshot_dir} ({built.eligible_source_rows} eligible "
+          f"source row(s))")
 
     report = validate_snapshot(_declared(built), source_coverage_end=source_end,
                                today=_iso(args.today) or date.today())
@@ -222,16 +289,11 @@ def _cmd_all(args) -> int:
         return 1
 
     version = args.version or snapshot_version()
-    source = {"file": Path(args.csv).name}
-    if args.release_state and Path(args.release_state).is_file():
-        try:
-            state = json.loads(Path(args.release_state).read_text())
-            source.update({k: state.get(k) for k in
-                           ("url", "etag", "last_modified", "content_length")})
-        except (OSError, ValueError):
-            pass
-    if args.source_sha256:
-        source["sha256"] = args.source_sha256
+    state = _release_state(args.release_state)
+    source = {"file": Path(args.csv).name, "sha256": receipt.sha256,
+              "bytes": receipt.bytes}
+    source.update({k: state.get(k) for k in
+                   ("url", "etag", "last_modified", "content_length")})
 
     release = package_release(built, dist_dir=dist, version=version,
                               source=source,
@@ -239,22 +301,27 @@ def _cmd_all(args) -> int:
     verify_bundle(release.bundle_path, expected_sha256=release.bundle_sha256,
                   expected_bytes=release.bundle_bytes)
     print(f"packaged {release.bundle_path.name} "
-          f"({release.bundle_bytes} bytes, sha256 {release.bundle_sha256})")
+          f"({release.bundle_bytes} bytes, sha256 {release.bundle_sha256}) "
+          f"into {release.candidate_dir.name}")
 
-    outcome = _boot_check(dist, work / "boot-cache")
+    # Booted from the CANDIDATE. Nothing reaches the dist root until this
+    # passes, so a failed boot cannot leave a publishable release behind.
+    outcome = _boot_check(release.candidate_dir, work / "boot-cache")
     print(f"boot check: {outcome['readiness'].upper()} "
           f"({outcome.get('source_error') or 'validated through the adapter'})")
 
-    # The report is rewritten once the boot check has run, so the recorded
-    # evidence covers the whole pipeline rather than stopping at packaging.
     stored = json.loads(release.report_path.read_text())
     stored["boot_check"] = outcome
     release.report_path.write_text(json.dumps(stored, indent=2) + "\n")
 
     if outcome["readiness"] != "ready":
+        print(f"not promoted; the candidate is left at "
+              f"{release.candidate_dir} for diagnosis")
         return 1
-    if args.release_state and Path(args.release_state).is_file():
-        state = json.loads(Path(args.release_state).read_text())
+
+    promoted = promote_release(release)
+    print(f"promoted to {promoted.bundle_path.parent}")
+    if state:
         record_ingested(args.release_state, version=version,
                         etag=state.get("etag"))
     return 0
@@ -287,8 +354,15 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--release-state")
     build.add_argument("--today")
     build.add_argument("--version")
-    build.add_argument("--source-sha256")
+    build.add_argument("--source-receipt")
     build.set_defaults(handler=_cmd_build)
+
+    receipt = sub.add_parser(
+        "receipt", help="bind a local CSV to the observed release")
+    receipt.add_argument("--csv", required=True)
+    receipt.add_argument("--release-state", required=True)
+    receipt.add_argument("--receipt", required=True)
+    receipt.set_defaults(handler=_cmd_receipt)
 
     validate = sub.add_parser("validate", help="run the gates on a built snapshot")
     validate.add_argument("--snapshot", required=True)
@@ -297,16 +371,19 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--release-state")
     validate.add_argument("--today")
     validate.add_argument("--rows", type=int)
+    validate.add_argument("--eligible-source-rows", type=int)
     validate.set_defaults(handler=_cmd_validate)
 
     every = sub.add_parser("all", help="build, validate, package, verify, boot")
     _add_build_arguments(every)
     every.add_argument("--dist", required=True)
     every.add_argument("--source-coverage-end")
-    every.add_argument("--release-state")
+    every.add_argument("--release-state", required=True,
+                       help="the observed-release state written by check-release")
     every.add_argument("--today")
     every.add_argument("--version")
-    every.add_argument("--source-sha256")
+    every.add_argument("--source-receipt", required=True,
+                       help="the receipt binding the CSV to a release")
     every.set_defaults(handler=_cmd_all)
     return parser
 

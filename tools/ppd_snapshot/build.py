@@ -90,6 +90,16 @@ def covers_maximum_request(coverage_from: date, today: date) -> bool:
     return (today - coverage_from).days >= MAX_REQUEST_DAYS
 
 
+class MalformedSourceRows(RuntimeError):
+    """The source holds rows the snapshot cannot honestly represent.
+
+    `TRY_CAST` makes silence the default: an unparseable price becomes NULL and
+    the row is published as a sale with no price, while an unparseable date
+    cannot be placed in a partition at all and would simply vanish. Neither is a
+    judgement this pipeline gets to make quietly, so both stop the build.
+    """
+
+
 @dataclass(frozen=True)
 class BuildRequest:
     """Everything the build needs, stated rather than discovered.
@@ -116,6 +126,10 @@ class BuildResult:
     years: tuple[int, ...]
     parquet_files: int
     rows: int
+    #: Rows the SOURCE holds for this window, counted from the staged source
+    #: table with its own predicate -- independent of the derivation and of the
+    #: write, so a row lost between them is visible.
+    eligible_source_rows: int
     source_rows: int
     rows_outside_window: int
     rows_without_date: int
@@ -158,7 +172,56 @@ SELECT
 FROM staged
 WHERE TRY_CAST(transfer_date AS TIMESTAMP)::DATE BETWEEN DATE {coverage_from}
                                                      AND DATE {coverage_to}
+  AND TRY_CAST(price AS BIGINT) IS NOT NULL
+  AND trim(coalesce(transaction_id, ''), '{{}} ') <> ''
 """
+
+#: Counted from the staged source rows, deliberately written out separately from
+#: the derivation above rather than sharing a predicate with it.
+_ELIGIBLE = """
+SELECT count(*) FROM staged
+WHERE TRY_CAST(transfer_date AS TIMESTAMP)::DATE >= DATE {coverage_from}
+  AND TRY_CAST(transfer_date AS TIMESTAMP)::DATE <= DATE {coverage_to}
+  AND TRY_CAST(price AS BIGINT) IS NOT NULL
+  AND length(trim(coalesce(transaction_id, ''), '{{}} ')) > 0
+"""
+
+
+def _refuse_malformed(con, coverage_from: date, coverage_to: date) -> None:
+    """Stop the build on any source row the snapshot cannot represent honestly.
+
+    The date check is deliberately over the WHOLE source rather than the window:
+    a row whose date does not parse cannot be shown to be outside the window, so
+    excluding it would be deciding that it is. Price and id are checked only
+    inside the window, because rows the snapshot never serves are not its
+    problem.
+    """
+    undated = int(con.execute(
+        "SELECT count(*) FROM staged "
+        "WHERE TRY_CAST(transfer_date AS TIMESTAMP) IS NULL").fetchone()[0])
+    if undated:
+        raise MalformedSourceRows(
+            f"{undated} source row(s) have an unparseable transfer_date; they "
+            f"cannot be placed in or excluded from the window, so the build "
+            f"stops rather than deciding silently")
+
+    window = (f"WHERE TRY_CAST(transfer_date AS TIMESTAMP)::DATE "
+              f"      BETWEEN DATE {_sql_literal(coverage_from.isoformat())} "
+              f"          AND DATE {_sql_literal(coverage_to.isoformat())}")
+    bad_price, bad_id = con.execute(
+        f"SELECT count(*) FILTER (WHERE TRY_CAST(price AS BIGINT) IS NULL), "
+        f"       count(*) FILTER (WHERE length(trim(coalesce(transaction_id, ''), "
+        f"                                          '{{}} ')) = 0) "
+        f"FROM staged {window}").fetchone()
+    problems = []
+    if int(bad_price):
+        problems.append(f"{int(bad_price)} row(s) have an unparseable price")
+    if int(bad_id):
+        problems.append(f"{int(bad_id)} row(s) have no transaction_id")
+    if problems:
+        raise MalformedSourceRows(
+            "; ".join(problems) + " inside the declared window; a required "
+            "value cannot be published as NULL")
 
 
 def build_snapshot(request: BuildRequest) -> BuildResult:
@@ -200,14 +263,19 @@ def build_snapshot(request: BuildRequest) -> BuildResult:
         timings["ingest"] = time.perf_counter() - started
 
         started = time.perf_counter()
+        _refuse_malformed(con, coverage_from, request.coverage_to)
+        eligible = int(con.execute(_ELIGIBLE.format(
+            coverage_from=_sql_literal(coverage_from.isoformat()),
+            coverage_to=_sql_literal(request.coverage_to.isoformat()),
+        )).fetchone()[0])
         con.execute(_DERIVE.format(
             coverage_from=_sql_literal(coverage_from.isoformat()),
             coverage_to=_sql_literal(request.coverage_to.isoformat()),
         ))
         rows = con.execute("SELECT count(*) FROM ppd").fetchone()[0]
-        # Accounted for explicitly rather than left as a silent difference: a
-        # row the window excluded and a row with no parseable date are different
-        # facts, and only one of them is expected.
+        # Zero by construction now -- `_refuse_malformed` has already stopped a
+        # build with any unplaceable row. Kept as a recorded fact rather than an
+        # assumption.
         without_date = con.execute(
             "SELECT count(*) FROM staged "
             "WHERE TRY_CAST(transfer_date AS TIMESTAMP) IS NULL").fetchone()[0]
@@ -242,6 +310,7 @@ def build_snapshot(request: BuildRequest) -> BuildResult:
         years=years,
         parquet_files=sum(1 for _ in snapshot_dir.rglob("*.parquet")),
         rows=int(rows),
+        eligible_source_rows=eligible,
         source_rows=int(source_rows),
         rows_outside_window=int(source_rows) - int(rows) - int(without_date),
         rows_without_date=int(without_date),

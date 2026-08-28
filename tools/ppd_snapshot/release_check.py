@@ -23,9 +23,16 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-#: The public open-data object. No credentials; nothing is created or mutated.
-DEFAULT_URL = ("http://prod.publicdata.landregistry.gov.uk.s3-website-eu-west-1"
-               ".amazonaws.com/pp-complete.csv")
+#: The official HTTPS endpoint published by HM Land Registry on the GOV.UK
+#: "Price Paid Data single file" page. Public open data: no credentials, and
+#: nothing is created or mutated.
+#:
+#: HTTPS on purpose. The S3 *website* endpoint the lab used
+#: (`http://prod.publicdata.landregistry.gov.uk.s3-website-eu-west-1...`) is
+#: plaintext, so both the validators this pipeline trusts and the 5.5 GB body
+#: itself are open to tampering in transit -- and the receipt would then bind
+#: the build to whatever arrived.
+DEFAULT_URL = "https://price-paid-data.publicdata.landregistry.gov.uk/pp-complete.csv"
 
 #: Section 4.9: an observed release still uningested after this many days is an
 #: operational alert -- the pipeline is failing, which is a different fact from

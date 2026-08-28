@@ -62,6 +62,7 @@ def snapshot(tmp_path: Path):
         provisional_from=result.provisional_from,
         rows=result.rows,
         parquet_files=result.parquet_files,
+        eligible_source_rows=result.eligible_source_rows,
     )
     return result, declared
 
@@ -100,8 +101,8 @@ def test_every_declared_gate_reports_a_result(snapshot):
     _, declared = snapshot
     report = run(declared)
     assert {g.name for g in report.gates} == {
-        "schema", "partitions", "rows", "uniqueness", "coverage", "guarantee",
-        "provisional", "ordering",
+        "partitions", "schema", "required_values", "rows", "reconciliation",
+        "uniqueness", "coverage", "guarantee", "provisional", "ordering",
     }
 
 
@@ -367,3 +368,76 @@ def test_validation_records_the_content_digest_as_a_fact(snapshot):
 def test_the_build_records_its_peak_memory(snapshot):
     built, _ = snapshot
     assert built.peak_rss_mb > 0
+
+
+def test_the_content_digest_separates_values_that_share_a_delimiter(tmp_path: Path):
+    """Two different rows must not digest the same because of a field separator.
+
+    `paon="A|B", saon="C"` and `paon="A", saon="B|C"` are different properties.
+    Joining fields with a delimiter that can occur inside a field makes them the
+    same string, so the digest silently stops distinguishing them.
+    """
+    from tools.ppd_snapshot.validate import content_digests
+
+    def digest_for(paon: str, saon: str) -> dict[str, str]:
+        name = f"{paon}-{saon}".replace("|", "")
+        path = write_source_csv(tmp_path / f"pp-{name}.csv", [
+            csv_row("{T-2024-A}", "B5 7AA", "2024-03-01 00:00", 210_000,
+                    paon=paon, saon=saon),
+        ])
+        built = build_snapshot(BuildRequest(
+            csv_path=path, out_dir=tmp_path / name, coverage_to=COVERAGE_TO,
+            temp_dir=tmp_path / f"tmp-{name}"))
+        return content_digests(built.snapshot_dir)
+
+    assert digest_for("A|B", "C")["2024"] != digest_for("A", "B|C")["2024"]
+
+
+# -- required values --------------------------------------------------------
+
+def test_required_values_gate_rejects_a_null_price(snapshot):
+    result, declared = snapshot
+    rewrite(result.snapshot_dir / "year=2024" / "data.parquet",
+            projection="* REPLACE (CAST(NULL AS BIGINT) AS price)")
+    report = run(declared)
+    assert failed(report) == {"required_values"}
+    assert "price" in report.failures[0].detail
+
+
+def test_required_values_gate_rejects_a_null_transfer_date(snapshot):
+    result, declared = snapshot
+    rewrite(result.snapshot_dir / "year=2016" / "data.parquet",
+            projection="* REPLACE (CAST(NULL AS DATE) AS transfer_date)")
+    report = run(declared)
+    assert failed(report) == {"required_values"}
+    assert "transfer_date" in report.failures[0].detail
+
+
+def test_required_values_gate_is_what_rejects_a_null_price(snapshot, monkeypatch):
+    result, declared = snapshot
+    rewrite(result.snapshot_dir / "year=2024" / "data.parquet",
+            projection="* REPLACE (CAST(NULL AS BIGINT) AS price)")
+    monkeypatch.setattr(gates, "_gate_required_values", lambda *a, **k: None)
+    assert run(declared).failures == ()
+
+
+# -- reconciliation against the source --------------------------------------
+
+def test_reconciliation_gate_rejects_a_snapshot_holding_fewer_rows_than_the_source(
+        snapshot):
+    _, declared = snapshot
+    # The source held one more eligible row than the snapshot wrote: a row was
+    # lost between reading and writing, which no count taken from the artifact
+    # alone can see.
+    report = run(declared.replace(eligible_source_rows=declared.rows + 1))
+    assert failed(report) == {"reconciliation"}
+
+
+def test_reconciliation_gate_is_skipped_rather_than_passed_without_a_source_count(
+        snapshot):
+    _, declared = snapshot
+    report = run(declared.replace(eligible_source_rows=None))
+    assert report.failures == ()
+    assert "reconciliation" in report.skipped
+    # A skipped gate is not a passing gate.
+    assert report.passed is False

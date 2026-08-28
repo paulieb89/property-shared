@@ -114,3 +114,64 @@ def test_build_reports_the_window_it_was_given(built):
 
 def test_build_records_the_duckdb_version_that_wrote_the_files(built):
     assert built.duckdb_version.startswith("v1.5.")
+
+
+# -- malformed required source values fail the build ------------------------
+
+def build_from(tmp_path: Path, rows, name: str = "s"):
+    csv_path = write_source_csv(tmp_path / f"pp-{name}.csv", rows)
+    return build_snapshot(BuildRequest(
+        csv_path=csv_path, out_dir=tmp_path / name, coverage_to=date(2026, 6, 30),
+        temp_dir=tmp_path / f"tmp-{name}"))
+
+
+def test_an_unparseable_date_anywhere_in_the_source_fails_the_build(tmp_path):
+    from tools.ppd_snapshot.build import MalformedSourceRows
+
+    with pytest.raises(MalformedSourceRows, match="transfer_date"):
+        build_from(tmp_path, [
+            csv_row("{OK}", "B5 7AA", "2024-03-01 00:00", 200_000),
+            # Unplaceable: it may or may not belong in the window, and dropping
+            # it would silently decide that it does not.
+            csv_row("{BAD}", "B5 7AB", "not-a-date", 210_000),
+        ])
+
+
+def test_an_unparseable_price_inside_the_window_fails_the_build(tmp_path):
+    from tools.ppd_snapshot.build import MalformedSourceRows
+
+    rows = [csv_row("{OK}", "B5 7AA", "2024-03-01 00:00", 200_000)]
+    bad = list(csv_row("{BAD}", "B5 7AB", "2024-04-01 00:00", 0))
+    bad[1] = "not-a-price"
+    with pytest.raises(MalformedSourceRows, match="price"):
+        build_from(tmp_path, rows + [tuple(bad)])
+
+
+def test_a_blank_transaction_id_inside_the_window_fails_the_build(tmp_path):
+    from tools.ppd_snapshot.build import MalformedSourceRows
+
+    with pytest.raises(MalformedSourceRows, match="transaction_id"):
+        build_from(tmp_path, [
+            csv_row("{OK}", "B5 7AA", "2024-03-01 00:00", 200_000),
+            csv_row("  ", "B5 7AB", "2024-04-01 00:00", 210_000),
+        ])
+
+
+def test_a_malformed_price_outside_the_window_does_not_fail_the_build(tmp_path):
+    # Rows the snapshot never serves are not its problem.
+    bad = list(csv_row("{OLD}", "B5 7AB", "2011-04-01 00:00", 0))
+    bad[1] = "not-a-price"
+    built = build_from(tmp_path, [
+        csv_row("{OK}", "B5 7AA", "2024-03-01 00:00", 200_000), tuple(bad)])
+    assert built.rows == 1
+
+
+def test_the_build_counts_eligible_source_rows_independently_of_what_it_wrote(
+        tmp_path):
+    built = build_from(tmp_path, [
+        csv_row("{A}", "B5 7AA", "2024-03-01 00:00", 200_000),
+        csv_row("{B}", "B5 7AB", "2016-03-01 00:00", 210_000),
+        csv_row("{OLD}", "B5 7AC", "2011-03-01 00:00", 100_000),
+    ])
+    assert built.eligible_source_rows == 2
+    assert built.rows == 2

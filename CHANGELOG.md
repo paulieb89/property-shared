@@ -213,6 +213,30 @@ coverage take effect only once a snapshot is enabled and materialized.
   observation. **Local only** — no upload, bucket, cloud resource, Fly command,
   secret, image or deployment change (§4.8). Runbook:
   `docs/ops/ppd-snapshot-build.md`.
+- **A source receipt binds the CSV to the release it claims to be.** Every gate
+  downstream checks the snapshot against itself, so an internally consistent
+  snapshot of the wrong file passed all of them: a 131-byte stale CSV built,
+  validated and booted `READY` while the release record described a
+  999,999,999-byte release under a different ETag. The receipt records the
+  SHA-256 and length computed from the file alongside the release's validators,
+  and the build refuses unless file, receipt and latest observation all agree.
+  A missing receipt is a refusal, not a default. The release check now uses the
+  official **HTTPS** endpoint published on GOV.UK rather than the plaintext S3
+  website endpoint, so neither the validators nor the body are open to tampering
+  in transit.
+- **The build fails closed on malformed required source values.** `TRY_CAST`
+  silently turned an unparseable price into NULL and published the row as a sale
+  with no price, while an unparseable date made a row vanish; every count-based
+  gate was happy either way. An unparseable `transfer_date` anywhere, or an
+  unparseable `price` or blank `transaction_id` inside the window, now stops the
+  build, and two new gates enforce it independently: `required_values` (no NULL
+  in a required column) and `reconciliation` (rows counted from the source equal
+  rows written).
+- **Releases are assembled in a candidate directory and promoted only after
+  booting.** A forced-`UNREADY` boot previously left the bundle, manifest and
+  `current.json` in the final directory — a publishable release nobody had
+  validated. `current.json` is now written last, so an interrupted promotion
+  leaves no pointer naming a manifest that is not there.
 - Optional `snapshot` extra (`duckdb==1.5.5`) and `PPD_SNAPSHOT_ENABLED`
   (default **off**). The published library gains no required dependency.
 - `docs/design/ppd-source-routing.md` — the frozen specification governing this
