@@ -157,6 +157,10 @@ def load_receipt_or_none(args):
 
 
 def _cmd_build(args) -> int:
+    # The same binding as `all`: this writes the artifact `validate` then
+    # blesses, so it is not a way around the source check.
+    if load_receipt_or_none(args) is None:
+        return 2
     built = _build(args)
     print(f"built {built.rows} row(s) into {built.parquet_files} partition(s) "
           f"at {built.snapshot_dir}")
@@ -351,10 +355,12 @@ def build_parser() -> argparse.ArgumentParser:
     _add_build_arguments(build)
     build.add_argument("--dist")
     build.add_argument("--source-coverage-end")
-    build.add_argument("--release-state")
+    build.add_argument("--release-state", required=True,
+                       help="the observed-release state written by check-release")
     build.add_argument("--today")
     build.add_argument("--version")
-    build.add_argument("--source-receipt")
+    build.add_argument("--source-receipt", required=True,
+                       help="the receipt binding the CSV to a release")
     build.set_defaults(handler=_cmd_build)
 
     receipt = sub.add_parser(

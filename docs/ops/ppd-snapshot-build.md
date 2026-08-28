@@ -50,7 +50,9 @@ The receipt is the binding, and refuses in three directions:
   `Content-Length` have moved, the file on disk is a previous release and the
   build refuses.
 
-There is no default and no override: a missing receipt is a refusal.
+There is no default and no override: a missing receipt is a refusal, and
+`build` applies the same check as `all` — it writes the artifact `validate` then
+blesses, so it is not a way around the binding.
 
 `--coverage-to` and the release record are kept **independent on purpose**: the
 coverage gate checks that the operator's declaration matches the end implied by

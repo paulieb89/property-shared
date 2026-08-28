@@ -194,3 +194,12 @@ def test_validate_without_a_source_count_does_not_report_success(tmp_path, capsy
                  "--source-coverage-end", "2026-06-30", "--today", "2026-07-15"])
     assert code != 0
     assert "skip" in capsys.readouterr().out
+
+
+def test_the_build_command_also_refuses_an_unbound_source(tmp_path, capsys):
+    # `build` writes the artifact that `validate` then blesses, so it applies
+    # the same binding as `all` rather than being a way around it.
+    prepare(tmp_path)
+    assert main(["build", *argv(tmp_path)]) != 0
+    assert "no source receipt" in capsys.readouterr().out
+    assert not (tmp_path / "work" / "snapshot").exists()
