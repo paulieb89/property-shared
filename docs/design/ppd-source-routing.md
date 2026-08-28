@@ -668,6 +668,28 @@ from build time.
 
 ---
 
+### 4.10 Lifespan wiring (governing rule for PR 4)
+
+Where the runtime is started is part of the design, not an implementation
+detail, so it is fixed here before PR 4 begins.
+
+* **Boot once per server process, through the FastMCP lifespan.** Not per
+  request, not lazily on first use.
+* **Where the MCP app is mounted alongside FastAPI, combine the two lifespans
+  explicitly.** Mounting does not chain them; a lifespan that is never awaited
+  is a boot that never happens.
+* **Runtime state is process-scoped, never MCP session state.** Session state is
+  client- and session-scoped, while the materialization belongs to the process
+  and the Machine — storing it per session would re-boot per client and leak
+  across reconnects.
+* **Retain the filesystem single-flight lock** across workers on the same
+  Machine. Lifespan wiring coordinates nothing between processes.
+* **A startup failure leaves the server available on the live fallback.** Boot
+  returning `UNREADY` is a normal outcome, not a startup error: the process must
+  come up and serve from the live source.
+
+---
+
 ## 5. Packaging
 
 DuckDB (~59 MB native wheel) must not be forced on every library consumer.

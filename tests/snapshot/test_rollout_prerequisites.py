@@ -260,3 +260,40 @@ def test_neither_image_installs_the_extra_today_and_that_is_correct():
         f"{installed} — if an image now installs the extra, the rollout has "
         f"started and this record needs updating alongside it"
     )
+
+
+# --------------------------------------------------------------------------
+# The lifespan rule is a governing rule, recorded before PR 4 starts.
+# --------------------------------------------------------------------------
+
+def _spec_body() -> str:
+    return " ".join((REPO / "docs" / "design" / "ppd-source-routing.md").read_text().split())
+
+
+@pytest.mark.parametrize(
+    "requirement",
+    [
+        "Boot once per server process, through the FastMCP lifespan",
+        "combine the two lifespans explicitly",
+        "process-scoped, never MCP session state",
+        "Retain the filesystem single-flight lock",
+        "leaves the server available on the live fallback",
+    ],
+)
+def test_the_lifespan_rule_is_recorded_in_the_specification(requirement):
+    assert requirement in _spec_body(), (
+        f"the governing lifespan rule no longer states: {requirement!r}"
+    )
+
+
+def test_no_lifespan_wiring_exists_yet():
+    """The rule is recorded; PR 4 implements it. Nothing boots a snapshot now."""
+    import inspect
+
+    import app.main as api
+    import property_app.server as mcp_app
+
+    for module in (api, mcp_app):
+        src = inspect.getsource(module)
+        assert "SnapshotRuntime" not in src, f"{module.__name__} boots a snapshot"
+        assert "property_core.snapshot" not in src

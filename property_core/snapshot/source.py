@@ -13,7 +13,8 @@ import urllib.parse
 import urllib.request
 
 from property_core.snapshot.errors import DownloadDeadlineExceeded
-from typing import IO, Optional, Protocol, runtime_checkable
+from contextlib import contextmanager
+from typing import IO, Iterator, Optional, Protocol, runtime_checkable
 
 #: Connect/read timeout, per the governing specification section 4.1.
 #: The single socket timeout urllib actually supports.
@@ -44,6 +45,43 @@ class ObjectSource(Protocol):
         """
 
 
+def _is_timeout(exc: BaseException) -> bool:
+    """Whether this failure is a timeout, however urllib chose to spell it.
+
+    `socket.timeout` is an alias of `TimeoutError` on modern Python, but a
+    connect-phase timeout arrives wrapped in `URLError`, so the reason has to be
+    unwrapped. `HTTPError` is deliberately excluded: it subclasses `URLError`,
+    and a 504 from the server is its answer, not our deadline.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return False
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return True
+    if isinstance(exc, urllib.error.URLError):
+        return isinstance(exc.reason, (TimeoutError, socket.timeout))
+    return False
+
+
+@contextmanager
+def _timeouts_typed(what: str, seconds: float) -> Iterator[None]:
+    """Translate timeout failures into the exported typed failure.
+
+    Applied at EVERY seam where a socket operation can time out -- opening a
+    control response, reading a control body, and opening the bundle response --
+    not only once the bundle stream exists. Unrelated OSError and URLError pass
+    through untouched; losing a connection-refused behind a deadline error would
+    be its own misdiagnosis.
+    """
+    try:
+        yield
+    except Exception as exc:
+        if _is_timeout(exc):
+            raise DownloadDeadlineExceeded(
+                f"{what} timed out after {seconds}s"
+            ) from exc
+        raise
+
+
 class _HttpStream:
     """A response wrapper exposing the declared length alongside read()."""
 
@@ -67,18 +105,8 @@ class _HttpStream:
         builtins.TimeoutError.
         """
         reader = getattr(self._response, "read1", None)
-        try:
+        with _timeouts_typed("bundle read", self._socket_timeout):
             return reader(size) if reader is not None else self._response.read(size)
-        except (TimeoutError, socket.timeout) as exc:
-            raise DownloadDeadlineExceeded(
-                f"transport read timed out after {self._socket_timeout}s"
-            ) from exc
-        except OSError as exc:
-            if isinstance(exc.args[0] if exc.args else None, socket.timeout):
-                raise DownloadDeadlineExceeded(
-                    f"transport read timed out after {self._socket_timeout}s"
-                ) from exc
-            raise
 
     def __enter__(self) -> "_HttpStream":
         return self
@@ -112,21 +140,27 @@ class HttpObjectSource:
 
     def read_bytes(self, name: str, *, max_bytes: Optional[int] = None) -> bytes:
         cap = MAX_CONTROL_BYTES if max_bytes is None else max_bytes
-        with urllib.request.urlopen(self._request(name),
-                                    timeout=self.socket_timeout) as resp:
-            # Read one byte past the cap so an oversized control object is an
-            # error rather than a silent truncation.
-            body = resp.read(cap + 1)
+        # Two separate seams: waiting for the response, then reading its body.
+        # A stalled body times out in the second even though the first succeeded.
+        with _timeouts_typed(f"request for {name!r}", self.socket_timeout):
+            resp = urllib.request.urlopen(self._request(name),
+                                          timeout=self.socket_timeout)
+        with resp:
+            with _timeouts_typed(f"read of {name!r}", self.socket_timeout):
+                # Read one byte past the cap so an oversized control object is an
+                # error rather than a silent truncation.
+                body = resp.read(cap + 1)
         if len(body) > cap:
             raise ValueError(f"control object {name!r} exceeds {cap} bytes")
         return body
 
     def open_stream(self, name: str) -> _HttpStream:
         # The socket timeout bounds connection setup and every read on this
-        # stream. A silent connection raises here rather than being noticed
-        # afterwards, and the stream translates it into the typed failure.
-        resp = urllib.request.urlopen(self._request(name),
-                                      timeout=self.socket_timeout)
+        # stream. A server that never sends headers times out HERE, before any
+        # stream exists, so the translation cannot live only in _HttpStream.read.
+        with _timeouts_typed(f"request for {name!r}", self.socket_timeout):
+            resp = urllib.request.urlopen(self._request(name),
+                                          timeout=self.socket_timeout)
         return _HttpStream(resp, socket_timeout=self.socket_timeout)
 
 

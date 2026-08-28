@@ -9,6 +9,7 @@ socket actually times out, which is where `builtins.TimeoutError` was escaping.
 from __future__ import annotations
 
 import hashlib
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -129,10 +130,139 @@ def test_a_healthy_server_still_downloads_and_verifies(healthy, tmp_path):
     assert dest.read_bytes() == BODY
 
 
-def test_a_control_object_timeout_also_surfaces_typed(stalling):
-    """read_bytes shares the same socket timeout; it must not leak a bare one."""
+# --------------------------------------------------------------------------
+# Every seam where a socket operation can time out, not only the bundle body.
+#
+# The previous version of the control-object test allowed
+# `pytest.raises((DownloadDeadlineExceeded, OSError))`. TimeoutError subclasses
+# OSError, so that tuple accepted precisely the raw escape the test was named
+# for. Every assertion below admits DownloadDeadlineExceeded and nothing else.
+# --------------------------------------------------------------------------
+
+
+class WithholdsHeaders:
+    """A raw socket server that accepts the connection and never responds.
+
+    The timeout then happens while waiting for response headers -- before any
+    stream object exists, so a translation living only in `_HttpStream.read`
+    cannot catch it.
+    """
+
+    def __init__(self):
+        self._sock = socket.socket()
+        self._sock.bind(("127.0.0.1", 0))
+        self._sock.listen(5)
+        self.port = self._sock.getsockname()[1]
+        self._held: list = []
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _addr = self._sock.accept()
+            except OSError:
+                return
+            self._held.append(conn)          # accepted, never answered
+
+    def close(self):
+        for conn in self._held:
+            conn.close()
+        self._sock.close()
+
+
+@pytest.fixture
+def headerless():
+    server = WithholdsHeaders()
+    yield f"http://127.0.0.1:{server.port}"
+    server.close()
+
+
+def test_control_read_timeout_is_typed_when_the_body_stalls(stalling):
+    """Headers arrive, then the body stalls: the timeout is in the body read."""
     source = HttpObjectSource(stalling, socket_timeout=0.05)
-    with pytest.raises((DownloadDeadlineExceeded, OSError)) as ei:
+    with pytest.raises(DownloadDeadlineExceeded) as ei:
         source.read_bytes("current.json")
-    # If it is an OSError it must at least not be a silent success.
-    assert ei.value is not None
+    assert isinstance(ei.value.__cause__, (TimeoutError, OSError))
+
+
+def test_control_request_timeout_is_typed_when_headers_are_withheld(headerless):
+    """No headers ever arrive: the timeout is in opening the response."""
+    source = HttpObjectSource(headerless, socket_timeout=0.05)
+    with pytest.raises(DownloadDeadlineExceeded) as ei:
+        source.read_bytes("current.json")
+    assert ei.value.__cause__ is not None
+
+
+def test_open_stream_timeout_is_typed_when_headers_are_withheld(headerless):
+    """The seam a stream-level translation cannot reach: no stream exists yet."""
+    source = HttpObjectSource(headerless, socket_timeout=0.05)
+    with pytest.raises(DownloadDeadlineExceeded) as ei:
+        source.open_stream("snapshot.tar")
+    assert ei.value.__cause__ is not None
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda src: src.read_bytes("current.json"),
+        lambda src: src.open_stream("snapshot.tar"),
+    ],
+    ids=["read_bytes", "open_stream"],
+)
+def test_no_untyped_timeout_escapes_from_any_entry_point(headerless, call):
+    source = HttpObjectSource(headerless, socket_timeout=0.05)
+    try:
+        call(source)
+    except DownloadDeadlineExceeded:
+        pass
+    except BaseException as exc:  # pragma: no cover - the defect
+        pytest.fail(f"untyped {type(exc).__module__}.{type(exc).__name__} escaped: {exc}")
+
+
+def test_a_boot_over_a_headerless_source_falls_back_to_live(headerless, tmp_path):
+    """End to end: the typed failure is what the runtime degrades on."""
+    from property_core.snapshot.models import Readiness
+    from property_core.snapshot.runtime import SnapshotRuntime
+    from property_core.snapshot.store import SnapshotStore
+
+    runtime = SnapshotRuntime(
+        source=HttpObjectSource(headerless, socket_timeout=0.05),
+        store=SnapshotStore(tmp_path))
+    report = runtime.boot()
+    assert report.readiness is Readiness.UNREADY
+    assert report.fallback_to_live is True
+
+
+# --- unrelated failures must NOT be relabelled as deadlines ----------------
+
+def test_a_connection_refusal_is_not_reported_as_a_deadline(tmp_path):
+    """Losing a connection-refused behind a deadline error is its own
+    misdiagnosis, so the translation is narrow by design."""
+    # Port 1 on loopback: refused immediately, not a timeout.
+    source = HttpObjectSource("http://127.0.0.1:1", socket_timeout=5.0)
+    with pytest.raises(Exception) as ei:
+        source.read_bytes("current.json")
+    assert not isinstance(ei.value, DownloadDeadlineExceeded), (
+        "a refused connection was relabelled as a timeout"
+    )
+
+
+def test_an_http_error_status_is_not_reported_as_a_deadline():
+    """HTTPError subclasses URLError; a 504 is the server's answer, not ours."""
+    import urllib.error
+
+    from property_core.snapshot.source import _is_timeout
+
+    gateway_timeout = urllib.error.HTTPError(
+        "http://x.invalid", 504, "Gateway Timeout", {}, None)
+    assert _is_timeout(gateway_timeout) is False
+
+
+def test_a_connect_phase_timeout_wrapped_in_urlerror_is_recognised():
+    """urllib wraps a connect timeout in URLError; the reason must be unwrapped."""
+    import urllib.error
+
+    from property_core.snapshot.source import _is_timeout
+
+    assert _is_timeout(urllib.error.URLError(TimeoutError("timed out"))) is True
+    assert _is_timeout(urllib.error.URLError(ConnectionRefusedError())) is False
