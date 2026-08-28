@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import Optional
+from typing import Literal, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -130,6 +130,37 @@ class BootReport(BaseModel):
         return self.readiness is Readiness.READY
 
 
+class FrozenInventory(dict):
+    """A dict that refuses in-place mutation.
+
+    The inventory IS the verification evidence: it is what `is_verified` compares
+    the directory against. `frozen=True` on the model only stops rebinding the
+    attribute, so `record.inventory["a"] = 999` silently rewrote the evidence and
+    changed the record's serialisation. Subclassing dict keeps the JSON shape and
+    equality with plain dicts unchanged while closing every mutator.
+    """
+
+    __slots__ = ()
+
+    def _immutable(self, *args, **kwargs):
+        raise TypeError(
+            "the verification inventory is immutable evidence; build a new "
+            "VerificationRecord rather than editing one"
+        )
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    __ior__ = _immutable
+    clear = _immutable
+    pop = _immutable
+    popitem = _immutable
+    setdefault = _immutable
+    update = _immutable
+
+    def __reduce__(self):
+        return (self.__class__, (dict(self),))
+
+
 class VerificationRecord(BaseModel):
     """What was verified about a materialized snapshot, and how.
 
@@ -165,13 +196,21 @@ class VerificationRecord(BaseModel):
     provisional_from: Optional[str] = None
     layout: Optional[str] = None
     duckdb_version: Optional[str] = None
-    bundle_object: Optional[str] = None
+    #: Required: the manifest requires it, and this record claims to persist the
+    #: validated value. Optional here would let a record claim provenance it
+    #: does not carry.
+    bundle_object: str
 
     #: Relative POSIX path -> exact byte size, for every file in the snapshot.
+    #: Annotated as a plain mapping so pydantic can build a schema and
+    #: serialise it unchanged; an after-validator swaps in the immutable
+    #: representation once validation has finished.
     inventory: dict[str, int] = Field(min_length=1)
 
-    #: What PR 3 verified. Structural only -- see the class docstring.
-    verification: str = "structural"
+    #: What this layer verified. A Literal, not a free string: the boot runtime
+    #: can only ever establish structural verification, and a record reading
+    #: `verification="queryable"` would assert something no code here checked.
+    verification: Literal["structural"] = "structural"
 
     @field_validator("version")
     @classmethod
@@ -185,6 +224,11 @@ class VerificationRecord(BaseModel):
         if not _SHA256.match(text):
             raise ValueError("bundle_sha256 must be 64 lowercase hex characters")
         return text
+
+    @field_validator("bundle_object")
+    @classmethod
+    def _object_component(cls, v: str) -> str:
+        return validate_component(v, "bundle_object", reserved=False)
 
     @field_validator("inventory", mode="before")
     @classmethod
@@ -205,3 +249,10 @@ class VerificationRecord(BaseModel):
                 raise ValueError(f"inventory size for {key!r} must be a non-negative int")
             out[key] = size
         return out
+
+    @field_validator("inventory", mode="after")
+    @classmethod
+    def _inventory_is_immutable(cls, v: dict[str, int]) -> "FrozenInventory":
+        # Runs last, so the stored value is the frozen representation while the
+        # declared schema stays a plain mapping.
+        return FrozenInventory(v)

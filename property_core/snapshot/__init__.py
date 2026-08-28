@@ -13,11 +13,18 @@ from property_core.snapshot.archive import ExtractionLimits, ExtractionStats, sa
 from property_core.snapshot.errors import (
     ArchiveRejected,
     BundleVerificationError,
+    DownloadDeadlineExceeded,
+    InsufficientDiskSpaceError,
     SnapshotExtraMissingError,
 )
 from property_core.snapshot.fetch import DownloadResult, download_verified
 from property_core.snapshot.lock import LockTimeout, single_flight
-from property_core.snapshot.models import BootReport, Readiness, SnapshotManifest
+from property_core.snapshot.models import (
+    BootReport,
+    Readiness,
+    SnapshotManifest,
+    VerificationRecord,
+)
 from property_core.snapshot.source import (
     HttpObjectSource,
     LocalDirectorySource,
@@ -29,10 +36,12 @@ __all__ = [
     "ArchiveRejected",
     "BootReport",
     "BundleVerificationError",
+    "DownloadDeadlineExceeded",
     "DownloadResult",
     "ExtractionLimits",
     "ExtractionStats",
     "HttpObjectSource",
+    "InsufficientDiskSpaceError",
     "LocalDirectorySource",
     "LockTimeout",
     "ObjectSource",
@@ -40,6 +49,7 @@ __all__ = [
     "SnapshotExtraMissingError",
     "SnapshotManifest",
     "SnapshotStore",
+    "VerificationRecord",
     "download_verified",
     "safe_extract",
     "single_flight",

@@ -75,18 +75,43 @@ def _manifest(blob: bytes, **over) -> SnapshotManifest:
 
 # --- the published constants ----------------------------------------------
 
-def test_constants_match_the_governing_specification():
-    """Section 4 publishes these. Drift between spec and code is what this
-    reconciliation existed to fix, so pin them."""
-    assert DEFAULT_MAX_BUNDLE_BYTES == 1 * 1024 ** 3          # 4.1: 1 GiB
-    assert DEFAULT_TOTAL_DEADLINE_SECONDS == 300.0            # 4.1: 300 s
-    assert DEFAULT_STALL_SECONDS == 60.0                      # 4.1: 60 s
-    assert DEFAULT_TIMEOUT == 10.0                            # 4.1: 10 s connect
-    assert DISK_HEADROOM_MULTIPLIER == 2.5                    # 4.7: bundle * 2.5
-    limits = ExtractionLimits()
-    assert limits.max_members == 5_000                        # 4.3
-    assert limits.max_total_bytes == 2 * 1024 ** 3            # 4.3
-    assert limits.max_member_bytes == 2 * 1024 ** 3           # 4.3
+SPEC = Path(__file__).resolve().parents[2] / "docs" / "design" / "ppd-source-routing.md"
+
+
+def _spec_text() -> str:
+    """Section 4 of the governing specification, whitespace-normalised."""
+    body = SPEC.read_text()
+    start = body.index("## 4. Runtime design")
+    end = body.index("## 5. Packaging")
+    return " ".join(body[start:end].split())
+
+
+@pytest.mark.parametrize(
+    "published, value, code_value",
+    [
+        ("`MAX_BUNDLE_BYTES` **1 GiB**", 1 * 1024 ** 3, DEFAULT_MAX_BUNDLE_BYTES),
+        ("total download deadline **300 s**", 300.0, DEFAULT_TOTAL_DEADLINE_SECONDS),
+        ("stall detection **60 s**", 60.0, DEFAULT_STALL_SECONDS),
+        ("connect timeout **10 s**", 10.0, DEFAULT_TIMEOUT),
+        ("`MAX_MEMBERS` (**5,000**", 5_000, ExtractionLimits().max_members),
+        ("`MAX_TOTAL_BYTES` (**2 GiB**", 2 * 1024 ** 3,
+         ExtractionLimits().max_total_bytes),
+        ("`bundle_bytes * 2.5`", 2.5, DISK_HEADROOM_MULTIPLIER),
+    ],
+)
+def test_each_constant_matches_the_text_published_in_the_specification(
+        published, value, code_value):
+    """Reads the SPECIFICATION, not a literal restated in this file.
+
+    The previous version compared code against hardcoded test literals and
+    comments, so code and test could drift together while the document said
+    something else -- which is exactly the drift this reconciliation fixed.
+    """
+    assert published in _spec_text(), (
+        f"the specification no longer publishes {published!r}; if the value "
+        f"changed, change it in both places deliberately"
+    )
+    assert code_value == value
 
 
 # --- disk preflight --------------------------------------------------------
@@ -275,3 +300,196 @@ def test_the_current_manifest_pointer_is_validated(tmp_path, bad):
     report = SnapshotRuntime(source=Src(), store=SnapshotStore(tmp_path)).boot()
     assert report.readiness is Readiness.UNREADY
     assert report.fallback_to_live is True
+
+
+# --- review follow-ups -----------------------------------------------------
+
+class EOFBlocker:
+    """Returns the whole body at once, then blocks before signalling EOF."""
+
+    def __init__(self, blob: bytes, eof_delay: float):
+        self.blob, self.eof_delay = blob, eof_delay
+        self.declared_length = len(blob)
+        self.sent = False
+
+    def read(self, n):
+        if not self.sent:
+            self.sent = True
+            return self.blob
+        time.sleep(self.eof_delay)
+        return b""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *e):
+        return False
+
+
+def test_the_total_deadline_is_enforced_on_the_read_that_returns_eof(tmp_path):
+    """`if not chunk: break` ran before the deadline check, so a transfer that
+    blocked past its budget and then returned EOF completed successfully."""
+    blob = b"X"
+
+    class Src:
+        def read_bytes(self, name, *, max_bytes=None):
+            return blob
+
+        def open_stream(self, name):
+            return EOFBlocker(blob, eof_delay=0.08)
+
+    with pytest.raises(DownloadDeadlineExceeded) as ei:
+        download_verified(Src(), _manifest(blob), tmp_path / "b.tar",
+                          total_deadline=0.05, stall_seconds=1.0, check_disk=False)
+    assert "budget" in str(ei.value).lower()
+    assert not (tmp_path / "b.tar").exists()
+
+
+def test_stall_detection_detects_late_it_does_not_interrupt(tmp_path):
+    """Pins the ACTUAL guarantee, so the docs and the test agree.
+
+    A stopwatch around a blocking call is not a timeout: the read completes,
+    and only then is the overrun noticed. This test asserts that honestly --
+    the error is raised AFTER the blocking read, not at the limit.
+    """
+    blob = b"ABCD"
+    blocked_for = 0.15
+
+    class Src:
+        def read_bytes(self, name, *, max_bytes=None):
+            return blob
+
+        def open_stream(self, name):
+            return Stream(blob, delay=blocked_for, chunk=1)
+
+    started = time.monotonic()
+    with pytest.raises(DownloadDeadlineExceeded):
+        download_verified(Src(), _manifest(blob), tmp_path / "b.tar",
+                          stall_seconds=0.02, check_disk=False)
+    elapsed = time.monotonic() - started
+    assert elapsed >= blocked_for, (
+        "the read was somehow interrupted; if that is now true, the "
+        "documented guarantee in spec 4.1 should be strengthened"
+    )
+
+
+def test_the_http_transport_bounds_each_read_at_the_socket(monkeypatch):
+    """The real interrupt: urllib passes the timeout to the socket."""
+    from property_core.snapshot import source as source_mod
+
+    seen = {}
+
+    class FakeResponse:
+        headers = {"Content-Length": "4"}
+
+        def read(self, n=-1):
+            return b"data"
+
+        def close(self):
+            pass
+
+    def fake_urlopen(request, timeout=None):
+        seen["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(source_mod.urllib.request, "urlopen", fake_urlopen)
+    src = source_mod.HttpObjectSource("https://example.invalid", read_timeout=7.5)
+    src.open_stream("b.tar")
+    assert seen["timeout"] == 7.5, (
+        "the streaming request must carry a socket timeout; without it nothing "
+        "actually bounds a blocked read"
+    )
+
+
+def test_read_timeout_defaults_to_the_connect_timeout(monkeypatch):
+    from property_core.snapshot import source as source_mod
+
+    src = source_mod.HttpObjectSource("https://example.invalid")
+    assert src.read_timeout == DEFAULT_TIMEOUT
+
+
+# --- verification record constraints ---------------------------------------
+
+def test_verification_is_constrained_to_structural():
+    from pydantic import ValidationError
+
+    from property_core.snapshot.models import VerificationRecord
+
+    base = dict(version="v1", bundle_sha256="a" * 64, bundle_bytes=10,
+                bundle_object="s.tar", parquet_files=1, rows=1,
+                verified_at="x", inventory={"a.parquet": 4})
+    assert VerificationRecord(**base).verification == "structural"
+    for claim in ("queryable", "schema", "full", ""):
+        with pytest.raises(ValidationError):
+            VerificationRecord(**base, verification=claim)
+
+
+def test_bundle_object_is_required_and_validated():
+    from pydantic import ValidationError
+
+    from property_core.snapshot.models import VerificationRecord
+
+    base = dict(version="v1", bundle_sha256="a" * 64, bundle_bytes=10,
+                parquet_files=1, rows=1, verified_at="x",
+                inventory={"a.parquet": 4})
+    with pytest.raises(ValidationError):
+        VerificationRecord(**base)                       # missing
+    for bad in ("a/b.tar", "../x.tar", "", "  "):
+        with pytest.raises(ValidationError):
+            VerificationRecord(**base, bundle_object=bad)
+    assert VerificationRecord(**base, bundle_object="s.tar").bundle_object == "s.tar"
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda inv: inv.__setitem__("a.parquet", 999),
+        lambda inv: inv.update({"b.parquet": 1}),
+        lambda inv: inv.pop("a.parquet"),
+        lambda inv: inv.clear(),
+        lambda inv: inv.setdefault("c.parquet", 1),
+        lambda inv: inv.__delitem__("a.parquet"),
+        lambda inv: inv.popitem(),
+    ],
+    ids=["setitem", "update", "pop", "clear", "setdefault", "delitem", "popitem"],
+)
+def test_the_inventory_cannot_be_mutated_in_place(mutate):
+    """The inventory IS the evidence is_verified compares against; frozen=True
+    only stopped rebinding the attribute, not editing the mapping."""
+    from property_core.snapshot.models import VerificationRecord
+
+    record = VerificationRecord(
+        version="v1", bundle_sha256="a" * 64, bundle_bytes=10,
+        bundle_object="s.tar", parquet_files=1, rows=1, verified_at="x",
+        inventory={"a.parquet": 4})
+    before = record.model_dump_json()
+    with pytest.raises(TypeError):
+        mutate(record.inventory)
+    assert record.model_dump_json() == before
+
+
+def test_the_inventory_still_serialises_and_compares_as_a_mapping():
+    """Immutability must not change the on-disk shape or equality."""
+    import json
+
+    from property_core.snapshot.models import VerificationRecord
+
+    record = VerificationRecord(
+        version="v1", bundle_sha256="a" * 64, bundle_bytes=10,
+        bundle_object="s.tar", parquet_files=1, rows=1, verified_at="x",
+        inventory={"a.parquet": 4})
+    assert record.inventory == {"a.parquet": 4}
+    assert json.loads(record.model_dump_json())["inventory"] == {"a.parquet": 4}
+    assert VerificationRecord(**json.loads(record.model_dump_json())) == record
+
+
+# --- exports ---------------------------------------------------------------
+
+def test_the_typed_failures_callers_must_handle_are_exported():
+    import property_core.snapshot as snapshot
+
+    for name in ("DownloadDeadlineExceeded", "InsufficientDiskSpaceError",
+                 "BundleVerificationError", "ArchiveRejected",
+                 "SnapshotExtraMissingError", "VerificationRecord"):
+        assert name in snapshot.__all__, f"{name} missing from __all__"
+        assert hasattr(snapshot, name)

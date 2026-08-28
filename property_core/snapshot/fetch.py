@@ -34,8 +34,18 @@ DEFAULT_MAX_BUNDLE_BYTES = 1 * 1024 ** 3
 #: finishes, and readiness would hang instead of falling back to the live source.
 DEFAULT_TOTAL_DEADLINE_SECONDS = 300.0
 
-#: Longest a single read may go without returning data. The transport's own
-#: socket timeout covers a silent connection; this covers one that dribbles.
+#: Post-read stall DETECTION budget.
+#:
+#: This is not an interrupt and does not bound how long a read may block:
+#: ``stream.read()`` is synchronous, and the elapsed time can only be inspected
+#: once it returns. A read that blocks for ten minutes is detected after ten
+#: minutes, not aborted at this limit.
+#:
+#: **What actually bounds a blocked read is the transport's socket timeout**
+#: (`HttpObjectSource(read_timeout=...)`), which the OS enforces per socket
+#: operation. This value is the backstop for sources that cannot honour one --
+#: a local file, a test double -- and for a connection that dribbles rather than
+#: going silent.
 DEFAULT_STALL_SECONDS = 60.0
 
 #: Free space required before the transfer starts: the bundle, plus room to
@@ -72,6 +82,10 @@ def download_verified(source, manifest: SnapshotManifest, dest: Path, *,
 
     On any failure the partial file is removed, so a rejected download can never
     be mistaken for a usable bundle.
+
+    ``total_deadline`` and ``stall_seconds`` are checked after every read,
+    including the one that returns EOF. Neither interrupts a blocked read --
+    see DEFAULT_STALL_SECONDS for what actually bounds one.
     """
     cap = DEFAULT_MAX_BUNDLE_BYTES if max_bytes is None else max_bytes
     if manifest.bundle_bytes > cap:
@@ -95,19 +109,24 @@ def download_verified(source, manifest: SnapshotManifest, dest: Path, *,
             while True:
                 read_started = time.monotonic()
                 chunk = stream.read(chunk_size)
-                waited = time.monotonic() - read_started
-                if waited > stall_seconds:
-                    raise DownloadDeadlineExceeded(
-                        f"transfer stalled: no data for {waited:.1f}s "
-                        f"(limit {stall_seconds}s)"
-                    )
-                if not chunk:
-                    break
-                if time.monotonic() - started > total_deadline:
+                now = time.monotonic()
+
+                # Both checks run after EVERY read, EOF included. Breaking on an
+                # empty chunk first let a read that blocked past the budget and
+                # then returned EOF finish successfully.
+                if now - started > total_deadline:
                     raise DownloadDeadlineExceeded(
                         f"transfer exceeded its {total_deadline}s budget after "
                         f"{written} bytes"
                     )
+                waited = now - read_started
+                if waited > stall_seconds:
+                    raise DownloadDeadlineExceeded(
+                        f"transfer stalled: a single read took {waited:.1f}s "
+                        f"(detection budget {stall_seconds}s)"
+                    )
+                if not chunk:
+                    break
                 written += len(chunk)
                 if written > cap:
                     # Abort the transfer rather than discovering the overrun

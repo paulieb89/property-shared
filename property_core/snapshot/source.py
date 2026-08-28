@@ -57,9 +57,14 @@ class HttpObjectSource:
     """Read-only HTTP object source rooted at a base URL."""
 
     def __init__(self, base_url: str, *, timeout: float = DEFAULT_TIMEOUT,
+                 read_timeout: Optional[float] = None,
                  user_agent: str = "property-shared-snapshot/1"):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        #: Applied to the streaming request. urllib passes this to the socket,
+        #: so the OS bounds each read operation -- this is the real interrupt,
+        #: as opposed to the post-read detection in fetch.py.
+        self.read_timeout = timeout if read_timeout is None else read_timeout
         self.user_agent = user_agent
 
     def _url(self, name: str) -> str:
@@ -82,7 +87,9 @@ class HttpObjectSource:
         return body
 
     def open_stream(self, name: str) -> _HttpStream:
-        resp = urllib.request.urlopen(self._request(name), timeout=self.timeout)
+        # The socket timeout bounds every read on this stream. A silent
+        # connection raises here rather than being noticed afterwards.
+        resp = urllib.request.urlopen(self._request(name), timeout=self.read_timeout)
         return _HttpStream(resp)
 
 

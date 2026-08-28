@@ -16,7 +16,8 @@ from property_core.snapshot.store import SnapshotStore
 
 def _record(**over) -> dict:
     payload = {"bundle_sha256": "a" * 64, "bundle_bytes": 10, "parquet_files": 1,
-               "rows": 3, "verified_at": "2026-01-01T00:00:00Z"}
+               "bundle_object": "snapshot.tar", "rows": 3,
+               "verified_at": "2026-01-01T00:00:00Z"}
     payload.update(over)
     return payload
 
