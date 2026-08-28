@@ -46,7 +46,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from tools.ppd_snapshot.atomic import atomic_write_json
+from tools.ppd_snapshot.atomic import (
+    atomic_write_json,
+    commit_prepared,
+    prepare_write_json,
+)
 from tools.ppd_snapshot.release_check import ReleaseObservation
 
 CHUNK_BYTES = 1024 * 1024
@@ -212,7 +216,15 @@ def download_with_receipt(url: str, dest: Path | str, receipt_path: Path | str,
 
     dest = Path(dest)
     receipt_path = Path(receipt_path)
+    if dest.resolve() == receipt_path.resolve():
+        # Checked before anything is requested: otherwise the download succeeds
+        # and the receipt is then written over the very file it describes.
+        raise SourceMismatch(
+            f"the destination and the receipt resolve to the same path "
+            f"({dest}); the receipt would overwrite the release it describes")
     dest.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+
     opener = opener or urllib.request.urlopen
     request = urllib.request.Request(
         url, headers={"User-Agent": "property-shared-snapshot-build/1"})
@@ -220,24 +232,35 @@ def download_with_receipt(url: str, dest: Path | str, receipt_path: Path | str,
     handle, tmp_name = tempfile.mkstemp(dir=dest.parent,
                                         prefix=f".{dest.name}.", suffix=".part")
     tmp = Path(tmp_name)
+    try:
+        # The descriptor is adopted by a file object IMMEDIATELY. Anything that
+        # fails between `mkstemp` and `fdopen` -- an opener that refuses to
+        # connect, a header that will not parse -- leaves a raw descriptor that
+        # nothing ever closes, and a daily check would leak one per attempt.
+        out = os.fdopen(handle, "wb")
+    except BaseException:
+        os.close(handle)
+        tmp.unlink(missing_ok=True)
+        raise
+
     digest = hashlib.sha256()
     length = 0
     try:
-        with opener(request, timeout=timeout) as response:
-            headers = response.headers
-            declared = headers.get("Content-Length")
-            observation = ReleaseObservation(
-                etag=headers.get("ETag"),
-                last_modified=headers.get("Last-Modified"),
-                content_length=int(declared) if declared and declared.isdigit()
-                else None)
-            with os.fdopen(handle, "wb") as out:
+        with out:
+            with opener(request, timeout=timeout) as response:
+                headers = response.headers
+                declared = headers.get("Content-Length")
+                observation = ReleaseObservation(
+                    etag=headers.get("ETag"),
+                    last_modified=headers.get("Last-Modified"),
+                    content_length=int(declared)
+                    if declared and declared.isdigit() else None)
                 while chunk := response.read(CHUNK_BYTES):
                     out.write(chunk)
                     digest.update(chunk)
                     length += len(chunk)
-                out.flush()
-                os.fsync(out.fileno())
+            out.flush()
+            os.fsync(out.fileno())
 
         if observation.content_length is None:
             raise SourceMismatch(
@@ -252,23 +275,51 @@ def download_with_receipt(url: str, dest: Path | str, receipt_path: Path | str,
         tmp.unlink(missing_ok=True)
         raise
 
-    # Committed only now: the transfer is complete and its length agrees with
-    # what was declared. The receipt is built from the digest computed AS THE
-    # BYTES ARRIVED rather than by re-reading the file -- re-reading would mean
-    # a second full pass over 5.5 GB, and would digest a file that is no longer
-    # provably the one that was received.
+    # The receipt is built from the digest computed AS THE BYTES ARRIVED rather
+    # than by re-reading the file: re-reading would mean a second full pass over
+    # 5.5 GB, and would digest a file that is no longer provably the one
+    # received.
     receipt = SourceReceipt(
         file=dest.name, sha256=digest.hexdigest(), bytes=length,
         etag=observation.etag, last_modified=observation.last_modified,
         content_length=observation.content_length,
         recorded_at=(now or datetime.now(timezone.utc)).isoformat(),
         evidence="streamed-download")
+
+    # The CSV and its receipt are ONE fact in two files, so both are written
+    # before either is published. Replacing the CSV and then failing to write
+    # the receipt destroys the previous valid pair: the old bytes are gone and
+    # the surviving receipt describes a file that no longer exists.
     try:
-        os.replace(tmp, dest)
+        tmp_receipt = prepare_write_json(receipt_path, dataclasses.asdict(receipt))
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
-    # If this fails, the new file sits beside the previous receipt and every
-    # later build refuses on the mismatch -- which is the safe direction.
-    atomic_write_json(receipt_path, dataclasses.asdict(receipt))
+
+    backup = None
+    if dest.exists():
+        # The previous release is renamed aside rather than overwritten, so the
+        # commit below can put it back. `mkstemp` hands back a descriptor with
+        # the name; close it before the file is renamed over.
+        backup_handle, backup_name = tempfile.mkstemp(
+            dir=dest.parent, prefix=f".{dest.name}.", suffix=".prev")
+        os.close(backup_handle)
+        backup = Path(backup_name)
+        os.replace(dest, backup)
+    try:
+        commit_prepared(tmp, dest)
+        commit_prepared(tmp_receipt, receipt_path)
+    except BaseException:
+        # Put back exactly what was there. A half-committed pair is worse than
+        # a refused refresh, because nothing downstream can tell it happened.
+        if backup is not None:
+            os.replace(backup, dest)
+        else:
+            dest.unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True)
+        Path(tmp_receipt).unlink(missing_ok=True)
+        raise
+    finally:
+        if backup is not None:
+            Path(backup).unlink(missing_ok=True)
     return receipt

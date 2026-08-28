@@ -26,6 +26,7 @@ from datetime import date
 from pathlib import Path
 from typing import Optional, Sequence
 
+from tools.ppd_snapshot.atomic import atomic_write_json
 from tools.ppd_snapshot.build import (
     BuildRequest,
     BuildResult,
@@ -367,7 +368,9 @@ def _cmd_all(args) -> int:
 
     stored = json.loads(release.report_path.read_text())
     stored["boot_check"] = outcome
-    release.report_path.write_text(json.dumps(stored, indent=2) + "\n")
+    # Rewritten, so it goes through the same replace-by-rename path as every
+    # other document this pipeline overwrites.
+    atomic_write_json(release.report_path, stored)
 
     if outcome["readiness"] != "ready":
         print(f"not promoted; the candidate is left at "

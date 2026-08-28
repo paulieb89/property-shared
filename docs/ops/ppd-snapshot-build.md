@@ -51,7 +51,12 @@ to obtain one, and they are not equally strong:
   streams into a unique sibling temporary file and replaces the destination only
   once the length agrees with `Content-Length`, so **a failed refresh leaves the
   release already held byte-for-byte intact**; writing the destination directly
-  would truncate a working CSV the moment a refresh began.
+  would truncate a working CSV the moment a refresh began. The CSV and its
+  receipt are one fact in two files, so both are written before either is
+  published and the CSV is rolled back if the receipt cannot be committed — a
+  half-committed pair is worse than a refused refresh, because nothing
+  downstream can tell it happened. A destination that resolves to the receipt
+  path is refused before any request is made.
   *It has never been pointed at the real host in this work; no download of the
   5.5 GB object is authorised here, and the mechanism is exercised against a
   loopback server.*
@@ -224,6 +229,13 @@ queryability validation. `all` exits non-zero unless that ends in `READY`.
   build concern. A stale but verified snapshot is always served in preference to
   going unready.
 
+Every document this pipeline replaces — the release state, the receipt, the
+manifest, the build report, `current.json` — is written to a unique sibling,
+fsynced, and renamed over its target. `write_text` truncates first, so an
+interrupted write would leave an empty file where a working one was; for the
+release state that would reset the first-observed timestamp the seven-day alert
+is measured from.
+
 ## Stop conditions
 
 Halt and report; there is no override flag for any of these.
@@ -238,6 +250,7 @@ Halt and report; there is no override flag for any of these.
   Parquet at all — a directory that failed validation is still a directory
   someone can point `validate` at.
 * The candidate and dist directories are on different filesystems.
+* The download destination and the receipt path are the same file.
 * The recorded `ETag` differs from the release the CSV was fetched from — a fresh
   5.5 GB download is a cost decision, not something the pipeline should make.
 * `transaction_id` is not unique within the window, or the row count disagrees.

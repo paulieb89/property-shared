@@ -234,3 +234,48 @@ def test_an_unparseable_publication_date_yields_no_declared_end():
 
     assert declared_coverage_end("not a date") is None
     assert declared_coverage_end(None) is None
+
+
+# -- the observation clock must survive a failed write ----------------------
+
+def test_a_failed_state_write_preserves_the_previous_observation(tmp_path,
+                                                                 monkeypatch):
+    """`write_text` truncates first, so an interrupted check would erase the
+    first-observed timestamp the seven-day alert is measured from."""
+    from tools.ppd_snapshot import atomic
+
+    state = tmp_path / "state.json"
+    check_release(URL, state, opener=_Opener(), now=NOW)
+    before = state.read_bytes()
+
+    monkeypatch.setattr(atomic.os, "replace",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("boom")))
+    with pytest.raises(OSError):
+        check_release(URL, state, opener=_Opener(),
+                      now=NOW + timedelta(days=1))
+
+    assert state.read_bytes() == before
+    assert json.loads(state.read_text())["first_observed_utc"] == NOW.isoformat()
+
+
+def test_a_failed_ingest_record_preserves_the_previous_state(tmp_path,
+                                                             monkeypatch):
+    from tools.ppd_snapshot import atomic
+
+    state = tmp_path / "state.json"
+    check_release(URL, state, opener=_Opener(), now=NOW)
+    before = state.read_bytes()
+
+    monkeypatch.setattr(atomic.os, "replace",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("boom")))
+    with pytest.raises(OSError):
+        record_ingested(state, version="v20260828T101500Z", etag=HEADERS["ETag"],
+                        now=NOW)
+    assert state.read_bytes() == before
+
+
+def test_a_state_write_leaves_no_temporary_files(tmp_path):
+    state = tmp_path / "state.json"
+    check_release(URL, state, opener=_Opener(), now=NOW)
+    record_ingested(state, version="v1", etag=HEADERS["ETag"], now=NOW)
+    assert [p.name for p in tmp_path.iterdir()] == ["state.json"]

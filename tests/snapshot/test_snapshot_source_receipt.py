@@ -322,3 +322,119 @@ def test_a_streamed_download_digests_the_file_only_once(tmp_path, monkeypatch):
         download_with_receipt(url, tmp_path / "pp.csv",
                               tmp_path / "receipt.json", now=NOW)
     assert calls == []
+
+
+def test_a_failed_receipt_commit_preserves_the_previous_pair(tmp_path,
+                                                             monkeypatch):
+    """The CSV and its receipt are one fact in two files.
+
+    Replacing the CSV and then failing to write the receipt leaves the previous
+    valid pair destroyed: the old bytes are gone and the surviving receipt
+    describes a file that no longer exists.
+    """
+    from tools.ppd_snapshot import source_receipt as sr
+
+    csv_path, receipt_path, csv_before, receipt_before = _seed(tmp_path)
+    fresh = b"newer,release,rows\n" * 3
+    served = _serve(fresh, {"ETag": '"newer-etag"',
+                            "Last-Modified": "Fri, 28 Aug 2026 05:16:16 GMT",
+                            "Content-Length": str(len(fresh))})
+
+    def _boom(*args, **kwargs):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(sr, "prepare_write_json", _boom)
+    with served as url:
+        with pytest.raises(OSError):
+            download_with_receipt(url, csv_path, receipt_path, now=NOW)
+
+    assert csv_path.read_bytes() == csv_before
+    assert receipt_path.read_bytes() == receipt_before
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["pp.csv", "receipt.json"]
+
+
+def test_a_failed_receipt_rename_rolls_the_csv_back(tmp_path, monkeypatch):
+    from tools.ppd_snapshot import source_receipt as sr
+
+    csv_path, receipt_path, csv_before, receipt_before = _seed(tmp_path)
+    fresh = b"newer,release,rows\n" * 3
+    served = _serve(fresh, {"ETag": '"newer-etag"',
+                            "Last-Modified": "Fri, 28 Aug 2026 05:16:16 GMT",
+                            "Content-Length": str(len(fresh))})
+
+    real = sr.os.replace
+
+    def _replace(src, dst, *args, **kwargs):
+        if str(dst).endswith("receipt.json"):
+            raise OSError("rename failed")
+        return real(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(sr.os, "replace", _replace)
+    with served as url:
+        with pytest.raises(OSError):
+            download_with_receipt(url, csv_path, receipt_path, now=NOW)
+
+    assert csv_path.read_bytes() == csv_before
+    assert receipt_path.read_bytes() == receipt_before
+
+
+def test_a_destination_that_is_also_the_receipt_is_refused_before_requesting(
+        tmp_path):
+    """Otherwise the download succeeds and the receipt JSON overwrites the CSV
+    it describes."""
+    requests = []
+
+    def _opener(request, timeout=None):  # pragma: no cover - must not run
+        requests.append(request)
+        raise AssertionError("no request may be made")
+
+    same = tmp_path / "pp.csv"
+    with pytest.raises(SourceMismatch, match="same path"):
+        download_with_receipt("http://example.invalid/pp.csv", same, same,
+                              opener=_opener, now=NOW)
+    assert requests == []
+    assert not same.exists()
+
+
+@pytest.mark.skipif(not Path("/proc/self/fd").is_dir(),
+                    reason="needs /proc to count open descriptors")
+def test_a_failing_opener_does_not_leak_descriptors(tmp_path):
+    """`mkstemp` hands back a raw descriptor. If the request fails before it is
+    adopted by a file object, nothing ever closes it."""
+    def _opener(request, timeout=None):
+        raise OSError("connection refused")
+
+    def open_fds() -> int:
+        return len(list(Path("/proc/self/fd").iterdir()))
+
+    before = open_fds()
+    for _ in range(12):
+        with pytest.raises(OSError):
+            download_with_receipt("http://example.invalid/pp.csv",
+                                  tmp_path / "pp.csv", tmp_path / "receipt.json",
+                                  opener=_opener, now=NOW)
+    assert open_fds() <= before
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.skipif(not Path("/proc/self/fd").is_dir(),
+                    reason="needs /proc to count open descriptors")
+def test_repeated_successful_downloads_do_not_leak_descriptors(tmp_path):
+    """The success path allocates temporaries too -- including the backup of the
+    file being replaced."""
+    def open_fds() -> int:
+        return len(list(Path("/proc/self/fd").iterdir()))
+
+    fresh = b"newer,release\n"
+    headers = {"ETag": '"newer-etag"',
+               "Last-Modified": "Fri, 28 Aug 2026 05:16:16 GMT",
+               "Content-Length": str(len(fresh))}
+    before = None
+    for attempt in range(12):
+        with _serve(fresh, headers) as url:
+            download_with_receipt(url, tmp_path / "pp.csv",
+                                  tmp_path / "receipt.json", now=NOW)
+        if attempt == 1:
+            before = open_fds()
+    assert open_fds() <= before
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["pp.csv", "receipt.json"]

@@ -23,6 +23,8 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from tools.ppd_snapshot.atomic import atomic_write_json
+
 #: The official HTTPS endpoint published by HM Land Registry on the GOV.UK
 #: "Price Paid Data single file" page. Public open data: no credentials, and
 #: nothing is created or mutated.
@@ -189,8 +191,10 @@ def check_release(url: str = DEFAULT_URL, state_path: Path | str = "release.json
         "first_observed_utc": first_observed.isoformat(),
         "last_checked_utc": now.isoformat(),
     })
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps(state, indent=2) + "\n")
+    # Atomic: `write_text` truncates first, and this file carries the
+    # first-observed timestamp the seven-day alert is measured from. An
+    # interrupted check must not be able to reset that clock.
+    atomic_write_json(state_path, state)
 
     return ReleaseCheck(
         url=url, observation=observation, previous=previous, changed=changed,
@@ -208,8 +212,7 @@ def record_ingested(state_path: Path | str, *, version: str, etag: Optional[str]
         "etag": etag,
         "at_utc": (now or datetime.now(timezone.utc)).isoformat(),
     }
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps(state, indent=2) + "\n")
+    atomic_write_json(state_path, state)
 
 
 def describe(check: ReleaseCheck) -> str:  # pragma: no cover - operator output

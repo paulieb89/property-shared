@@ -258,7 +258,13 @@ coverage take effect only once a snapshot is enabled and materialized.
   downloader streams into a unique sibling temporary file and replaces the
   destination only after the transfer's length is confirmed; writing the
   destination directly truncated a working CSV as soon as a refresh began, and
-  a mid-stream failure erased it while its receipt survived to describe it.
+  a mid-stream failure erased it while its receipt survived to describe it. The
+  CSV and its receipt are committed as a pair, with the CSV rolled back if the
+  receipt cannot be written, and a destination that resolves to the receipt path
+  is refused before any request. Every document the pipeline replaces — release
+  state, receipt, manifest, build report, `current.json` — is now written by
+  sibling-and-rename; the release state in particular carries the timestamp the
+  seven-day uningested alert is measured from.
 - **Promotion is a rename, on one filesystem, and says so.** The device IDs of
   the candidate and dist directories are compared before anything moves;
   `shutil.move` across a boundary would silently copy 266 MiB, which is neither

@@ -34,7 +34,7 @@ from typing import Any, Mapping, Optional
 
 from property_core.snapshot.models import SnapshotManifest, validate_component
 
-from tools.ppd_snapshot.atomic import atomic_write_json
+from tools.ppd_snapshot.atomic import atomic_write_json, atomic_write_text
 
 from tools.ppd_snapshot.build import COMPRESSION, PARTITION_FILE, BuildResult
 
@@ -219,7 +219,8 @@ def package_release(built: BuildResult, *, dist_dir: Path, candidate_root: Path,
         layout=LAYOUT,
         duckdb_version=built.duckdb_version,
     )
-    manifest_path.write_text(json.dumps(manifest.model_dump(), indent=2) + "\n")
+    atomic_write_text(manifest_path,
+                      json.dumps(manifest.model_dump(), indent=2) + "\n")
 
     # The candidate gets its own pointer so the whole boot path can be
     # exercised against it. The pointer in the dist root is written only at
@@ -252,7 +253,7 @@ def package_release(built: BuildResult, *, dist_dir: Path, candidate_root: Path,
         "peak_rss_mb": built.peak_rss_mb,
         **dict(facts),
     }
-    report_path.write_text(json.dumps(report, indent=2) + "\n")
+    atomic_write_json(report_path, report)
 
     return PackagedRelease(
         version=version, dist_dir=dist_dir, candidate_dir=candidate_dir,
