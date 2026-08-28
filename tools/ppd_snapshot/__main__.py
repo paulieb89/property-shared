@@ -49,6 +49,7 @@ from tools.ppd_snapshot.release_check import (
 )
 from tools.ppd_snapshot.source_receipt import (
     SourceMismatch,
+    download_with_receipt,
     load_receipt,
     verify_source,
     write_receipt,
@@ -102,17 +103,18 @@ def _observed(state: dict) -> Optional[ReleaseObservation]:
         content_length=state.get("content_length"))
 
 
-def _source_end(args) -> Optional[date]:
-    """The release's declared coverage end, from the release record if not given.
+def _expected_end(receipt) -> Optional[date]:
+    """The coverage end the bound release implies. Not an argument.
 
-    Kept independent of `--coverage-to` on purpose: the two agreeing is the
-    check. Deriving one from the other would make the gate say nothing.
+    There is deliberately no override on `build`/`all`. `--coverage-to` is the
+    operator's declaration and this is the evidence it is checked against, so a
+    flag that sets the evidence too makes the check compare a claim with itself:
+    a 28 July release was published as covering 31 July by setting both.
+
+    It is derived from the RECEIPT rather than the release-state file because
+    the receipt is the document bound to the bytes that were actually read.
     """
-    explicit = _iso(getattr(args, "source_coverage_end", None))
-    if explicit:
-        return explicit
-    return declared_coverage_end(
-        _release_state(getattr(args, "release_state", None)).get("last_modified"))
+    return declared_coverage_end(receipt.last_modified)
 
 
 # -- commands ----------------------------------------------------------------
@@ -130,12 +132,27 @@ def _cmd_receipt(args) -> int:
               "first so the file can be bound to a release")
         return 2
     try:
-        receipt = write_receipt(Path(args.csv), observation, Path(args.receipt))
+        receipt = write_receipt(Path(args.csv), observation, Path(args.receipt),
+                                expected_sha256=args.expected_sha256)
     except SourceMismatch as exc:
         print(f"refusing to write a receipt: {exc}")
         return 2
     print(f"receipt written for {receipt.file}: {receipt.bytes} bytes, "
-          f"sha256 {receipt.sha256}, ETag {receipt.etag}")
+          f"sha256 {receipt.sha256}, ETag {receipt.etag} "
+          f"(evidence: {receipt.evidence})")
+    return 0
+
+
+def _cmd_download(args) -> int:
+    """Stream a release and mint its receipt from the same response."""
+    try:
+        receipt = download_with_receipt(args.url, Path(args.dest),
+                                        Path(args.receipt))
+    except SourceMismatch as exc:
+        print(f"download refused: {exc}")
+        return 2
+    print(f"downloaded {receipt.bytes} bytes to {args.dest}; receipt sha256 "
+          f"{receipt.sha256} (evidence: {receipt.evidence})")
     return 0
 
 
@@ -159,7 +176,12 @@ def load_receipt_or_none(args):
 def _cmd_build(args) -> int:
     # The same binding as `all`: this writes the artifact `validate` then
     # blesses, so it is not a way around the source check.
-    if load_receipt_or_none(args) is None:
+    receipt = load_receipt_or_none(args)
+    if receipt is None:
+        return 2
+    if _expected_end(receipt) is None:
+        print("refusing to build: the bound release carries no usable "
+              "publication date, so its coverage end cannot be derived")
         return 2
     built = _build(args)
     print(f"built {built.rows} row(s) into {built.parquet_files} partition(s) "
@@ -181,7 +203,14 @@ def _build(args) -> BuildResult:
 def _cmd_validate(args) -> int:
     directory = Path(args.snapshot)
     coverage_to = date.fromisoformat(args.coverage_to)
-    source_end = _source_end(args)
+    source_end = _iso(args.source_coverage_end)
+    if source_end is not None:
+        print("note: --source-coverage-end was supplied, so the coverage gate "
+              "is comparing two operator-stated dates; build/all derive it from "
+              "the bound release instead")
+    else:
+        source_end = declared_coverage_end(
+            _release_state(args.release_state).get("last_modified"))
     if source_end is None:
         print("refusing to validate: the source release's declared coverage end "
               "is unknown; pass --source-coverage-end or --release-state")
@@ -268,15 +297,16 @@ def _boot_check(dist_dir: Path, cache_dir: Path) -> dict:
 def _cmd_all(args) -> int:
     work = Path(args.work)
     dist = Path(args.dist)
-    source_end = _source_end(args)
-    if source_end is None:
-        print("refusing to build: the source release's declared coverage end is "
-              "unknown; pass --source-coverage-end or --release-state")
-        return 2
 
     receipt = load_receipt_or_none(args)
     if receipt is None:
         return 2
+    source_end = _expected_end(receipt)
+    if source_end is None:
+        print("refusing to build: the bound release carries no usable "
+              "publication date, so its coverage end cannot be derived")
+        return 2
+    print(f"the bound release implies a coverage end of {source_end}")
     print(f"source verified: {Path(args.csv).name} matches its receipt and the "
           f"observed release")
 
@@ -295,12 +325,13 @@ def _cmd_all(args) -> int:
     version = args.version or snapshot_version()
     state = _release_state(args.release_state)
     source = {"file": Path(args.csv).name, "sha256": receipt.sha256,
-              "bytes": receipt.bytes}
+              "bytes": receipt.bytes, "digest_evidence": receipt.evidence}
     source.update({k: state.get(k) for k in
                    ("url", "etag", "last_modified", "content_length")})
 
-    release = package_release(built, dist_dir=dist, version=version,
-                              source=source,
+    release = package_release(built, dist_dir=dist,
+                              candidate_root=work / "candidates",
+                              version=version, source=source,
                               facts={"gates": "passed", **report.facts})
     verify_bundle(release.bundle_path, expected_sha256=release.bundle_sha256,
                   expected_bytes=release.bundle_bytes)
@@ -354,7 +385,6 @@ def build_parser() -> argparse.ArgumentParser:
     build = sub.add_parser("build", help="build the partitions")
     _add_build_arguments(build)
     build.add_argument("--dist")
-    build.add_argument("--source-coverage-end")
     build.add_argument("--release-state", required=True,
                        help="the observed-release state written by check-release")
     build.add_argument("--today")
@@ -368,7 +398,16 @@ def build_parser() -> argparse.ArgumentParser:
     receipt.add_argument("--csv", required=True)
     receipt.add_argument("--release-state", required=True)
     receipt.add_argument("--receipt", required=True)
+    receipt.add_argument("--expected-sha256", required=True,
+                         help="the digest recorded when this file was fetched")
     receipt.set_defaults(handler=_cmd_receipt)
+
+    download = sub.add_parser(
+        "download", help="stream a release and mint its receipt in one pass")
+    download.add_argument("--url", default=DEFAULT_URL)
+    download.add_argument("--dest", required=True)
+    download.add_argument("--receipt", required=True)
+    download.set_defaults(handler=_cmd_download)
 
     validate = sub.add_parser("validate", help="run the gates on a built snapshot")
     validate.add_argument("--snapshot", required=True)
@@ -383,7 +422,6 @@ def build_parser() -> argparse.ArgumentParser:
     every = sub.add_parser("all", help="build, validate, package, verify, boot")
     _add_build_arguments(every)
     every.add_argument("--dist", required=True)
-    every.add_argument("--source-coverage-end")
     every.add_argument("--release-state", required=True,
                        help="the observed-release state written by check-release")
     every.add_argument("--today")

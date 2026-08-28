@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import os
 import shutil
 import tarfile
 from dataclasses import dataclass
@@ -63,8 +64,10 @@ class VersionAlreadyPublished(RuntimeError):
 class PackagedRelease:
     version: str
     dist_dir: Path
-    #: Where the release is assembled. A bundle sitting in the dist root is a
-    #: bundle someone can publish, so nothing arrives there until it has booted.
+    #: Where the release is assembled -- deliberately OUTSIDE the dist root.
+    #: A candidate inside it is still inside the directory something else may
+    #: sync, mirror or serve, and "ignore the subdirectory" is a convention, not
+    #: a boundary. Nothing enters the dist root until it has booted.
     candidate_dir: Path
     bundle_path: Path
     manifest_path: Path
@@ -153,14 +156,40 @@ def verify_bundle(bundle_path: Path, *, expected_sha256: str,
             f"{expected_sha256}")
 
 
-def package_release(built: BuildResult, *, dist_dir: Path, version: str,
-                    source: Mapping[str, Any],
+def _write_json_atomically(path: Path, payload: Any) -> None:
+    """Write beside the target, then rename over it.
+
+    `write_text` truncates first: interrupted, it leaves an empty or half-written
+    file where a valid one used to be. For `current.json` that is the difference
+    between a failed publish and taking down the release that was already
+    published, because the pointer is the first thing a booting Machine reads.
+    """
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n")
+    try:
+        os.replace(tmp, path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def package_release(built: BuildResult, *, dist_dir: Path, candidate_root: Path,
+                    version: str, source: Mapping[str, Any],
                     facts: Mapping[str, Any]) -> PackagedRelease:
-    """Bundle, publish the manifest, and record the build report."""
+    """Bundle, write the manifest, and record the build report -- as a candidate.
+
+    Nothing is published here. `candidate_root` is a working directory outside
+    `dist_dir`; `promote_release` is what publishes.
+    """
     validate_component(version, "snapshot_version")
     dist_dir = Path(dist_dir)
-    dist_dir.mkdir(parents=True, exist_ok=True)
-    candidate_dir = dist_dir / f"candidate-{version}"
+    candidate_dir = Path(candidate_root) / f"candidate-{version}"
+    if dist_dir.resolve() in candidate_dir.resolve().parents:
+        raise ValueError(
+            f"the candidate directory {candidate_dir} is inside the dist root "
+            f"{dist_dir}; a candidate must not sit in the directory releases "
+            f"are published from")
 
     bundle_path = candidate_dir / f"snapshot-{version}.tar.zst"
     manifest_path = candidate_dir / f"manifest-{version}.json"
@@ -196,8 +225,7 @@ def package_release(built: BuildResult, *, dist_dir: Path, version: str,
     # exercised against it. The pointer in the dist root is written only at
     # promotion, and only last.
     current_path = candidate_dir / "current.json"
-    current_path.write_text(
-        json.dumps({"current_manifest": manifest_path.name}, indent=2) + "\n")
+    _write_json_atomically(current_path, {"current_manifest": manifest_path.name})
 
     report = {
         "snapshot_version": version,
@@ -245,6 +273,7 @@ def promote_release(release: PackagedRelease) -> PackagedRelease:
     honest state to be in.
     """
     dist_dir = release.dist_dir
+    dist_dir.mkdir(parents=True, exist_ok=True)
     moved: dict[str, Path] = {}
     for path in (release.bundle_path, release.manifest_path, release.report_path):
         target = dist_dir / path.name
@@ -256,9 +285,8 @@ def promote_release(release: PackagedRelease) -> PackagedRelease:
         moved[path.name] = target
 
     current_path = dist_dir / "current.json"
-    current_path.write_text(
-        json.dumps({"current_manifest": release.manifest_path.name},
-                   indent=2) + "\n")
+    _write_json_atomically(
+        current_path, {"current_manifest": release.manifest_path.name})
     shutil.rmtree(release.candidate_dir, ignore_errors=True)
 
     return dataclasses.replace(

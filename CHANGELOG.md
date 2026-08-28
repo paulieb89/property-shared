@@ -220,7 +220,13 @@ coverage take effect only once a snapshot is enabled and materialized.
   999,999,999-byte release under a different ETag. The receipt records the
   SHA-256 and length computed from the file alongside the release's validators,
   and the build refuses unless file, receipt and latest observation all agree.
-  A missing receipt is a refusal, not a default. The release check now uses the
+  A missing receipt is a refusal, not a default, and a receipt cannot be minted
+  from a file alone: it requires the SHA-256 captured when the release was
+  downloaded, since length agreement lets same-length bytes through under any
+  ETag. `download` mints one while streaming the release, taking bytes, digest
+  and validators from a single response; `receipt --expected-sha256` is the
+  weaker path for a file already on disk, and the receipt records which was
+  used. The release check now uses the
   official **HTTPS** endpoint published on GOV.UK rather than the plaintext S3
   website endpoint, so neither the validators nor the body are open to tampering
   in transit.
@@ -231,12 +237,21 @@ coverage take effect only once a snapshot is enabled and materialized.
   unparseable `price` or blank `transaction_id` inside the window, now stops the
   build, and two new gates enforce it independently: `required_values` (no NULL
   in a required column) and `reconciliation` (rows counted from the source equal
-  rows written).
-- **Releases are assembled in a candidate directory and promoted only after
-  booting.** A forced-`UNREADY` boot previously left the bundle, manifest and
-  `current.json` in the final directory — a publishable release nobody had
-  validated. `current.json` is now written last, so an interrupted promotion
-  leaves no pointer naming a manifest that is not there.
+  rows written). A price must be **written as digits**, not merely be castable:
+  `TRY_CAST` silently turns `1.5` into 2, `2.5` into 3, `1e3` into 1000, `0x10`
+  into 16 and `1_000` into 1000, each landing in the snapshot as a plausible
+  integer no gate can question.
+- **Releases are assembled outside the publishing directory and promoted only
+  after booting.** A forced-`UNREADY` boot previously left the bundle, manifest
+  and `current.json` in the final directory — a publishable release nobody had
+  validated. Candidates now live under the work directory, not under `dist/`,
+  and `current.json` is replaced **last and atomically**: `write_text`
+  truncates before writing, so an interrupted promotion used to leave an empty
+  pointer where a working release's pointer had been.
+- **The expected coverage end cannot be passed in.** `build` and `all` derive it
+  from the bound release's publication date; there is no `--source-coverage-end`
+  on either. Setting both dates so they agreed published a 28 July release as
+  covering 31 July.
 - Optional `snapshot` extra (`duckdb==1.5.5`) and `PPD_SNAPSHOT_ENABLED`
   (default **off**). The published library gains no required dependency.
 - `docs/design/ppd-source-routing.md` — the frozen specification governing this

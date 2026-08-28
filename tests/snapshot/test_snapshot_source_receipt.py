@@ -13,9 +13,12 @@ still agree.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import threading
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -23,6 +26,7 @@ import pytest
 from tools.ppd_snapshot.release_check import ReleaseObservation
 from tools.ppd_snapshot.source_receipt import (
     SourceMismatch,
+    download_with_receipt,
     load_receipt,
     verify_source,
     write_receipt,
@@ -30,6 +34,7 @@ from tools.ppd_snapshot.source_receipt import (
 
 NOW = datetime(2026, 8, 28, 9, 0, tzinfo=timezone.utc)
 BODY = b"a,b,c\n" * 40
+BODY_SHA = hashlib.sha256(BODY).hexdigest()
 
 
 def observation(**over) -> ReleaseObservation:
@@ -48,7 +53,7 @@ def csv_path(tmp_path: Path) -> Path:
 
 def test_a_receipt_records_the_digest_and_length_it_computed(csv_path, tmp_path):
     receipt = write_receipt(csv_path, observation(), tmp_path / "receipt.json",
-                            now=NOW)
+                            expected_sha256=BODY_SHA, now=NOW)
     assert receipt.sha256 == hashlib.sha256(BODY).hexdigest()
     assert receipt.bytes == len(BODY)
     assert receipt.etag == '"an-etag"'
@@ -62,7 +67,8 @@ def test_writing_a_receipt_refuses_a_file_the_release_says_is_a_different_size(
     # something else entirely.
     with pytest.raises(SourceMismatch, match="999999999"):
         write_receipt(csv_path, observation(content_length=999_999_999),
-                      tmp_path / "receipt.json", now=NOW)
+                      tmp_path / "receipt.json", expected_sha256=BODY_SHA,
+                      now=NOW)
     assert not (tmp_path / "receipt.json").exists()
 
 
@@ -70,19 +76,20 @@ def test_writing_a_receipt_refuses_a_release_that_declares_no_length(
         csv_path, tmp_path):
     with pytest.raises(SourceMismatch, match="no Content-Length"):
         write_receipt(csv_path, observation(content_length=None),
-                      tmp_path / "receipt.json", now=NOW)
+                      tmp_path / "receipt.json", expected_sha256=BODY_SHA,
+                      now=NOW)
 
 
 def test_verification_accepts_a_file_that_still_matches(csv_path, tmp_path):
     receipt = write_receipt(csv_path, observation(), tmp_path / "receipt.json",
-                            now=NOW)
+                            expected_sha256=BODY_SHA, now=NOW)
     verify_source(csv_path, receipt, observation())
 
 
 def test_verification_refuses_a_file_that_changed_since_the_receipt(
         csv_path, tmp_path):
     receipt = write_receipt(csv_path, observation(), tmp_path / "receipt.json",
-                            now=NOW)
+                            expected_sha256=BODY_SHA, now=NOW)
     csv_path.write_bytes(BODY + b"one more row\n")
     with pytest.raises(SourceMismatch, match="bytes"):
         verify_source(csv_path, receipt, observation())
@@ -91,7 +98,7 @@ def test_verification_refuses_a_file_that_changed_since_the_receipt(
 def test_verification_refuses_a_file_edited_without_changing_its_length(
         csv_path, tmp_path):
     receipt = write_receipt(csv_path, observation(), tmp_path / "receipt.json",
-                            now=NOW)
+                            expected_sha256=BODY_SHA, now=NOW)
     edited = bytearray(BODY)
     edited[0] = ord("z")
     csv_path.write_bytes(bytes(edited))
@@ -101,7 +108,7 @@ def test_verification_refuses_a_file_edited_without_changing_its_length(
 
 def test_verification_refuses_when_the_release_has_moved_on(csv_path, tmp_path):
     receipt = write_receipt(csv_path, observation(), tmp_path / "receipt.json",
-                            now=NOW)
+                            expected_sha256=BODY_SHA, now=NOW)
     with pytest.raises(SourceMismatch, match="ETag"):
         verify_source(csv_path, receipt, observation(etag='"a-newer-etag"'))
 
@@ -109,7 +116,7 @@ def test_verification_refuses_when_the_release_has_moved_on(csv_path, tmp_path):
 def test_verification_refuses_when_the_publication_date_has_moved(
         csv_path, tmp_path):
     receipt = write_receipt(csv_path, observation(), tmp_path / "receipt.json",
-                            now=NOW)
+                            expected_sha256=BODY_SHA, now=NOW)
     with pytest.raises(SourceMismatch, match="Last-Modified"):
         verify_source(csv_path, receipt,
                       observation(last_modified="Fri, 28 Aug 2026 05:16:16 GMT"))
@@ -128,5 +135,84 @@ def test_a_corrupt_receipt_is_refused(tmp_path):
 
 def test_a_receipt_round_trips(csv_path, tmp_path):
     written = write_receipt(csv_path, observation(), tmp_path / "receipt.json",
-                            now=NOW)
+                            expected_sha256=BODY_SHA, now=NOW)
     assert load_receipt(tmp_path / "receipt.json") == written
+
+
+# -- a receipt must be grounded in independent download evidence ------------
+
+def test_minting_a_receipt_requires_the_digest_recorded_at_download(
+        csv_path, tmp_path):
+    """Same length, any ETag: without a recorded digest the receipt binds
+    whatever happens to be on disk to whatever the release claims to be."""
+    with pytest.raises(SourceMismatch, match="sha256"):
+        write_receipt(csv_path, observation(), tmp_path / "receipt.json",
+                      expected_sha256="0" * 64, now=NOW)
+    assert not (tmp_path / "receipt.json").exists()
+
+
+def test_a_receipt_records_where_its_digest_came_from(csv_path, tmp_path):
+    receipt = write_receipt(csv_path, observation(), tmp_path / "receipt.json",
+                            expected_sha256=BODY_SHA, now=NOW)
+    assert receipt.evidence == "recorded-checksum"
+
+
+def test_swapping_the_file_for_same_length_bytes_is_refused(csv_path, tmp_path):
+    swapped = bytearray(BODY)
+    swapped[0] = ord("z")
+    csv_path.write_bytes(bytes(swapped))
+    with pytest.raises(SourceMismatch, match="sha256"):
+        write_receipt(csv_path, observation(), tmp_path / "receipt.json",
+                      expected_sha256=BODY_SHA, now=NOW)
+
+
+def test_a_streamed_download_mints_its_own_receipt(tmp_path):
+    """The intended way to obtain a receipt: digest the bytes as they arrive,
+    from the same response the validators come from."""
+    served = _serve(BODY, {"ETag": '"served-etag"',
+                           "Last-Modified": "Tue, 28 Jul 2026 05:16:16 GMT",
+                           "Content-Length": str(len(BODY))})
+    with served as url:
+        receipt = download_with_receipt(url, tmp_path / "pp.csv",
+                                        tmp_path / "receipt.json", now=NOW)
+    assert (tmp_path / "pp.csv").read_bytes() == BODY
+    assert receipt.sha256 == BODY_SHA
+    assert receipt.etag == '"served-etag"'
+    assert receipt.evidence == "streamed-download"
+
+
+def test_a_download_that_does_not_match_its_declared_length_is_refused(tmp_path):
+    served = _serve(BODY, {"ETag": '"served-etag"',
+                           "Last-Modified": "Tue, 28 Jul 2026 05:16:16 GMT",
+                           "Content-Length": str(len(BODY) + 10)})
+    with served as url:
+        with pytest.raises(SourceMismatch, match="Content-Length"):
+            download_with_receipt(url, tmp_path / "pp.csv",
+                                  tmp_path / "receipt.json", now=NOW)
+    assert not (tmp_path / "pp.csv").exists()
+    assert not (tmp_path / "receipt.json").exists()
+
+
+@contextlib.contextmanager
+def _serve(body: bytes, headers: dict):
+    """A loopback HTTP server. Local only -- no external host is contacted."""
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - stdlib naming
+            self.send_response(200)
+            for key, value in headers.items():
+                self.send_header(key, value)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/pp-complete.csv"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)

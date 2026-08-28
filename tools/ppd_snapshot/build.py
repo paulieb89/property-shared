@@ -57,6 +57,17 @@ SOURCE_COLUMNS: tuple[str, ...] = (
     "district", "county", "ppd_category", "record_status",
 )
 
+#: A price is an integer number of pounds, written as digits and nothing else.
+#:
+#: `TRY_CAST` is not that test. It accepts and silently *changes* far more than
+#: an integer: "1.5" becomes 2, "2.5" becomes 3, ".5" becomes 1, "1e3" becomes
+#: 1000, "0x10" becomes 16 and "1_000" becomes 1000. Each of those lands in the
+#: snapshot as a plausible integer, so no gate reading the artifact can tell
+#: anything went wrong. Signed forms are rejected too: a negative or explicitly
+#: positive price is not a shape this feed uses, and guessing at intent is how
+#: the rounding got in.
+CANONICAL_PRICE = "^[0-9]+$"
+
 #: One file per partition. The name is part of the bundle contract: the runtime
 #: counts `*.parquet` and the adapter globs for them.
 PARTITION_FILE = "data.parquet"
@@ -172,7 +183,7 @@ SELECT
 FROM staged
 WHERE TRY_CAST(transfer_date AS TIMESTAMP)::DATE BETWEEN DATE {coverage_from}
                                                      AND DATE {coverage_to}
-  AND TRY_CAST(price AS BIGINT) IS NOT NULL
+  AND regexp_full_match(trim(coalesce(price, '')), '{price}')
   AND trim(coalesce(transaction_id, ''), '{{}} ') <> ''
 """
 
@@ -182,7 +193,7 @@ _ELIGIBLE = """
 SELECT count(*) FROM staged
 WHERE TRY_CAST(transfer_date AS TIMESTAMP)::DATE >= DATE {coverage_from}
   AND TRY_CAST(transfer_date AS TIMESTAMP)::DATE <= DATE {coverage_to}
-  AND TRY_CAST(price AS BIGINT) IS NOT NULL
+  AND regexp_full_match(trim(coalesce(price, '')), '{price}')
   AND length(trim(coalesce(transaction_id, ''), '{{}} ')) > 0
 """
 
@@ -209,19 +220,22 @@ def _refuse_malformed(con, coverage_from: date, coverage_to: date) -> None:
               f"      BETWEEN DATE {_sql_literal(coverage_from.isoformat())} "
               f"          AND DATE {_sql_literal(coverage_to.isoformat())}")
     bad_price, bad_id = con.execute(
-        f"SELECT count(*) FILTER (WHERE TRY_CAST(price AS BIGINT) IS NULL), "
+        f"SELECT count(*) FILTER (WHERE NOT regexp_full_match("
+        f"           trim(coalesce(price, '')), '{CANONICAL_PRICE}')), "
         f"       count(*) FILTER (WHERE length(trim(coalesce(transaction_id, ''), "
         f"                                          '{{}} ')) = 0) "
         f"FROM staged {window}").fetchone()
     problems = []
     if int(bad_price):
-        problems.append(f"{int(bad_price)} row(s) have an unparseable price")
+        problems.append(f"{int(bad_price)} row(s) have a price that is not a "
+                        f"canonical integer")
     if int(bad_id):
         problems.append(f"{int(bad_id)} row(s) have no transaction_id")
     if problems:
         raise MalformedSourceRows(
             "; ".join(problems) + " inside the declared window; a required "
-            "value cannot be published as NULL")
+            "value cannot be published as NULL, and a price that is not "
+            "written as digits would be silently rounded or reinterpreted")
 
 
 def build_snapshot(request: BuildRequest) -> BuildResult:
@@ -267,10 +281,12 @@ def build_snapshot(request: BuildRequest) -> BuildResult:
         eligible = int(con.execute(_ELIGIBLE.format(
             coverage_from=_sql_literal(coverage_from.isoformat()),
             coverage_to=_sql_literal(request.coverage_to.isoformat()),
+            price=CANONICAL_PRICE,
         )).fetchone()[0])
         con.execute(_DERIVE.format(
             coverage_from=_sql_literal(coverage_from.isoformat()),
             coverage_to=_sql_literal(request.coverage_to.isoformat()),
+            price=CANONICAL_PRICE,
         ))
         rows = con.execute("SELECT count(*) FROM ppd").fetchone()[0]
         # Zero by construction now -- `_refuse_malformed` has already stopped a

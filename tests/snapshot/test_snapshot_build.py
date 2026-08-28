@@ -175,3 +175,48 @@ def test_the_build_counts_eligible_source_rows_independently_of_what_it_wrote(
     ])
     assert built.eligible_source_rows == 2
     assert built.rows == 2
+
+
+# -- prices must be canonical integers, not merely castable ------------------
+
+def _with_price(text: str):
+    row = list(csv_row("{BAD}", "B5 7AB", "2024-04-01 00:00", 0))
+    row[1] = text
+    return tuple(row)
+
+
+@pytest.mark.parametrize("text,cast_to", [
+    ("1.5", "2"),        # rounded, not rejected
+    ("2.5", "3"),
+    (".5", "1"),
+    ("100.", "100"),
+    ("1e3", "1000"),     # scientific notation
+    ("0x10", "16"),      # hexadecimal
+    ("1_000", "1000"),   # digit separators
+    ("+100", "100"),     # signed forms
+    ("-100", "-100"),
+])
+def test_a_non_canonical_price_fails_the_build(tmp_path, text, cast_to):
+    """`TRY_CAST` accepts far more than an integer and silently changes it.
+
+    A price of "1.5" becomes 2 and a price of "0x10" becomes 16, with nothing
+    downstream able to tell: the artifact holds a plausible integer, so every
+    gate that reads the snapshot agrees with itself.
+    """
+    from tools.ppd_snapshot.build import MalformedSourceRows
+
+    with pytest.raises(MalformedSourceRows, match="price"):
+        build_from(tmp_path, [
+            csv_row("{OK}", "B5 7AA", "2024-03-01 00:00", 200_000),
+            _with_price(text),
+        ], name=f"p{abs(hash(text))}")
+
+
+def test_a_canonical_price_is_accepted(tmp_path):
+    built = build_from(tmp_path, [_with_price("100")])
+    assert built.rows == 1
+
+
+def test_surrounding_whitespace_does_not_make_a_price_non_canonical(tmp_path):
+    built = build_from(tmp_path, [_with_price(" 100 ")], name="ws")
+    assert built.rows == 1

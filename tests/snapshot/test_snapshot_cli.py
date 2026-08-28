@@ -7,6 +7,7 @@ can publish, and "we knew it was bad" is not a control.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -52,7 +53,6 @@ def argv(tmp_path: Path, **over) -> list[str]:
         "--work": str(tmp_path / "work"),
         "--dist": str(tmp_path / "dist"),
         "--coverage-to": "2026-06-30",
-        "--source-coverage-end": "2026-06-30",
         "--today": "2026-07-15",
         "--version": "v20260828T101500Z",
         "--release-state": str(tmp_path / "release-state.json"),
@@ -66,11 +66,17 @@ def argv(tmp_path: Path, **over) -> list[str]:
 
 
 def bound(tmp_path: Path, **over) -> list[str]:
-    """`prepare` plus a written receipt: the ordinary, authorised flow."""
-    prepare(tmp_path, **over)
-    assert main(["receipt", "--csv", str(tmp_path / "pp.csv"),
+    """`prepare` plus a written receipt: the ordinary, authorised flow.
+
+    The digest stands in for the one recorded when the file was downloaded --
+    the receipt refuses to be minted without it.
+    """
+    csv_path = prepare(tmp_path, **over)
+    recorded = hashlib.sha256(csv_path.read_bytes()).hexdigest()
+    assert main(["receipt", "--csv", str(csv_path),
                  "--release-state", str(tmp_path / "release-state.json"),
-                 "--receipt", str(tmp_path / "receipt.json")]) == 0
+                 "--receipt", str(tmp_path / "receipt.json"),
+                 "--expected-sha256", recorded]) == 0
     return argv(tmp_path)
 
 
@@ -87,10 +93,11 @@ def test_the_all_command_builds_validates_packages_and_boots(tmp_path, capsys):
 def test_a_failing_gate_stops_before_anything_is_packaged(tmp_path, capsys):
     # The snapshot claims a window the source release does not cover.
     bound(tmp_path)
-    code = main(["all", *argv(tmp_path,
-                              **{"--source-coverage-end": "2026-05-31"})])
+    # The declared window disagrees with the release the receipt binds to.
+    code = main(["all", *argv(tmp_path, **{"--coverage-to": "2026-05-31"})])
     assert code != 0
-    assert list((tmp_path / "dist").glob("*.tar.zst")) == []
+    assert not (tmp_path / "dist").exists() or \
+        list((tmp_path / "dist").glob("*.tar.zst")) == []
     assert "coverage" in capsys.readouterr().out
 
 
@@ -135,10 +142,12 @@ def test_a_failed_boot_check_leaves_the_dist_root_empty(tmp_path, monkeypatch):
 
     dist = tmp_path / "dist"
     assert not (dist / "current.json").exists()
-    assert list(dist.glob("*.tar.zst")) == []
-    assert list(dist.glob("manifest-*.json")) == []
-    # The candidate is kept for diagnosis, and is not a published release.
-    assert [p.name for p in dist.iterdir()] == ["candidate-v20260828T101500Z"]
+    # Nothing is in the publishing directory at all -- not even a subdirectory
+    # someone could mistake for a release.
+    assert not dist.exists() or list(dist.iterdir()) == []
+    # The candidate is kept for diagnosis, outside dist.
+    assert (tmp_path / "work" / "candidates" /
+            "candidate-v20260828T101500Z").is_dir()
 
 
 # -- the source must be bound to a release ----------------------------------
@@ -154,10 +163,12 @@ def test_the_all_command_refuses_without_a_source_receipt(tmp_path, capsys):
 def test_a_receipt_is_refused_for_a_file_the_release_contradicts(tmp_path, capsys):
     """The reproduction: a stale local CSV under a release describing something
     far larger. It used to build, validate and boot READY."""
-    prepare(tmp_path, content_length=999_999_999)
-    code = main(["receipt", "--csv", str(tmp_path / "pp.csv"),
+    csv_path = prepare(tmp_path, content_length=999_999_999)
+    code = main(["receipt", "--csv", str(csv_path),
                  "--release-state", str(tmp_path / "release-state.json"),
-                 "--receipt", str(tmp_path / "receipt.json")])
+                 "--receipt", str(tmp_path / "receipt.json"),
+                 "--expected-sha256",
+                 hashlib.sha256(csv_path.read_bytes()).hexdigest()])
     assert code != 0
     assert "999999999" in capsys.readouterr().out
     assert not (tmp_path / "receipt.json").exists()
@@ -203,3 +214,30 @@ def test_the_build_command_also_refuses_an_unbound_source(tmp_path, capsys):
     assert main(["build", *argv(tmp_path)]) != 0
     assert "no source receipt" in capsys.readouterr().out
     assert not (tmp_path / "work" / "snapshot").exists()
+
+
+# -- the declared window cannot be talked past ------------------------------
+
+def test_the_all_command_does_not_accept_a_source_coverage_end_override(tmp_path):
+    """The reproduction: a 28 July release was published as covering 31 July by
+    setting both date arguments to agree with each other."""
+    bound(tmp_path)
+    with pytest.raises(SystemExit):
+        main(["all", *argv(tmp_path), "--source-coverage-end", "2026-07-31"])
+
+
+def test_a_window_the_release_does_not_cover_is_refused(tmp_path, capsys):
+    bound(tmp_path)
+    code = main(["all", *argv(tmp_path, **{"--coverage-to": "2026-07-31"})])
+    assert code != 0
+    out = capsys.readouterr().out
+    assert "coverage" in out and "2026-06-30" in out
+    assert not (tmp_path / "dist").exists() or \
+        list((tmp_path / "dist").glob("*.tar.zst")) == []
+
+
+def test_the_expected_end_comes_from_the_receipt_not_the_command_line(tmp_path,
+                                                                     capsys):
+    bound(tmp_path)
+    assert main(["all", *argv(tmp_path)]) == 0
+    assert "2026-06-30" in capsys.readouterr().out

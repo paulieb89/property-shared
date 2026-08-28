@@ -25,8 +25,8 @@ runbook.
 |---|---|
 | `pp-complete.csv` | HM Land Registry public open data, unauthenticated, over **HTTPS**: `https://price-paid-data.publicdata.landregistry.gov.uk/pp-complete.csv` (the [GOV.UK single-file page](https://www.gov.uk/government/statistical-data-sets/price-paid-data-single-file)). ~5.5 GB |
 | The release's `ETag` / `Last-Modified` / `Content-Length` | recorded by `check-release` into the release-state file |
-| The **source receipt** | written by `receipt`: the SHA-256 and byte length computed from the file, alongside the validators of the release it was fetched for |
-| `--coverage-to` | the release's declared coverage end, stated by the operator |
+| The **source receipt** | minted by `download` while streaming the release, or by `receipt` for a file already on disk — the SHA-256 and byte length computed from the bytes, alongside the validators of the release they arrived with |
+| `--coverage-to` | the operator's declaration of the window end, **checked** against the end derived from the bound release |
 
 The plaintext S3 *website* endpoint used during the lab phase is not used: over
 HTTP both the validators this pipeline trusts and the 5.5 GB body are open to
@@ -40,10 +40,29 @@ internally consistent snapshot of the **wrong file** passes all of them. A
 131-byte stale CSV once built, validated and booted `READY` while the release
 record described a 999,999,999-byte release under a different ETag.
 
-The receipt is the binding, and refuses in three directions:
+The receipt is the binding, and it has to be **grounded in evidence captured at
+download time** or it binds nothing: a receipt minted from a file plus a set of
+validators accepts any same-length bytes under any ETag. So there are two ways
+to obtain one, and they are not equally strong:
 
-* **file vs release** — writing a receipt refuses unless the file's length is
-  the length the observed release declares;
+* `download` streams the release, digests the bytes as they arrive and reads the
+  validators off the **same response** — file, digest and provenance from one
+  observation (`evidence: "streamed-download"`). This is the intended path.
+  *It has never been pointed at the real host in this work; no download of the
+  5.5 GB object is authorised here, and the mechanism is exercised against a
+  loopback server.*
+* `receipt --expected-sha256 <digest>` mints one for a file already on disk, and
+  refuses unless the file's computed digest matches the digest recorded when it
+  was fetched. Weaker — it trusts a record made elsewhere — and the receipt says
+  so (`evidence: "recorded-checksum"`).
+
+It then refuses in three directions:
+
+* **file vs recorded download** — minting refuses unless the file's SHA-256 is
+  the one recorded when the release was fetched; length agreement alone would
+  let same-length bytes through;
+* **file vs release** — minting also refuses unless the file's length is the
+  length the observed release declares;
 * **file vs receipt** — every build recomputes SHA-256 and length, so a file
   edited or replaced since is refused (including an edit that preserves length);
 * **receipt vs latest observation** — if `ETag`, `Last-Modified` or
@@ -56,8 +75,12 @@ blesses, so it is not a way around the binding.
 
 `--coverage-to` and the release record are kept **independent on purpose**: the
 coverage gate checks that the operator's declaration matches the end implied by
-the release's publication date (a file published in July covers to 30 June).
-Deriving one from the other would make the gate say nothing.
+the bound release's publication date (a file published in July covers to 30
+June). `build` and `all` therefore accept **no** way to set that expected end —
+a 28 July release was once published as covering 31 July by passing both dates
+so they agreed with each other. `validate` still accepts `--source-coverage-end`
+as a diagnostic and says out loud when the gate is comparing two operator-stated
+dates.
 
 ## Commands
 
@@ -66,11 +89,11 @@ Deriving one from the other would make the gate say nothing.
 uv run --extra snapshot python -m tools.ppd_snapshot check-release \
     --state ~/ppd-snapshot/release-state.json
 
-# 2. Bind the downloaded CSV to that release. Refuses if it is not that file.
-uv run --extra snapshot python -m tools.ppd_snapshot receipt \
-    --csv           ~/ppd-snapshot/pp-complete.csv \
-    --release-state ~/ppd-snapshot/release-state.json \
-    --receipt       ~/ppd-snapshot/receipt.json
+# 2. Fetch the release and mint its receipt from the same response. (For a file
+#    already on disk, use `receipt --expected-sha256 <digest recorded at fetch>`.)
+uv run --extra snapshot python -m tools.ppd_snapshot download \
+    --dest    ~/ppd-snapshot/pp-complete.csv \
+    --receipt ~/ppd-snapshot/receipt.json
 
 # 3. Verify the source, build, validate, package into a candidate, boot it
 #    through the real runtime and adapter, and only then promote. Stops before
@@ -83,6 +106,9 @@ uv run --extra snapshot python -m tools.ppd_snapshot all \
     --release-state  ~/ppd-snapshot/release-state.json \
     --source-receipt ~/ppd-snapshot/receipt.json \
     --memory 4GB
+# `--coverage-to` is the operator's declaration. The end it is checked against
+# is DERIVED from the bound release's publication date and cannot be passed in:
+# a flag that sets both makes the coverage gate compare a claim with itself.
 
 # 4. Re-run the gates against an existing snapshot directory. Without
 #    --rows and --eligible-source-rows the reconciliation gate cannot run, and
@@ -100,21 +126,26 @@ gets slower, not less correct.
 ## Outputs
 
 ```
-dist/candidate-<version>/                  assembled here, booted from here, never published from here
-dist/current.json                          written LAST, at promotion
+work/candidates/candidate-<version>/       assembled here, booted from here -- OUTSIDE dist
+dist/current.json                          replaced atomically, LAST, at promotion
 dist/manifest-<version>.json               exactly the eleven SnapshotManifest fields
 dist/snapshot-<version>.tar.zst            eleven year=YYYY/data.parquet members, nothing else
 dist/build-report-<version>.json           provenance, timings, per-year rows, boot-check result
 ```
 
-**Nothing reaches the dist root until it has booted.** A bundle sitting beside a
-`current.json` is a release someone can publish, so the pipeline assembles into
-`candidate-<version>/`, boots *that* directory through the real runtime, and
-promotes only on `READY`. Promotion moves the bundle, then the manifest, then
-the report, and writes `current.json` last: a pointer is a promise that what it
-names is present, so an interrupted promotion leaves a partial directory and no
-pointer, which reads as "nothing published". A failed boot leaves the candidate
-in place for diagnosis and the dist root untouched.
+**Nothing reaches the dist root until it has booted, and the candidate is not
+inside it.** A candidate under `dist/` is still inside the directory something
+else may sync, mirror or serve — "ignore the subdirectory" is a convention, not
+a boundary — so candidates are assembled under the work directory, booted
+through the real runtime from there, and promoted only on `READY`.
+
+Promotion moves the bundle, then the manifest, then the report, and replaces
+`current.json` **last and atomically** (write beside, then rename). A pointer is
+a promise that what it names is present, and `write_text` truncates before it
+writes: interrupted, it would leave an empty pointer where a working one used to
+be, taking down the release that was already published. An interrupted promotion
+now leaves the previous pointer byte-for-byte intact. A failed boot leaves the
+candidate in place for diagnosis and the dist root untouched.
 
 The published manifest carries **only** what
 `property_core.snapshot.models.SnapshotManifest` declares. That model is frozen
@@ -146,9 +177,16 @@ The gates in `validate.py` check what the build *declared* against what it
 The build itself **fails closed** before any of this: a source row whose
 `transfer_date` does not parse stops the build outright — it can be neither
 placed in the window nor shown to be outside it, so dropping it would be
-deciding silently — and an unparseable `price` or a blank `transaction_id`
+deciding silently — and a non-canonical `price` or a blank `transaction_id`
 *inside* the window stops it too. Rows outside the window are not the
 snapshot's problem and are not policed.
+
+**A price must be written as digits, not merely be castable.** `TRY_CAST` is not
+a validity test: it accepts and silently *changes* `1.5` to 2, `2.5` to 3, `.5`
+to 1, `1e3` to 1000, `0x10` to 16 and `1_000` to 1000. Each lands in the
+snapshot as a plausible integer that no gate reading the artifact can question,
+so the source text is matched against `^[0-9]+$` before any cast. Signed forms
+are refused too: guessing at intent is how the rounding got in.
 
 **Coverage is a declaration about the source release, not a measurement of the
 rows.** `min(transfer_date) == coverage_from` is deliberately *not* required: a
@@ -181,8 +219,9 @@ Halt and report; there is no override flag for any of these.
 * Any gate fails, or the boot check does not end `READY` (nothing is promoted).
 * The CSV does not match its receipt, or the receipt does not match the latest
   observed release — including a release that has moved on since the download.
-* A source row inside the window has an unparseable `price` or no
+* A source row inside the window has a non-canonical `price` or no
   `transaction_id`, or any source row has an unparseable `transfer_date`.
+* The declared `--coverage-to` is not the end the bound release implies.
 * The recorded `ETag` differs from the release the CSV was fetched from — a fresh
   5.5 GB download is a cost decision, not something the pipeline should make.
 * `transaction_id` is not unique within the window, or the row count disagrees.
@@ -204,6 +243,7 @@ no deployed system touched). Source: the HM Land Registry release fetched on
 | Rows in the eleven-year window | **10,394,935** |
 | Eligible source rows (counted from the source) | 10,394,935 — equal, so nothing was lost between reading and writing |
 | Source rows with a malformed required value | 0 (`transfer_date` anywhere, `price`/`transaction_id` in window) |
+| Source rows with a non-canonical price | 0 of 31,430,611 — checked across the whole file, not only the window |
 | Distinct `transaction_id` | 10,394,935 — equal, so the key holds |
 | Rows with no parseable date | 0 |
 | Partitions | 11 (`year=2016` … `year=2026`) |
@@ -231,10 +271,11 @@ files and a byte-identical bundle** — the same sha256 `50f802b2…9072c` — a
 identical logical content digests.
 
 The fail-closed source checks were added after that build and re-run against the
-same CSV using the shipped predicates: **zero** rows with a malformed required
-value, and an eligible source count of 10,394,935 — exactly the published row
-count. The artifact's content and size are therefore unchanged by that work, and
-the build was not re-run. The per-partition content digests recorded in the
+same CSV using the shipped predicates — including the stricter canonical-price
+rule: **zero** rows with a malformed required value, **zero** non-canonical
+prices anywhere in the 31,430,611-row file, and an eligible source count of
+10,394,935 — exactly the published row count. The artifact's content and size
+are therefore unchanged by that work, and the build was not re-run. The per-partition content digests recorded in the
 build report predate the switch to the length-prefixed encoding and are not
 comparable across that change; the bundle digest is.
 

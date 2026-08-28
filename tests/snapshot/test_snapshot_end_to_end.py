@@ -55,7 +55,7 @@ def published(tmp_path: Path):
         csv_path=csv_path, out_dir=tmp_path / "snapshot",
         coverage_to=COVERAGE_TO, temp_dir=tmp_path / "tmp"))
     release = package_release(
-        built, dist_dir=tmp_path / "dist",
+        built, dist_dir=tmp_path / "dist", candidate_root=tmp_path / "work",
         version=snapshot_version(datetime(2026, 8, 28, 10, 15, tzinfo=timezone.utc)),
         source={"file": "pp.csv"}, facts={})
     # Promoted, because a published release is what the runtime is pointed at.

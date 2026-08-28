@@ -45,7 +45,7 @@ def released(tmp_path: Path):
         csv_path=csv_path, out_dir=tmp_path / "snapshot",
         coverage_to=COVERAGE_TO, temp_dir=tmp_path / "tmp"))
     release = package_release(
-        built, dist_dir=tmp_path / "dist",
+        built, dist_dir=tmp_path / "dist", candidate_root=tmp_path / "work",
         version=snapshot_version(datetime(2026, 8, 28, 10, 15, tzinfo=timezone.utc)),
         source={"file": "pp.csv", "sha256": "a" * 64, "etag": '"abc"'},
         facts={"rows_per_year": {"2024": 1, "2026": 1}},
@@ -188,8 +188,9 @@ def test_verify_bundle_rejects_a_length_that_disagrees(released):
 def test_publishing_the_same_version_twice_is_refused(released, tmp_path):
     built, release = released
     with pytest.raises(VersionAlreadyPublished):
-        package_release(built, dist_dir=release.dist_dir, version=release.version,
-                        source={}, facts={})
+        package_release(built, dist_dir=release.dist_dir,
+                        candidate_root=release.candidate_dir.parent,
+                        version=release.version, source={}, facts={})
 
 
 # -- candidate, then promotion ----------------------------------------------
@@ -197,15 +198,15 @@ def test_publishing_the_same_version_twice_is_refused(released, tmp_path):
 def test_packaging_writes_into_a_candidate_directory(released):
     _, release = released
     assert release.candidate_dir.name == f"candidate-{release.version}"
-    assert release.candidate_dir.parent == release.dist_dir
+    assert release.candidate_dir.parent == release.dist_dir.parent / "work"
     assert release.bundle_path.parent == release.candidate_dir
     assert release.manifest_path.parent == release.candidate_dir
 
 
 def test_packaging_leaves_the_dist_root_empty(released):
     _, release = released
-    assert sorted(p.name for p in release.dist_dir.iterdir()) == [
-        release.candidate_dir.name]
+    assert not release.dist_dir.exists() or \
+        list(release.dist_dir.iterdir()) == []
 
 
 def test_the_candidate_carries_its_own_pointer_so_it_can_be_booted(released):
@@ -246,3 +247,69 @@ def test_promotion_writes_the_pointer_last(released, monkeypatch):
     with pytest.raises(OSError):
         pkg.promote_release(release)
     assert not (release.dist_dir / "current.json").exists()
+
+
+# -- the candidate lives outside dist; the pointer is replaced atomically ----
+
+def test_the_candidate_is_not_inside_the_dist_root(released):
+    _, release = released
+    assert release.dist_dir not in release.candidate_dir.parents
+    assert not release.dist_dir.exists() or \
+        list(release.dist_dir.iterdir()) == []
+
+
+def test_an_interrupted_promotion_leaves_a_previous_pointer_untouched(
+        released, monkeypatch):
+    """A dist root with a working release must survive a failed promotion.
+
+    Truncating `current.json` and then dying takes down the release that was
+    already published, which is worse than never having tried: the pointer is
+    the one file a booting Machine reads first.
+    """
+    from tools.ppd_snapshot import package as pkg
+
+    _, release = released
+    release.dist_dir.mkdir(parents=True, exist_ok=True)
+    previous = release.dist_dir / "current.json"
+    previous.write_text(json.dumps({"current_manifest": "manifest-v1.json"}))
+    before = previous.read_bytes()
+
+    real_move = pkg.shutil.move
+    monkeypatch.setattr(pkg.shutil, "move", lambda src, dst, *a, **k: (
+        (_ for _ in ()).throw(OSError("disk went away")) if "manifest" in str(dst)
+        else real_move(src, dst, *a, **k)))
+
+    with pytest.raises(OSError):
+        pkg.promote_release(release)
+    assert previous.read_bytes() == before
+
+
+def test_a_pointer_write_that_fails_leaves_the_previous_one_intact(
+        released, monkeypatch):
+    from tools.ppd_snapshot import package as pkg
+
+    _, release = released
+    release.dist_dir.mkdir(parents=True, exist_ok=True)
+    previous = release.dist_dir / "current.json"
+    previous.write_text(json.dumps({"current_manifest": "manifest-v1.json"}))
+    before = previous.read_bytes()
+
+    monkeypatch.setattr(pkg.os, "replace", lambda *a, **k: (
+        _ for _ in ()).throw(OSError("rename failed")))
+    with pytest.raises(OSError):
+        pkg.promote_release(release)
+    assert previous.read_bytes() == before
+    assert json.loads(previous.read_text())["current_manifest"] == "manifest-v1.json"
+
+
+def test_promotion_replaces_an_existing_pointer(released):
+    from tools.ppd_snapshot.package import promote_release
+
+    _, release = released
+    release.dist_dir.mkdir(parents=True, exist_ok=True)
+    (release.dist_dir / "current.json").write_text(
+        json.dumps({"current_manifest": "manifest-v1.json"}))
+    promoted = promote_release(release)
+    assert json.loads(promoted.current_path.read_text()) == {
+        "current_manifest": release.manifest_path.name}
+    assert not list(release.dist_dir.glob("*.tmp"))

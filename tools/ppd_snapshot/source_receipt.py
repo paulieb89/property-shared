@@ -14,6 +14,20 @@ evidence:
 * **observed from the release** -- `ETag`, `Last-Modified`, `Content-Length`, as
   the source reported them.
 
+Those two alone are not enough, and the gap is worth stating plainly: a receipt
+minted from a file and a set of validators binds *whatever bytes are on disk* to
+*whatever release is claimed*, provided only that the lengths agree. Same-length
+substitution passes. So minting also requires a digest captured **independently
+of the file being read now**:
+
+* `download_with_receipt` is the intended path -- it digests the bytes as they
+  stream in, from the same response the validators come from, so the file, its
+  digest and its release provenance all originate in one observation
+  (`evidence: "streamed-download"`);
+* for a file that already exists, the digest recorded when it was fetched must
+  be supplied and must match (`evidence: "recorded-checksum"`). That is weaker,
+  because it trusts a record made elsewhere, and the receipt says so.
+
 Writing a receipt refuses unless those agree, and every build re-checks the file
 against its receipt and the receipt against the latest observation. Any
 disagreement stops the build: a snapshot that cannot say which release it came
@@ -47,6 +61,10 @@ class SourceReceipt:
     last_modified: Optional[str]
     content_length: Optional[int]
     recorded_at: str
+    #: Where the digest came from. "streamed-download" means it was computed
+    #: from the response that also carried the validators; "recorded-checksum"
+    #: means it was taken on trust from a record made at some earlier fetch.
+    evidence: str = "recorded-checksum"
 
     def observation(self) -> ReleaseObservation:
         return ReleaseObservation(etag=self.etag,
@@ -66,13 +84,15 @@ def digest_file(path: Path | str) -> tuple[int, str]:
 
 
 def write_receipt(csv_path: Path | str, observation: ReleaseObservation,
-                  receipt_path: Path | str, *,
+                  receipt_path: Path | str, *, expected_sha256: str,
+                  evidence: str = "recorded-checksum",
                   now: Optional[datetime] = None) -> SourceReceipt:
     """Record what this file is, refusing if it is not what the release says.
 
-    The length comparison is the one that catches a stale download: a file that
-    is not the size the release declares is not that release, whatever it is
-    named.
+    `expected_sha256` is required, and is the point of the function: the length
+    comparison catches a stale download, but only the digest catches a file of
+    the right size holding different bytes. Without it a receipt would bind any
+    same-length content to any release.
     """
     csv_path = Path(csv_path)
     receipt_path = Path(receipt_path)
@@ -87,12 +107,18 @@ def write_receipt(csv_path: Path | str, observation: ReleaseObservation,
             f"{csv_path.name} is {length} bytes but the observed release "
             f"declares {observation.content_length}; this file is not that "
             f"release")
+    if digest != expected_sha256:
+        raise SourceMismatch(
+            f"{csv_path.name} has sha256 {digest}, but the digest recorded when "
+            f"this release was downloaded is {expected_sha256}; the file on "
+            f"disk is not the one that was fetched")
 
     receipt = SourceReceipt(
         file=csv_path.name, sha256=digest, bytes=length,
         etag=observation.etag, last_modified=observation.last_modified,
         content_length=observation.content_length,
-        recorded_at=(now or datetime.now(timezone.utc)).isoformat())
+        recorded_at=(now or datetime.now(timezone.utc)).isoformat(),
+        evidence=evidence)
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
     receipt_path.write_text(json.dumps(asdict(receipt), indent=2) + "\n")
     return receipt
@@ -153,3 +179,66 @@ def verify_source(csv_path: Path | str, receipt: SourceReceipt,
         raise SourceMismatch(
             f"the published Content-Length {observation.content_length} is not "
             f"the one this file was fetched under ({receipt.content_length})")
+
+
+def download_with_receipt(url: str, dest: Path | str, receipt_path: Path | str,
+                          *, opener=None, now: Optional[datetime] = None,
+                          timeout: float = 300.0) -> SourceReceipt:
+    """Stream a release to disk, digesting it as it arrives, and mint a receipt.
+
+    This is the receipt path the pipeline is designed around: the bytes, the
+    digest and the validators all come from **one** response, so there is no
+    window in which the file could be something other than what the headers
+    describe. Minting a receipt for a file that is merely sitting on disk is the
+    fallback, and it is recorded as the weaker evidence it is.
+
+    The body is streamed in fixed chunks and never held in memory, and a
+    transfer whose length disagrees with `Content-Length` is an interrupted
+    download rather than a release: the partial file and the receipt are both
+    discarded.
+
+    **Not exercised against the real host in this PR.** No download of the
+    5.5 GB object is authorised here; the mechanism is tested against a loopback
+    server.
+    """
+    import urllib.request
+
+    dest = Path(dest)
+    receipt_path = Path(receipt_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    opener = opener or urllib.request.urlopen
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "property-shared-snapshot-build/1"})
+
+    digest = hashlib.sha256()
+    length = 0
+    try:
+        with opener(request, timeout=timeout) as response:
+            headers = response.headers
+            declared = headers.get("Content-Length")
+            observation = ReleaseObservation(
+                etag=headers.get("ETag"),
+                last_modified=headers.get("Last-Modified"),
+                content_length=int(declared) if declared and declared.isdigit()
+                else None)
+            with open(dest, "wb") as out:
+                while chunk := response.read(CHUNK_BYTES):
+                    out.write(chunk)
+                    digest.update(chunk)
+                    length += len(chunk)
+
+        if observation.content_length is None:
+            raise SourceMismatch(
+                f"{url} returned no Content-Length, so the transfer cannot be "
+                f"shown to be complete")
+        if length != observation.content_length:
+            raise SourceMismatch(
+                f"{url} declared Content-Length {observation.content_length} "
+                f"but {length} bytes arrived; the transfer was interrupted")
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
+
+    return write_receipt(dest, observation, receipt_path,
+                         expected_sha256=digest.hexdigest(),
+                         evidence="streamed-download", now=now)
