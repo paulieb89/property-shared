@@ -60,6 +60,20 @@ class SourceMismatch(RuntimeError):
     """The file, its receipt and the observed release do not describe one thing."""
 
 
+class ReceiptRollbackFailed(RuntimeError):
+    """A commit failed and the previous release could not be put back.
+
+    The backup is the only copy of it at that moment, so it is **kept** and its
+    path is reported. Deleting it to tidy up turns a recoverable half-commit
+    into an unrecoverable one: the destination holds the new bytes, the receipt
+    still describes the old ones, and nothing on disk can reconcile them.
+    """
+
+    def __init__(self, message: str, *, backup_path: Path):
+        super().__init__(message)
+        self.backup_path = backup_path
+
+
 @dataclass(frozen=True)
 class SourceReceipt:
     file: str
@@ -296,30 +310,74 @@ def download_with_receipt(url: str, dest: Path | str, receipt_path: Path | str,
         tmp.unlink(missing_ok=True)
         raise
 
-    backup = None
-    if dest.exists():
-        # The previous release is renamed aside rather than overwritten, so the
-        # commit below can put it back. `mkstemp` hands back a descriptor with
-        # the name; close it before the file is renamed over.
-        backup_handle, backup_name = tempfile.mkstemp(
-            dir=dest.parent, prefix=f".{dest.name}.", suffix=".prev")
-        os.close(backup_handle)
-        backup = Path(backup_name)
-        os.replace(dest, backup)
-    try:
-        commit_prepared(tmp, dest)
-        commit_prepared(tmp_receipt, receipt_path)
-    except BaseException:
-        # Put back exactly what was there. A half-committed pair is worse than
-        # a refused refresh, because nothing downstream can tell it happened.
-        if backup is not None:
-            os.replace(backup, dest)
-        else:
-            dest.unlink(missing_ok=True)
-        tmp.unlink(missing_ok=True)
-        Path(tmp_receipt).unlink(missing_ok=True)
-        raise
-    finally:
-        if backup is not None:
-            Path(backup).unlink(missing_ok=True)
+    _publish_pair(tmp, dest, tmp_receipt, receipt_path)
     return receipt
+
+
+def _discard(*paths: Optional[Path]) -> None:
+    for path in paths:
+        if path is not None:
+            Path(path).unlink(missing_ok=True)
+
+
+def _publish_pair(tmp_data: Path, dest: Path, tmp_receipt: Path,
+                  receipt_path: Path) -> None:
+    """Publish two staged files together, or leave the previous pair in place.
+
+    An explicit transaction, because the interesting cases are all in the middle
+    of it. The stages, in order:
+
+        staged          both temporaries written; nothing on disk touched
+        backed_up       the previous release renamed aside -- the backup is now
+                        the ONLY copy of it
+        dest_published  the new release is in place, the receipt is not
+        published       both in place
+
+    The backup is removed at exactly two points: after `published`, and after a
+    restoration that was **confirmed to have worked**. Anywhere else it is what
+    the previous release is recovered from, so it is kept -- including, and
+    especially, when the restoration itself failed.
+    """
+    stage = "staged"
+    backup: Optional[Path] = None
+    try:
+        if dest.exists():
+            handle, name = tempfile.mkstemp(dir=dest.parent,
+                                            prefix=f".{dest.name}.",
+                                            suffix=".prev")
+            os.close(handle)
+            backup = Path(name)
+            os.replace(dest, backup)
+            stage = "backed_up"
+        os.replace(tmp_data, dest)
+        stage = "dest_published"
+        os.replace(tmp_receipt, receipt_path)
+        stage = "published"
+    except BaseException as failure:
+        if stage == "staged":
+            # Nothing was moved. Any backup here is the empty placeholder
+            # `mkstemp` made, not the previous release, so all three staging
+            # files go.
+            _discard(tmp_data, tmp_receipt, backup)
+            raise
+        try:
+            if backup is not None:
+                os.replace(backup, dest)
+            else:
+                # There was no previous release; the new one is withdrawn.
+                Path(dest).unlink(missing_ok=True)
+        except BaseException as restore_failure:
+            _discard(tmp_data, tmp_receipt)
+            raise ReceiptRollbackFailed(
+                f"the download could not be committed ({failure}) and the "
+                f"previous release could not be restored "
+                f"({restore_failure}). {dest} now holds the NEW bytes while "
+                f"{receipt_path} still describes the old ones. The previous "
+                f"release has been RETAINED at {backup} -- move it back to "
+                f"{dest}, or re-run the download.",
+                backup_path=backup) from restore_failure
+        # Restoration confirmed: the backup is redundant.
+        _discard(tmp_data, tmp_receipt, backup)
+        raise
+    # Published: the backup is redundant.
+    _discard(backup)

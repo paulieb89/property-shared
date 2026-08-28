@@ -438,3 +438,66 @@ def test_repeated_successful_downloads_do_not_leak_descriptors(tmp_path):
             before = open_fds()
     assert open_fds() <= before
     assert sorted(p.name for p in tmp_path.iterdir()) == ["pp.csv", "receipt.json"]
+
+
+def test_a_failed_rollback_retains_the_backup_and_names_it(tmp_path, monkeypatch):
+    """When the commit fails AND the restore fails, the backup is the only copy
+    of the previous release. Deleting it turns a recoverable half-commit into an
+    unrecoverable one."""
+    from tools.ppd_snapshot import source_receipt as sr
+    from tools.ppd_snapshot.source_receipt import ReceiptRollbackFailed
+
+    csv_path, receipt_path, csv_before, receipt_before = _seed(tmp_path)
+    fresh = b"newer,release,rows\n" * 3
+    served = _serve(fresh, {"ETag": '"newer-etag"',
+                            "Last-Modified": "Fri, 28 Aug 2026 05:16:16 GMT",
+                            "Content-Length": str(len(fresh))})
+
+    real = sr.os.replace
+    seen = {"dest": 0}
+
+    def _replace(src, dst, *args, **kwargs):
+        if str(dst).endswith("receipt.json"):
+            raise OSError("receipt commit failed")
+        if str(dst) == str(csv_path):
+            seen["dest"] += 1
+            # The first is publication; the second is the rollback.
+            if seen["dest"] > 1:
+                raise OSError("restore failed")
+        return real(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(sr.os, "replace", _replace)
+    with served as url:
+        with pytest.raises(ReceiptRollbackFailed) as caught:
+            download_with_receipt(url, csv_path, receipt_path, now=NOW)
+
+    backups = [p for p in tmp_path.iterdir() if p.name.endswith(".prev")]
+    assert len(backups) == 1, "the only copy of the previous release was deleted"
+    assert backups[0].read_bytes() == csv_before
+    assert str(backups[0]) in str(caught.value)
+    # The receipt was never replaced, so the previous pair is reconstructable.
+    assert receipt_path.read_bytes() == receipt_before
+
+
+def test_a_failed_backup_rename_leaves_no_staging_files(tmp_path, monkeypatch):
+    from tools.ppd_snapshot import source_receipt as sr
+
+    csv_path, receipt_path, csv_before, receipt_before = _seed(tmp_path)
+    fresh = b"newer,release,rows\n" * 3
+    served = _serve(fresh, {"ETag": '"newer-etag"',
+                            "Last-Modified": "Fri, 28 Aug 2026 05:16:16 GMT",
+                            "Content-Length": str(len(fresh))})
+
+    real = sr.os.replace
+    monkeypatch.setattr(sr.os, "replace", lambda src, dst, *a, **k: (
+        (_ for _ in ()).throw(OSError("backup rename failed"))
+        if str(dst).endswith(".prev") else real(src, dst, *a, **k)))
+
+    with served as url:
+        with pytest.raises(OSError):
+            download_with_receipt(url, csv_path, receipt_path, now=NOW)
+
+    assert csv_path.read_bytes() == csv_before
+    assert receipt_path.read_bytes() == receipt_before
+    # No data temp, no receipt temp, no empty backup left behind.
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["pp.csv", "receipt.json"]

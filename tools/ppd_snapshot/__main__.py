@@ -49,6 +49,7 @@ from tools.ppd_snapshot.release_check import (
     record_ingested,
 )
 from tools.ppd_snapshot.source_receipt import (
+    ReceiptRollbackFailed,
     SourceMismatch,
     download_with_receipt,
     load_receipt,
@@ -149,6 +150,12 @@ def _cmd_download(args) -> int:
     try:
         receipt = download_with_receipt(args.url, Path(args.dest),
                                         Path(args.receipt))
+    except ReceiptRollbackFailed as exc:
+        # The path is the whole recovery instruction; it must not be buried in
+        # a traceback.
+        print(f"DOWNLOAD LEFT A HALF-COMMITTED PAIR: {exc}")
+        print(f"the previous release is retained at {exc.backup_path}")
+        return 3
     except SourceMismatch as exc:
         print(f"download refused: {exc}")
         return 2

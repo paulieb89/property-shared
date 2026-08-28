@@ -57,6 +57,13 @@ to obtain one, and they are not equally strong:
   half-committed pair is worse than a refused refresh, because nothing
   downstream can tell it happened. A destination that resolves to the receipt
   path is refused before any request is made.
+
+  The commit is an explicit transaction (`staged` → `backed_up` →
+  `dest_published` → `published`). While it is open, the renamed-aside backup is
+  the **only** copy of the previous release, so it is deleted at exactly two
+  points: after publication, and after a restoration confirmed to have worked.
+  **If the rollback itself fails**, `download` exits `3`, keeps the backup and
+  prints its path — see below.
   *It has never been pointed at the real host in this work; no download of the
   5.5 GB object is authorised here, and the mechanism is exercised against a
   loopback server.*
@@ -235,6 +242,14 @@ fsynced, and renamed over its target. `write_text` truncates first, so an
 interrupted write would leave an empty file where a working one was; for the
 release state that would reset the first-observed timestamp the seven-day alert
 is measured from.
+
+### If `download` exits 3
+
+The commit failed *and* the previous release could not be put back. The
+destination holds the new bytes, the receipt still describes the old ones, and
+the previous release is retained in the temporary file whose path is printed.
+Recover by moving that file back over the destination, or by re-running
+`download`. Nothing deletes it for you: it is the only copy.
 
 ## Stop conditions
 

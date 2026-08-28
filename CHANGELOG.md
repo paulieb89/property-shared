@@ -259,8 +259,11 @@ coverage take effect only once a snapshot is enabled and materialized.
   destination only after the transfer's length is confirmed; writing the
   destination directly truncated a working CSV as soon as a refresh began, and
   a mid-stream failure erased it while its receipt survived to describe it. The
-  CSV and its receipt are committed as a pair, with the CSV rolled back if the
-  receipt cannot be written, and a destination that resolves to the receipt path
+  CSV and its receipt are committed as a pair by an explicit transaction that
+  removes the renamed-aside backup only after publication or a confirmed
+  restoration — if the rollback itself fails the backup is kept and its path
+  reported, because it is then the only copy of the previous release — with the
+  CSV rolled back if the receipt cannot be written, and a destination that resolves to the receipt path
   is refused before any request. Every document the pipeline replaces — release
   state, receipt, manifest, build report, `current.json` — is now written by
   sibling-and-rename; the release state in particular carries the timestamp the

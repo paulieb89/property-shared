@@ -275,3 +275,23 @@ def test_the_source_is_verified_once_per_run(tmp_path, monkeypatch):
                         lambda *a, **k: (calls.append(1), real(*a, **k))[1])
     assert main(["all", *argv(tmp_path)]) == 0
     assert len(calls) == 1
+
+
+def test_a_retained_backup_is_reported_to_the_operator(tmp_path, monkeypatch,
+                                                       capsys):
+    """A rollback failure leaves the only copy of the previous release in a
+    temporary file. Its path is the whole recovery instruction."""
+    from tools.ppd_snapshot import __main__ as cli
+    from tools.ppd_snapshot.source_receipt import ReceiptRollbackFailed
+
+    backup = tmp_path / ".pp.csv.xyz.prev"
+
+    def _boom(*args, **kwargs):
+        raise ReceiptRollbackFailed(f"retained at {backup}", backup_path=backup)
+
+    monkeypatch.setattr(cli, "download_with_receipt", _boom)
+    code = cli.main(["download", "--url", "http://example.invalid/pp.csv",
+                     "--dest", str(tmp_path / "pp.csv"),
+                     "--receipt", str(tmp_path / "receipt.json")])
+    assert code != 0
+    assert str(backup) in capsys.readouterr().out
