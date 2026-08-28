@@ -198,6 +198,21 @@ coverage take effect only once a snapshot is enabled and materialized.
   `TransactionNotFoundError`, `UpstreamShapeError`, `SnapshotFailure`,
   `SnapshotUnavailableError`, `UpstreamUnavailableError`), all exported from
   `property_core`.
+- **Local snapshot build and validation pipeline** (`tools/ppd_snapshot/`),
+  deliberately outside the published wheel. Builds the eleven year-only Parquet
+  partitions from `pp-complete.csv`, publishes the immutable manifest the runtime
+  reads plus a separate build report, and gates the artifact on schema and column
+  types (per partition, never over the union), row count, `transaction_id`
+  uniqueness, declared-coverage containment, the 120-month guarantee, the
+  provisional boundary, the file inventory, the bundle digest and deterministic
+  ordering. It then boots the result through the real `SnapshotRuntime` and opens
+  it with the real `SnapshotAdapter`, which is the only claim worth making about
+  a build. Also carries the section 4.9 release check: a `HEAD` on
+  `pp-complete.csv` comparing `ETag`/`Last-Modified`/`Content-Length` against the
+  recorded release, with the seven-day uningested alert measured from
+  observation. **Local only** — no upload, bucket, cloud resource, Fly command,
+  secret, image or deployment change (§4.8). Runbook:
+  `docs/ops/ppd-snapshot-build.md`.
 - Optional `snapshot` extra (`duckdb==1.5.5`) and `PPD_SNAPSHOT_ENABLED`
   (default **off**). The published library gains no required dependency.
 - `docs/design/ppd-source-routing.md` — the frozen specification governing this
@@ -230,10 +245,18 @@ coverage take effect only once a snapshot is enabled and materialized.
   changing which area a caller's request covers is a behaviour change of its
   own. Both paths return the requested area with a warning saying why, and the
   reason differs by source because the reasons genuinely differ.
-- The build pipeline, artifact distribution, the shadow corpus, and rollout
-  gates G1–G3. No Dockerfile, Fly config, image, secret or deployment is touched
-  here, and neither production image installs the `snapshot` extra yet — which
-  G3 requires **before** the flag may be enabled.
+- Artifact distribution, the shadow corpus, and rollout gates G1–G3. No
+  Dockerfile, Fly config, image, secret or deployment is touched here, and
+  neither production image installs the `snapshot` extra yet — which G3 requires
+  **before** the flag may be enabled. The build pipeline produces a bundle on a
+  workstation and stops there; where one would be hosted is separately approved.
+- **A measurement the rollout needs, recorded rather than acted on:** the real
+  eleven-partition **year-only** bundle is **266.2 MiB**, not the 214 MiB §1.1
+  estimates — that figure is a year+area measurement, while §1.2 mandates
+  year-only, which the same Phase 3 run measured at +22%. This moves §1.1's
+  download estimate and the G1 transient-disk budget. The specification is frozen
+  and is not edited here; correcting its sizing table is a decision round that
+  belongs before G1.
 
 
 ## v1.14.2 (2026-08-26) — MCP server card version; inferred-GBP warning ordering
