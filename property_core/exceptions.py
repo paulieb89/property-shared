@@ -115,6 +115,52 @@ class InvalidPostcodeError(PPDError):
         }
 
 
+class InvalidDateRangeError(PPDError):
+    """Caller supplied a date, or a pair of dates, that cannot mean anything.
+
+    Two distinct mistakes share this type because they share a remedy -- fix the
+    input -- but ``field`` says which one:
+
+    * an unparseable date. Coverage decisions compare ISO strings lexically,
+      which is only meaningful for well-formed ones: ``"nonsense"`` sorts after
+      ``"2026-06-30"``, so a garbage ``to_date`` read as "beyond coverage" and
+      was silently clamped to it.
+    * ``from_date`` after ``to_date``. The window is empty by construction, so
+      it passed both coverage-bound checks, matched nothing, and -- being
+      nominally inside coverage -- was reported as a COMPLETE empty result.
+
+    Raised **before either source is queried**, because it is the caller's
+    input that is wrong and neither source can improve on that answer.
+    """
+
+    code = "invalid_date_range"
+    retryable = False
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        field: str = "",
+        value: Optional[str] = None,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ):
+        self.field = field
+        self.value = value
+        self.from_date = from_date
+        self.to_date = to_date
+        super().__init__(detail)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **super().to_dict(),
+            "field": self.field,
+            "value": self.value,
+            "requested": {"from_date": self.from_date, "to_date": self.to_date},
+            "expected": "ISO dates (YYYY-MM-DD) with from_date <= to_date",
+        }
+
+
 class TransactionNotFoundError(PPDError):
     """No such transaction upstream. Distinct from a failed lookup."""
 

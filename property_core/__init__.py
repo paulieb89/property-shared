@@ -21,6 +21,7 @@ from property_core.attribution import (
     hmlr_attribution,
 )
 from property_core.exceptions import (
+    InvalidDateRangeError,
     InvalidPostcodeError,
     PPDCoverageError,
     PPDError,
@@ -103,6 +104,7 @@ __all__ = [
     "CoveragePolicy",
     "HMLR_ATTRIBUTION",
     "HMLR_LICENCE_URL",
+    "InvalidDateRangeError",
     "InvalidPostcodeError",
     "PPDCoverageError",
     "PPDError",

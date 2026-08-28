@@ -26,6 +26,7 @@ from property_core.ppd_source import (
     live_provenance,
     resolve_coverage,
     snapshot_provenance,
+    validate_date_range,
 )
 from property_core.provenance import SourceKind
 
@@ -119,6 +120,11 @@ class PPDService:
         confident false claim.
         """
         warnings: List[str] = []
+
+        # Before routing, so neither source is queried on input that cannot mean
+        # anything -- and so the same bad input gets the same typed answer
+        # whichever source would have served it.
+        validate_date_range(from_date, to_date)
 
         if limit <= 0:
             limit = DEFAULT_LIMIT

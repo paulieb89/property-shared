@@ -33,7 +33,7 @@ from enum import Enum
 from typing import Any, Iterable, Optional
 
 from property_core.config import ppd_snapshot_enabled
-from property_core.exceptions import PPDCoverageError
+from property_core.exceptions import InvalidDateRangeError, PPDCoverageError
 from property_core.provenance import (
     CompletenessBasis,
     PPDProvenance,
@@ -103,6 +103,58 @@ def _today() -> date:
     return date.today()
 
 
+def validate_date_range(from_date: Optional[str],
+                        to_date: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Both dates parse as ISO, and `from_date <= to_date`. Or a typed error.
+
+    **Everything downstream compares these as strings.** That is deliberate and
+    fine for well-formed ISO dates, whose lexical and chronological orders agree
+    -- and meaningless for anything else. Unvalidated, `"nonsense"` sorted after
+    `"2026-06-30"` and a garbage `to_date` was read as "beyond coverage" and
+    quietly clamped to it.
+
+    An inverted range is rejected rather than answered. It describes an empty
+    window, so it passed both coverage-bound checks, returned nothing, and was
+    reported complete: a confident "no such sales exist" for a period no source
+    was ever asked about.
+
+    Called before any routing decision, so it protects the live path as well --
+    where an unparseable date previously surfaced as an upstream failure rather
+    than a caller error.
+    """
+    def _parsed(value: Optional[str], field: str) -> Optional[date]:
+        if value is None:
+            return None
+        try:
+            parsed = date.fromisoformat(value)
+        except (TypeError, ValueError) as exc:
+            raise InvalidDateRangeError(
+                f"{field} {value!r} is not an ISO date (YYYY-MM-DD)",
+                field=field, value=value,
+                from_date=from_date, to_date=to_date,
+            ) from exc
+        # `date.fromisoformat` accepts a few non-canonical spellings; requiring
+        # the round trip keeps one spelling reaching the comparisons.
+        if parsed.isoformat() != value:
+            raise InvalidDateRangeError(
+                f"{field} {value!r} is not a canonical ISO date (YYYY-MM-DD)",
+                field=field, value=value,
+                from_date=from_date, to_date=to_date,
+            )
+        return parsed
+
+    start = _parsed(from_date, "from_date")
+    end = _parsed(to_date, "to_date")
+    if start is not None and end is not None and start > end:
+        raise InvalidDateRangeError(
+            f"from_date {from_date} is after to_date {to_date}; the window is "
+            f"empty, and an empty window is not an answer",
+            field="from_date", value=from_date,
+            from_date=from_date, to_date=to_date,
+        )
+    return from_date, to_date
+
+
 def freshness_days(coverage_to: Optional[str]) -> Optional[int]:
     if not coverage_to:
         return None
@@ -147,9 +199,15 @@ def resolve_coverage(
        naming what was excluded, and record that the interval was NOT fully
        contained, which forbids any completeness claim.
 
-    Raises `PPDCoverageError` or `SnapshotCoverageGapError`.
+    Raises `InvalidDateRangeError`, `PPDCoverageError` or
+    `SnapshotCoverageGapError`.
     """
     from property_core.snapshot.errors import SnapshotCoverageGapError
+
+    # Defence in depth. The service validates before routing, so both sources
+    # are protected; this function owns the lexical comparisons, so it must not
+    # depend on a caller having checked first.
+    validate_date_range(from_date, to_date)
 
     coverage_from = adapter.coverage_from
     coverage_to = adapter.coverage_to

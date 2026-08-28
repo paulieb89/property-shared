@@ -357,3 +357,168 @@ def test_the_runtime_statement_matches_the_frozen_specification():
         line.lstrip("> ") for line in spec.read_text().splitlines()
     )
     assert " ".join(hmlr_attribution().split()) in " ".join(body.split())
+
+
+# ---------------------------------------------------------------------------
+# 6. Date inputs are validated before anything compares them
+# ---------------------------------------------------------------------------
+#
+# `resolve_coverage` compares date strings lexically, which is only meaningful
+# for well-formed ISO dates. Fed anything else it produced confident nonsense:
+# "nonsense" sorts after "2026-06-30", so a garbage `to_date` was read as
+# "beyond coverage" and silently clamped; an inverted range passed both bound
+# checks, queried `date >= 2025-01-01 AND date <= 2024-01-01`, matched nothing,
+# and -- being entirely "inside" coverage -- was reported COMPLETE.
+#
+# The live path shares the defect from the other side: a garbage date reached
+# SPARQL's own validator and surfaced as an upstream failure rather than a
+# caller error, and an inverted range returned an empty 200. Validation
+# therefore belongs before routing, where it covers both sources.
+
+
+@pytest.mark.parametrize("bad", ["nonsense", "2026-13-01", "2026-02-30", "", "20260101"])
+def test_a_malformed_date_is_a_caller_error_not_a_clamp(snapshot_routing, bad):
+    from property_core.exceptions import InvalidDateRangeError
+
+    with pytest.raises(InvalidDateRangeError) as exc:
+        PPDService().search_transactions(postcode=None, postcode_prefix="B5",
+                                         to_date=bad, limit=10)
+    payload = exc.value.to_dict()
+    assert payload["error"] == "invalid_date_range"
+    assert payload["field"] == "to_date"
+    assert payload["value"] == bad
+
+
+def test_a_malformed_from_date_names_that_field(snapshot_routing):
+    from property_core.exceptions import InvalidDateRangeError
+
+    with pytest.raises(InvalidDateRangeError) as exc:
+        PPDService().search_transactions(postcode=None, postcode_prefix="B5",
+                                         from_date="not-a-date", limit=10)
+    assert exc.value.to_dict()["field"] == "from_date"
+
+
+def test_an_inverted_range_is_refused_rather_than_answered_completely(snapshot_routing):
+    """The worst of the two: an empty result asserted to be complete."""
+    from property_core.exceptions import InvalidDateRangeError
+
+    with pytest.raises(InvalidDateRangeError) as exc:
+        PPDService().search_transactions(postcode=None, postcode_prefix="B5",
+                                         from_date="2025-01-01", to_date="2024-01-01",
+                                         limit=10)
+    payload = exc.value.to_dict()
+    assert payload["requested"] == {"from_date": "2025-01-01", "to_date": "2024-01-01"}
+
+
+def test_an_equal_range_is_valid(snapshot_routing):
+    """A single day is a legitimate window; only from > to is not."""
+    result = PPDService().search_transactions(postcode=None, postcode_prefix="B5",
+                                              from_date="2024-03-01",
+                                              to_date="2024-03-01", limit=10)
+    assert result["count"] >= 1
+
+
+def test_bad_dates_are_rejected_on_the_live_path_too(live_only, fake_live):
+    """Same defect, other source: SPARQL reported a caller error as an outage."""
+    from property_core.exceptions import InvalidDateRangeError
+
+    with pytest.raises(InvalidDateRangeError):
+        PPDService().search_transactions(postcode=None, postcode_prefix="B5",
+                                         to_date="nonsense", limit=10)
+    with pytest.raises(InvalidDateRangeError):
+        PPDService().search_transactions(postcode=None, postcode_prefix="B5",
+                                         from_date="2025-01-01", to_date="2024-01-01",
+                                         limit=10)
+    assert fake_live.calls == 0, "neither source may be queried on invalid input"
+
+
+def test_neither_source_is_queried_on_invalid_input(snapshot_routing, monkeypatch,
+                                                    fake_live):
+    from property_core.exceptions import InvalidDateRangeError
+
+    def _must_not_run(*a, **k):
+        raise AssertionError("the snapshot was queried with an invalid date range")
+
+    monkeypatch.setattr(type(snapshot_routing.adapter), "search", _must_not_run)
+    with pytest.raises(InvalidDateRangeError):
+        PPDService().search_transactions(postcode=None, postcode_prefix="B5",
+                                         from_date="2025-01-01", to_date="2024-01-01",
+                                         limit=10)
+    assert fake_live.calls == 0
+
+
+@pytest.mark.parametrize("params, expected", [
+    ({"to_date": "nonsense"}, 422),
+    ({"from_date": "2025-01-01", "to_date": "2024-01-01"}, 422),
+])
+def test_rest_reports_a_bad_range_as_a_caller_error(snapshot_routing, params, expected):
+    """Previously 502 (an upstream outage) and 200 (an empty complete answer)."""
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    with TestClient(create_app()) as client:
+        response = client.get("/v1/ppd/transactions",
+                              params={"postcode_prefix": "B5", **params})
+    assert response.status_code == expected
+    assert response.json()["detail"]["error"] == "invalid_date_range"
+
+
+def test_resolve_coverage_validates_before_comparing(snapshot_routing):
+    """Defence in depth: the comparison itself refuses unvalidated input.
+
+    `resolve_coverage` is where the lexical comparisons live, so it must not
+    depend on a caller having checked first.
+    """
+    from property_core.exceptions import InvalidDateRangeError
+    from property_core.ppd_source import CoveragePolicy, resolve_coverage
+
+    with pytest.raises(InvalidDateRangeError):
+        resolve_coverage(snapshot_routing.adapter, from_date="2025-01-01",
+                         to_date="2024-01-01", policy=CoveragePolicy.EXPLICIT)
+    with pytest.raises(InvalidDateRangeError):
+        resolve_coverage(snapshot_routing.adapter, from_date=None,
+                         to_date="nonsense", policy=CoveragePolicy.EXPLICIT)
+
+
+# ---------------------------------------------------------------------------
+# 7. The adapter's own evidence must not contradict its documentation
+# ---------------------------------------------------------------------------
+
+
+def test_an_offset_page_carries_no_completeness_basis(tmp_path):
+    """`SnapshotPage` is exported, and says a basis means everything was seen.
+
+    The service withdrew the basis afterwards, so no response was wrong -- but
+    the adapter still handed out a page whose own evidence contradicted its
+    documented meaning, and it is a public type. Fixed at the source; the
+    central withdrawal stays as defence in depth.
+    """
+    directory, record = build_snapshot(tmp_path, default_rows())
+    with SnapshotAdapter.open(directory, record) as adapter:
+        page = adapter.search(postcode_prefix="B5", offset=1, limit=50)
+        assert page.completeness_basis is None
+        # `exhausted` is a fact about the page that was fetched and stays true.
+        assert page.exhausted is True
+        assert page.offset == 1
+
+        first = adapter.search(postcode_prefix="B5", offset=0, limit=50)
+        assert first.completeness_basis is not None
+
+
+def test_the_central_withdrawal_is_retained(snapshot_routing):
+    """Belt and braces: provenance drops a basis at an offset regardless."""
+    from property_core.provenance import CompletenessBasis
+    from property_core.ppd_source import CoverageDecision, snapshot_provenance
+
+    decision = CoverageDecision(
+        from_date="2016-01-01", to_date="2026-06-30", warnings=(),
+        from_narrowed=False, to_clamped=False, recent_period_provisional=False,
+        fully_contained=True,
+    )
+    provenance = snapshot_provenance(
+        snapshot_routing.adapter, decision=decision, sample_count=1, sample_limit=50,
+        completeness_basis=CompletenessBasis.LIMIT_PLUS_ONE, offset=3,
+    )
+    assert provenance.sample_complete is False
+    assert provenance.completeness_basis is None

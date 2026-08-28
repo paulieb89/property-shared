@@ -86,6 +86,15 @@ coverage take effect only once a snapshot is enabled and materialized.
   because the caller never chose that window.
 - **`offset` is honoured on the snapshot path.** Paging is exact — the ordering
   is total, so successive pages neither repeat nor omit a row.
+- **Malformed and inverted date ranges are typed caller errors (422
+  `invalid_date_range`), on both sources, before either is queried.** Coverage
+  decisions compare ISO strings lexically, which is meaningful only for
+  well-formed dates: `"nonsense"` sorts after `"2026-06-30"`, so a garbage
+  `to_date` read as "beyond coverage" and was silently clamped to it. An
+  inverted range (`from_date` after `to_date`) describes an empty window, so it
+  passed both coverage checks, matched nothing, and was reported as a
+  **complete** empty result. On the live path the same inputs previously gave a
+  **502** (a caller error dressed as an upstream outage) and an empty **200**.
 
 ### Added
 
@@ -149,7 +158,9 @@ coverage take effect only once a snapshot is enabled and materialized.
   interval reaching past either coverage bound was only partly searched — and is
   **withdrawn whenever `offset > 0`**, because a short final page says the page
   ended, not that the pages skipped over were examined. Both withdrawals happen
-  where the block is built, so no call site can omit one.
+  where the block is built, so no call site can omit one — and `SnapshotPage`,
+  which is exported, no longer hands out a basis at a non-zero offset in the
+  first place. Its `exhausted` flag remains page-scoped and true.
 - **Every Parquet partition is validated individually** before the union view
   exists. `union_by_name` fills a column a partition lacks with NULLs, so a
   single partition missing `outcode` passed a check over the combined view,

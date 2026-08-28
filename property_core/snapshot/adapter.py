@@ -65,10 +65,14 @@ _CATEGORIES = frozenset({"A", "B"})
 class SnapshotPage:
     """One page of snapshot rows plus the evidence that judges completeness.
 
-    `exhausted` is *positive* evidence: the adapter asked for one row more than
-    the caller wanted and did not get it, so every matching row inside coverage
-    was examined. `completeness_basis` records how that was established, because
-    a claim of completeness with no stated basis is not a claim anyone can check.
+    The two fields say different things, and the difference is the whole point:
+
+    * `exhausted` is scoped to the PAGE -- the adapter asked for one row more
+      than the caller wanted and did not get it, so this page ran out;
+    * `completeness_basis` is scoped to the whole matching set. It is set only
+      when the page ran out *and* it was the only page (`offset == 0`), because
+      rows skipped over by an offset were never examined. A claim of
+      completeness with no stated basis is not a claim anyone can check.
     """
 
     transactions: list[PPDTransaction]
@@ -454,10 +458,18 @@ class SnapshotAdapter:
                 ) from exc
 
         exhausted = len(rows) <= limit
+        # A basis is a claim that every matching row was examined, so it needs
+        # BOTH facts: the page ended, and it was the only page. At an offset the
+        # rows skipped over were never looked at, however short the final page
+        # is. The provenance builder withdraws a basis at an offset as well;
+        # that stays, but this type is exported and its evidence must be true on
+        # its own terms rather than relying on a later caller to correct it.
+        basis = (CompletenessBasis.LIMIT_PLUS_ONE
+                 if exhausted and offset == 0 else None)
         return SnapshotPage(
             transactions=[_row_to_transaction(r) for r in rows[:limit]],
             exhausted=exhausted,
             fetch_limit=fetch_limit,
             offset=offset,
-            completeness_basis=CompletenessBasis.LIMIT_PLUS_ONE if exhausted else None,
+            completeness_basis=basis,
         )
