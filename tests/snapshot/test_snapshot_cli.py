@@ -241,3 +241,37 @@ def test_the_expected_end_comes_from_the_receipt_not_the_command_line(tmp_path,
     bound(tmp_path)
     assert main(["all", *argv(tmp_path)]) == 0
     assert "2026-06-30" in capsys.readouterr().out
+
+
+def test_the_build_command_refuses_a_window_the_release_does_not_cover(
+        tmp_path, capsys):
+    """`build` writes the artifact `validate` later blesses, so the declaration
+    has to be checked before anything is written -- not by a gate afterwards."""
+    bound(tmp_path)
+    code = main(["build", *argv(tmp_path, **{"--coverage-to": "2026-07-31"})])
+    assert code != 0
+    out = capsys.readouterr().out
+    assert "2026-06-30" in out and "2026-07-31" in out
+    assert not (tmp_path / "work" / "snapshot").exists()
+    assert list((tmp_path / "work").rglob("*.parquet")) == []
+
+
+def test_a_mismatched_window_writes_no_snapshot_at_all(tmp_path):
+    # `all` fails the same way, and fails before the build rather than after it.
+    bound(tmp_path)
+    assert main(["all", *argv(tmp_path, **{"--coverage-to": "2026-07-31"})]) != 0
+    assert list((tmp_path / "work").rglob("*.parquet")) == []
+
+
+def test_the_source_is_verified_once_per_run(tmp_path, monkeypatch):
+    """Verification digests the whole CSV. Doing it twice is a second full pass
+    over 5.5 GB for no additional evidence."""
+    from tools.ppd_snapshot import __main__ as cli
+
+    bound(tmp_path)
+    calls = []
+    real = cli.verify_source
+    monkeypatch.setattr(cli, "verify_source",
+                        lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+    assert main(["all", *argv(tmp_path)]) == 0
+    assert len(calls) == 1

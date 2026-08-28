@@ -251,7 +251,19 @@ coverage take effect only once a snapshot is enabled and materialized.
 - **The expected coverage end cannot be passed in.** `build` and `all` derive it
   from the bound release's publication date; there is no `--source-coverage-end`
   on either. Setting both dates so they agreed published a 28 July release as
-  covering 31 July.
+  covering 31 July. The declaration is compared with the derived end **before
+  the build runs**, so a mismatch writes no Parquet at all rather than leaving a
+  failed snapshot directory behind.
+- **A failed refresh no longer destroys the release already held.** The
+  downloader streams into a unique sibling temporary file and replaces the
+  destination only after the transfer's length is confirmed; writing the
+  destination directly truncated a working CSV as soon as a refresh began, and
+  a mid-stream failure erased it while its receipt survived to describe it.
+- **Promotion is a rename, on one filesystem, and says so.** The device IDs of
+  the candidate and dist directories are compared before anything moves;
+  `shutil.move` across a boundary would silently copy 266 MiB, which is neither
+  atomic nor within the transient-disk and timing model G1 was measured
+  against.
 - Optional `snapshot` extra (`duckdb==1.5.5`) and `PPD_SNAPSHOT_ENABLED`
   (default **off**). The published library gains no required dependency.
 - `docs/design/ppd-source-routing.md` — the frozen specification governing this

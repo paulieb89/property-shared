@@ -36,13 +36,17 @@ from has no provenance, whatever its gates say.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
+import os
+import tempfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from tools.ppd_snapshot.atomic import atomic_write_json
 from tools.ppd_snapshot.release_check import ReleaseObservation
 
 CHUNK_BYTES = 1024 * 1024
@@ -119,8 +123,7 @@ def write_receipt(csv_path: Path | str, observation: ReleaseObservation,
         content_length=observation.content_length,
         recorded_at=(now or datetime.now(timezone.utc)).isoformat(),
         evidence=evidence)
-    receipt_path.parent.mkdir(parents=True, exist_ok=True)
-    receipt_path.write_text(json.dumps(asdict(receipt), indent=2) + "\n")
+    atomic_write_json(receipt_path, asdict(receipt))
     return receipt
 
 
@@ -192,10 +195,14 @@ def download_with_receipt(url: str, dest: Path | str, receipt_path: Path | str,
     describe. Minting a receipt for a file that is merely sitting on disk is the
     fallback, and it is recorded as the weaker evidence it is.
 
-    The body is streamed in fixed chunks and never held in memory, and a
-    transfer whose length disagrees with `Content-Length` is an interrupted
-    download rather than a release: the partial file and the receipt are both
-    discarded.
+    The body is streamed in fixed chunks and never held in memory, and it is
+    streamed into a **unique sibling temporary file**, never into the
+    destination. Writing the destination directly makes every refresh
+    destructive: opening it truncates the release already held, so a transfer
+    that dies half way leaves nothing where a working CSV was, next to a receipt
+    that still describes it. The destination is replaced only once the length
+    and digest have been checked, and a failure leaves the previous file and its
+    receipt byte-for-byte intact.
 
     **Not exercised against the real host in this PR.** No download of the
     5.5 GB object is authorised here; the mechanism is tested against a loopback
@@ -210,6 +217,9 @@ def download_with_receipt(url: str, dest: Path | str, receipt_path: Path | str,
     request = urllib.request.Request(
         url, headers={"User-Agent": "property-shared-snapshot-build/1"})
 
+    handle, tmp_name = tempfile.mkstemp(dir=dest.parent,
+                                        prefix=f".{dest.name}.", suffix=".part")
+    tmp = Path(tmp_name)
     digest = hashlib.sha256()
     length = 0
     try:
@@ -221,11 +231,13 @@ def download_with_receipt(url: str, dest: Path | str, receipt_path: Path | str,
                 last_modified=headers.get("Last-Modified"),
                 content_length=int(declared) if declared and declared.isdigit()
                 else None)
-            with open(dest, "wb") as out:
+            with os.fdopen(handle, "wb") as out:
                 while chunk := response.read(CHUNK_BYTES):
                     out.write(chunk)
                     digest.update(chunk)
                     length += len(chunk)
+                out.flush()
+                os.fsync(out.fileno())
 
         if observation.content_length is None:
             raise SourceMismatch(
@@ -235,10 +247,28 @@ def download_with_receipt(url: str, dest: Path | str, receipt_path: Path | str,
             raise SourceMismatch(
                 f"{url} declared Content-Length {observation.content_length} "
                 f"but {length} bytes arrived; the transfer was interrupted")
-    except Exception:
-        dest.unlink(missing_ok=True)
+    except BaseException:
+        # The destination was never opened, so whatever was there is untouched.
+        tmp.unlink(missing_ok=True)
         raise
 
-    return write_receipt(dest, observation, receipt_path,
-                         expected_sha256=digest.hexdigest(),
-                         evidence="streamed-download", now=now)
+    # Committed only now: the transfer is complete and its length agrees with
+    # what was declared. The receipt is built from the digest computed AS THE
+    # BYTES ARRIVED rather than by re-reading the file -- re-reading would mean
+    # a second full pass over 5.5 GB, and would digest a file that is no longer
+    # provably the one that was received.
+    receipt = SourceReceipt(
+        file=dest.name, sha256=digest.hexdigest(), bytes=length,
+        etag=observation.etag, last_modified=observation.last_modified,
+        content_length=observation.content_length,
+        recorded_at=(now or datetime.now(timezone.utc)).isoformat(),
+        evidence="streamed-download")
+    try:
+        os.replace(tmp, dest)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    # If this fails, the new file sits beside the previous receipt and every
+    # later build refuses on the mismatch -- which is the safe direction.
+    atomic_write_json(receipt_path, dataclasses.asdict(receipt))
+    return receipt

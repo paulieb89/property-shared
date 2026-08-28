@@ -34,6 +34,8 @@ from typing import Any, Mapping, Optional
 
 from property_core.snapshot.models import SnapshotManifest, validate_component
 
+from tools.ppd_snapshot.atomic import atomic_write_json
+
 from tools.ppd_snapshot.build import COMPRESSION, PARTITION_FILE, BuildResult
 
 #: Read in fixed chunks so a full-history bundle is never held in memory --
@@ -49,6 +51,17 @@ LAYOUT = "year"
 
 class BundleMismatch(RuntimeError):
     """The bundle on disk is not what the manifest says it is."""
+
+
+class CrossFilesystemPromotion(RuntimeError):
+    """The candidate and the dist root are on different filesystems.
+
+    `os.replace` cannot cross devices and `shutil.move` silently degrades to a
+    copy, which is neither atomic nor free: it doubles the transient disk and
+    the wall time that the G1 model was measured against, and leaves a window
+    where a half-copied bundle sits in the publishing directory. Refused before
+    anything moves.
+    """
 
 
 class VersionAlreadyPublished(RuntimeError):
@@ -156,22 +169,9 @@ def verify_bundle(bundle_path: Path, *, expected_sha256: str,
             f"{expected_sha256}")
 
 
-def _write_json_atomically(path: Path, payload: Any) -> None:
-    """Write beside the target, then rename over it.
-
-    `write_text` truncates first: interrupted, it leaves an empty or half-written
-    file where a valid one used to be. For `current.json` that is the difference
-    between a failed publish and taking down the release that was already
-    published, because the pointer is the first thing a booting Machine reads.
-    """
-    path = Path(path)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2) + "\n")
-    try:
-        os.replace(tmp, path)
-    except Exception:
-        tmp.unlink(missing_ok=True)
-        raise
+def _device_of(path: Path) -> int:
+    """The filesystem a path lives on. A seam, so the check is testable."""
+    return os.stat(path).st_dev
 
 
 def package_release(built: BuildResult, *, dist_dir: Path, candidate_root: Path,
@@ -225,7 +225,7 @@ def package_release(built: BuildResult, *, dist_dir: Path, candidate_root: Path,
     # exercised against it. The pointer in the dist root is written only at
     # promotion, and only last.
     current_path = candidate_dir / "current.json"
-    _write_json_atomically(current_path, {"current_manifest": manifest_path.name})
+    atomic_write_json(current_path, {"current_manifest": manifest_path.name})
 
     report = {
         "snapshot_version": version,
@@ -274,6 +274,16 @@ def promote_release(release: PackagedRelease) -> PackagedRelease:
     """
     dist_dir = release.dist_dir
     dist_dir.mkdir(parents=True, exist_ok=True)
+
+    # Checked BEFORE anything moves, so a cross-device layout is a refusal
+    # rather than a half-published directory.
+    if _device_of(release.candidate_dir) != _device_of(dist_dir):
+        raise CrossFilesystemPromotion(
+            f"the candidate at {release.candidate_dir} and the dist root at "
+            f"{dist_dir} are on different filesystems; promotion must be a "
+            f"rename, not a copy -- put the work and dist directories on one "
+            f"filesystem")
+
     moved: dict[str, Path] = {}
     for path in (release.bundle_path, release.manifest_path, release.report_path):
         target = dist_dir / path.name
@@ -281,11 +291,13 @@ def promote_release(release: PackagedRelease) -> PackagedRelease:
             raise VersionAlreadyPublished(
                 f"{target.name} is already published; a changed snapshot "
                 f"requires a new version")
-        shutil.move(str(path), str(target))
+        # `os.replace`, never `shutil.move`: a rename within one filesystem, or
+        # an error. `move` would quietly copy 266 MiB across a device boundary.
+        os.replace(path, target)
         moved[path.name] = target
 
     current_path = dist_dir / "current.json"
-    _write_json_atomically(
+    atomic_write_json(
         current_path, {"current_manifest": release.manifest_path.name})
     shutil.rmtree(release.candidate_dir, ignore_errors=True)
 

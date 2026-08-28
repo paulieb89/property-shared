@@ -173,15 +173,36 @@ def load_receipt_or_none(args):
     return receipt
 
 
+def _checked_window(args, receipt) -> Optional[date]:
+    """The declared window end, checked against the bound release. Or nothing.
+
+    Checked HERE, before anything is written. The coverage gate would catch a
+    mismatch afterwards, but only after a snapshot had been built from it, and a
+    directory of Parquet files that failed validation is still a directory
+    someone can point `validate` at.
+
+    Takes the already-verified receipt rather than loading it again: verifying
+    digests the whole CSV, and a second pass over 5.5 GB buys no more evidence.
+    """
+    expected = _expected_end(receipt)
+    if expected is None:
+        print("refusing to build: the bound release carries no usable "
+              "publication date, so its coverage end cannot be derived")
+        return None
+    declared = _iso(args.coverage_to)
+    if declared != expected:
+        print(f"refusing to build: --coverage-to {declared} is not the coverage "
+              f"end the bound release implies ({expected}); the release was "
+              f"published on {receipt.last_modified}")
+        return None
+    return expected
+
+
 def _cmd_build(args) -> int:
     # The same binding as `all`: this writes the artifact `validate` then
     # blesses, so it is not a way around the source check.
     receipt = load_receipt_or_none(args)
-    if receipt is None:
-        return 2
-    if _expected_end(receipt) is None:
-        print("refusing to build: the bound release carries no usable "
-              "publication date, so its coverage end cannot be derived")
+    if receipt is None or _checked_window(args, receipt) is None:
         return 2
     built = _build(args)
     print(f"built {built.rows} row(s) into {built.parquet_files} partition(s) "
@@ -301,12 +322,11 @@ def _cmd_all(args) -> int:
     receipt = load_receipt_or_none(args)
     if receipt is None:
         return 2
-    source_end = _expected_end(receipt)
+    source_end = _checked_window(args, receipt)
     if source_end is None:
-        print("refusing to build: the bound release carries no usable "
-              "publication date, so its coverage end cannot be derived")
         return 2
-    print(f"the bound release implies a coverage end of {source_end}")
+    print(f"the bound release implies a coverage end of {source_end}, matching "
+          f"the declared window")
     print(f"source verified: {Path(args.csv).name} matches its receipt and the "
           f"observed release")
 

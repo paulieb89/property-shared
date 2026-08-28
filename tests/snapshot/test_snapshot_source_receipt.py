@@ -194,15 +194,24 @@ def test_a_download_that_does_not_match_its_declared_length_is_refused(tmp_path)
 
 
 @contextlib.contextmanager
-def _serve(body: bytes, headers: dict):
-    """A loopback HTTP server. Local only -- no external host is contacted."""
+def _serve(body: bytes, headers: dict, *, drop: bool = False):
+    """A loopback HTTP server. Local only -- no external host is contacted.
+
+    `drop` closes the connection after the body, modelling a transfer that dies
+    part way through rather than one that merely disagrees about its length.
+    """
     class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
         def do_GET(self):  # noqa: N802 - stdlib naming
             self.send_response(200)
             for key, value in headers.items():
                 self.send_header(key, value)
             self.end_headers()
             self.wfile.write(body)
+            if drop:
+                self.close_connection = True
+                self.wfile.flush()
 
         def log_message(self, *args):
             pass
@@ -216,3 +225,100 @@ def _serve(body: bytes, headers: dict):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+# -- a failed refresh must not destroy the release already held -------------
+
+def _seed(tmp_path: Path) -> tuple[Path, Path, bytes, bytes]:
+    """A known-good CSV and its receipt, as a previous run would leave them."""
+    csv_path = tmp_path / "pp.csv"
+    csv_path.write_bytes(BODY)
+    receipt_path = tmp_path / "receipt.json"
+    write_receipt(csv_path, observation(), receipt_path,
+                  expected_sha256=BODY_SHA, now=NOW)
+    return csv_path, receipt_path, csv_path.read_bytes(), receipt_path.read_bytes()
+
+
+def test_a_download_that_disagrees_with_its_length_preserves_what_was_held(
+        tmp_path):
+    csv_path, receipt_path, csv_before, receipt_before = _seed(tmp_path)
+    served = _serve(b"new but truncated\n", {
+        "ETag": '"newer-etag"',
+        "Last-Modified": "Fri, 28 Aug 2026 05:16:16 GMT",
+        "Content-Length": "999999"})
+    with served as url:
+        with pytest.raises(SourceMismatch):
+            download_with_receipt(url, csv_path, receipt_path, now=NOW)
+
+    assert csv_path.read_bytes() == csv_before
+    assert receipt_path.read_bytes() == receipt_before
+
+
+def test_a_download_dropped_mid_stream_preserves_what_was_held(tmp_path):
+    csv_path, receipt_path, csv_before, receipt_before = _seed(tmp_path)
+    served = _serve(b"x" * 32, {"ETag": '"newer-etag"',
+                                "Last-Modified": "Fri, 28 Aug 2026 05:16:16 GMT",
+                                "Content-Length": "100000"}, drop=True)
+    with served as url:
+        with pytest.raises(Exception):
+            download_with_receipt(url, csv_path, receipt_path, now=NOW)
+
+    assert csv_path.read_bytes() == csv_before
+    assert receipt_path.read_bytes() == receipt_before
+
+
+def test_a_failed_download_leaves_no_partial_file_behind(tmp_path):
+    csv_path, receipt_path, _, _ = _seed(tmp_path)
+    served = _serve(b"short", {"ETag": '"newer-etag"',
+                               "Last-Modified": "Fri, 28 Aug 2026 05:16:16 GMT",
+                               "Content-Length": "999999"})
+    with served as url:
+        with pytest.raises(SourceMismatch):
+            download_with_receipt(url, csv_path, receipt_path, now=NOW)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["pp.csv", "receipt.json"]
+
+
+def test_a_successful_download_replaces_both_the_file_and_its_receipt(tmp_path):
+    csv_path, receipt_path, _, _ = _seed(tmp_path)
+    fresh = b"newer,release,rows\n" * 3
+    served = _serve(fresh, {"ETag": '"newer-etag"',
+                            "Last-Modified": "Fri, 28 Aug 2026 05:16:16 GMT",
+                            "Content-Length": str(len(fresh))})
+    with served as url:
+        receipt = download_with_receipt(url, csv_path, receipt_path, now=NOW)
+
+    assert csv_path.read_bytes() == fresh
+    assert receipt.sha256 == hashlib.sha256(fresh).hexdigest()
+    assert load_receipt(receipt_path).etag == '"newer-etag"'
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["pp.csv", "receipt.json"]
+
+
+def test_a_streamed_receipt_names_the_destination_not_the_temporary_file(
+        tmp_path):
+    fresh = b"newer,release\n"
+    served = _serve(fresh, {"ETag": '"newer-etag"',
+                            "Last-Modified": "Fri, 28 Aug 2026 05:16:16 GMT",
+                            "Content-Length": str(len(fresh))})
+    with served as url:
+        download_with_receipt(url, tmp_path / "pp-complete.csv",
+                              tmp_path / "receipt.json", now=NOW)
+    assert load_receipt(tmp_path / "receipt.json").file == "pp-complete.csv"
+
+
+def test_a_streamed_download_digests_the_file_only_once(tmp_path, monkeypatch):
+    """Re-reading to build the receipt would mean a second pass over 5.5 GB."""
+    from tools.ppd_snapshot import source_receipt as sr
+
+    calls = []
+    real = sr.digest_file
+    monkeypatch.setattr(sr, "digest_file",
+                        lambda path: (calls.append(path), real(path))[1])
+
+    fresh = b"newer,release\n"
+    served = _serve(fresh, {"ETag": '"newer-etag"',
+                            "Last-Modified": "Fri, 28 Aug 2026 05:16:16 GMT",
+                            "Content-Length": str(len(fresh))})
+    with served as url:
+        download_with_receipt(url, tmp_path / "pp.csv",
+                              tmp_path / "receipt.json", now=NOW)
+    assert calls == []

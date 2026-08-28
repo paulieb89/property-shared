@@ -26,7 +26,7 @@ runbook.
 | `pp-complete.csv` | HM Land Registry public open data, unauthenticated, over **HTTPS**: `https://price-paid-data.publicdata.landregistry.gov.uk/pp-complete.csv` (the [GOV.UK single-file page](https://www.gov.uk/government/statistical-data-sets/price-paid-data-single-file)). ~5.5 GB |
 | The release's `ETag` / `Last-Modified` / `Content-Length` | recorded by `check-release` into the release-state file |
 | The **source receipt** | minted by `download` while streaming the release, or by `receipt` for a file already on disk — the SHA-256 and byte length computed from the bytes, alongside the validators of the release they arrived with |
-| `--coverage-to` | the operator's declaration of the window end, **checked** against the end derived from the bound release |
+| `--coverage-to` | the operator's declaration of the window end, **checked before the build runs** against the end derived from the bound release |
 
 The plaintext S3 *website* endpoint used during the lab phase is not used: over
 HTTP both the validators this pipeline trusts and the 5.5 GB body are open to
@@ -47,7 +47,11 @@ to obtain one, and they are not equally strong:
 
 * `download` streams the release, digests the bytes as they arrive and reads the
   validators off the **same response** — file, digest and provenance from one
-  observation (`evidence: "streamed-download"`). This is the intended path.
+  observation (`evidence: "streamed-download"`). This is the intended path. It
+  streams into a unique sibling temporary file and replaces the destination only
+  once the length agrees with `Content-Length`, so **a failed refresh leaves the
+  release already held byte-for-byte intact**; writing the destination directly
+  would truncate a working CSV the moment a refresh began.
   *It has never been pointed at the real host in this work; no download of the
   5.5 GB object is authorised here, and the mechanism is exercised against a
   loopback server.*
@@ -139,8 +143,16 @@ else may sync, mirror or serve — "ignore the subdirectory" is a convention, no
 a boundary — so candidates are assembled under the work directory, booted
 through the real runtime from there, and promoted only on `READY`.
 
+**The work and dist directories must be on one filesystem**, and this is
+enforced rather than advised: promotion compares their device IDs and refuses
+before moving anything if they differ. `os.replace` cannot cross devices and
+`shutil.move` silently degrades to a copy — not atomic, and it doubles both the
+transient disk and the wall time the G1 model was measured against, while
+leaving a window where a half-copied bundle sits in the publishing directory.
+Promotion is `os.replace` throughout, never a copy.
+
 Promotion moves the bundle, then the manifest, then the report, and replaces
-`current.json` **last and atomically** (write beside, then rename). A pointer is
+`current.json` **last and atomically** (write a unique sibling, then rename). A pointer is
 a promise that what it names is present, and `write_text` truncates before it
 writes: interrupted, it would leave an empty pointer where a working one used to
 be, taking down the release that was already published. An interrupted promotion
@@ -221,7 +233,11 @@ Halt and report; there is no override flag for any of these.
   observed release — including a release that has moved on since the download.
 * A source row inside the window has a non-canonical `price` or no
   `transaction_id`, or any source row has an unparseable `transfer_date`.
-* The declared `--coverage-to` is not the end the bound release implies.
+* The declared `--coverage-to` is not the end the bound release implies. This
+  is checked **before the build runs**, so a mismatched declaration writes no
+  Parquet at all — a directory that failed validation is still a directory
+  someone can point `validate` at.
+* The candidate and dist directories are on different filesystems.
 * The recorded `ETag` differs from the release the CSV was fetched from — a fresh
   5.5 GB download is a cost decision, not something the pipeline should make.
 * `transaction_id` is not unique within the window, or the row count disagrees.

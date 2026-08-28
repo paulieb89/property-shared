@@ -227,6 +227,20 @@ def test_promotion_moves_the_release_into_the_dist_root(released):
     assert not release.candidate_dir.exists()
 
 
+def _fail_replace_on(monkeypatch, needle: str):
+    """Break exactly one `os.replace`, leaving the others working."""
+    from tools.ppd_snapshot import package as pkg
+
+    real = pkg.os.replace
+
+    def _replace(src, dst, *args, **kwargs):
+        if needle in str(dst):
+            raise OSError("disk went away")
+        return real(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(pkg.os, "replace", _replace)
+
+
 def test_promotion_writes_the_pointer_last(released, monkeypatch):
     """A pointer is a promise that what it names is there.
 
@@ -236,14 +250,7 @@ def test_promotion_writes_the_pointer_last(released, monkeypatch):
     from tools.ppd_snapshot import package as pkg
 
     _, release = released
-    real_move = pkg.shutil.move
-
-    def _fail_on_manifest(src, dst, *args, **kwargs):
-        if "manifest" in str(dst):
-            raise OSError("disk went away")
-        return real_move(src, dst, *args, **kwargs)
-
-    monkeypatch.setattr(pkg.shutil, "move", _fail_on_manifest)
+    _fail_replace_on(monkeypatch, "manifest")
     with pytest.raises(OSError):
         pkg.promote_release(release)
     assert not (release.dist_dir / "current.json").exists()
@@ -274,10 +281,7 @@ def test_an_interrupted_promotion_leaves_a_previous_pointer_untouched(
     previous.write_text(json.dumps({"current_manifest": "manifest-v1.json"}))
     before = previous.read_bytes()
 
-    real_move = pkg.shutil.move
-    monkeypatch.setattr(pkg.shutil, "move", lambda src, dst, *a, **k: (
-        (_ for _ in ()).throw(OSError("disk went away")) if "manifest" in str(dst)
-        else real_move(src, dst, *a, **k)))
+    _fail_replace_on(monkeypatch, "manifest")
 
     with pytest.raises(OSError):
         pkg.promote_release(release)
@@ -294,8 +298,7 @@ def test_a_pointer_write_that_fails_leaves_the_previous_one_intact(
     previous.write_text(json.dumps({"current_manifest": "manifest-v1.json"}))
     before = previous.read_bytes()
 
-    monkeypatch.setattr(pkg.os, "replace", lambda *a, **k: (
-        _ for _ in ()).throw(OSError("rename failed")))
+    _fail_replace_on(monkeypatch, "current.json")
     with pytest.raises(OSError):
         pkg.promote_release(release)
     assert previous.read_bytes() == before
@@ -313,3 +316,50 @@ def test_promotion_replaces_an_existing_pointer(released):
     assert json.loads(promoted.current_path.read_text()) == {
         "current_manifest": release.manifest_path.name}
     assert not list(release.dist_dir.glob("*.tmp"))
+
+
+# -- promotion must be a rename, on one filesystem --------------------------
+
+def test_promotion_refuses_a_candidate_on_another_filesystem(released,
+                                                             monkeypatch):
+    """A cross-device `move` is a copy, which is neither atomic nor free.
+
+    It also silently doubles the transient disk and the time the G1 model was
+    measured against, so it is refused before anything moves rather than
+    discovered afterwards.
+    """
+    from tools.ppd_snapshot import package as pkg
+    from tools.ppd_snapshot.package import CrossFilesystemPromotion
+
+    _, release = released
+    release.dist_dir.mkdir(parents=True, exist_ok=True)
+    previous = release.dist_dir / "current.json"
+    previous.write_text(json.dumps({"current_manifest": "manifest-v1.json"}))
+    before = previous.read_bytes()
+
+    monkeypatch.setattr(pkg, "_device_of",
+                        lambda path: 1 if "dist" in str(path) else 2)
+
+    with pytest.raises(CrossFilesystemPromotion, match="filesystem"):
+        pkg.promote_release(release)
+
+    assert previous.read_bytes() == before
+    assert list(release.dist_dir.glob("*.tar.zst")) == []
+    # Nothing moved: the candidate is still whole.
+    assert release.bundle_path.is_file()
+    assert release.manifest_path.is_file()
+
+
+def test_promotion_never_falls_back_to_a_copy(released, monkeypatch):
+    from tools.ppd_snapshot import package as pkg
+    from tools.ppd_snapshot.package import promote_release
+
+    _, release = released
+
+    def _forbidden(*args, **kwargs):
+        raise AssertionError("promotion must rename, never copy")
+
+    monkeypatch.setattr(pkg.shutil, "move", _forbidden)
+    monkeypatch.setattr(pkg.shutil, "copy2", _forbidden)
+    promoted = promote_release(release)
+    assert promoted.bundle_path.is_file()
