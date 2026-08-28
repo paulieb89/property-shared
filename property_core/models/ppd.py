@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
+from property_core.provenance import PPDProvenance
+
 # --- URI-to-code reverse mappings ---
 
 _PROPERTY_TYPE_BY_URI: Dict[str, str] = {
@@ -162,6 +164,11 @@ class SubjectProperty(BaseModel):
     last_sale: Optional[PPDTransaction] = None
     transaction_count: int = 0
     transaction_history: List[PPDTransaction] = Field(default_factory=list)
+    #: Its own provenance, because it does not share the comparables' source.
+    #: Subject-property history is frequently older than snapshot coverage, so
+    #: it is always answered live -- and a mixed-source response that presented
+    #: both under one label would be making a claim about neither.
+    provenance: Optional[PPDProvenance] = None
 
     @model_validator(mode="after")
     def _history_must_be_one_property(self) -> SubjectProperty:
@@ -227,6 +234,9 @@ class PPDCompsResponse(BaseModel):
     subject_vs_median_pct: Optional[float] = None
     transactions: List[PPDTransaction] = Field(default_factory=list)
     subject_property: Optional[SubjectProperty] = None
+    #: Where these comparables came from and how much of the source was seen.
+    #: Additive and nullable: a caller that never looked at it sees no change.
+    provenance: Optional[PPDProvenance] = None
 
 
 class PPDTransactionRecord(BaseModel):

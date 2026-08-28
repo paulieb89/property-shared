@@ -47,6 +47,7 @@ class PPDCoverageError(PPDError):
         requested_to: Optional[str] = None,
         source_release: Optional[str] = None,
         detail: str = "requested range precedes available coverage",
+        remedy: Optional[str] = None,
     ):
         if not coverage_from or not coverage_to:
             raise ValueError(
@@ -58,6 +59,13 @@ class PPDCoverageError(PPDError):
         self.requested_from = requested_from
         self.requested_to = requested_to
         self.source_release = source_release
+        # The remedy differs by which boundary was crossed. Telling a caller who
+        # asked for next month to "set from_date >= 2016-01-01" is advice that
+        # cannot work, and advice that cannot work is worse than none.
+        self.remedy = remedy or (
+            f"set from_date >= {coverage_from}, or look up a known transaction "
+            f"by its id"
+        )
         super().__init__(detail)
 
     def to_dict(self) -> dict[str, Any]:
@@ -71,10 +79,7 @@ class PPDCoverageError(PPDError):
             },
             "source_release": self.source_release,
             "retryable": self.retryable,
-            "remedy": (
-                f"set from_date >= {self.coverage_from}, or look up a known "
-                f"transaction by its id"
-            ),
+            "remedy": self.remedy,
         }
 
 
@@ -110,6 +115,52 @@ class InvalidPostcodeError(PPDError):
         }
 
 
+class InvalidDateRangeError(PPDError):
+    """Caller supplied a date, or a pair of dates, that cannot mean anything.
+
+    Two distinct mistakes share this type because they share a remedy -- fix the
+    input -- but ``field`` says which one:
+
+    * an unparseable date. Coverage decisions compare ISO strings lexically,
+      which is only meaningful for well-formed ones: ``"nonsense"`` sorts after
+      ``"2026-06-30"``, so a garbage ``to_date`` read as "beyond coverage" and
+      was silently clamped to it.
+    * ``from_date`` after ``to_date``. The window is empty by construction, so
+      it passed both coverage-bound checks, matched nothing, and -- being
+      nominally inside coverage -- was reported as a COMPLETE empty result.
+
+    Raised **before either source is queried**, because it is the caller's
+    input that is wrong and neither source can improve on that answer.
+    """
+
+    code = "invalid_date_range"
+    retryable = False
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        field: str = "",
+        value: Optional[str] = None,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ):
+        self.field = field
+        self.value = value
+        self.from_date = from_date
+        self.to_date = to_date
+        super().__init__(detail)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **super().to_dict(),
+            "field": self.field,
+            "value": self.value,
+            "requested": {"from_date": self.from_date, "to_date": self.to_date},
+            "expected": "ISO dates (YYYY-MM-DD) with from_date <= to_date",
+        }
+
+
 class TransactionNotFoundError(PPDError):
     """No such transaction upstream. Distinct from a failed lookup."""
 
@@ -124,7 +175,28 @@ class TransactionNotFoundError(PPDError):
         return {**super().to_dict(), "transaction_id": self.transaction_id}
 
 
-class SnapshotUnavailableError(PPDError):
+class SnapshotFailure(PPDError):
+    """The snapshot path could not serve this request.
+
+    **This type is the fallback contract.** A caller that sees it uses the live
+    source and says so; it never returns empty data. Routing catches this base
+    class rather than an enumeration of known subclasses, so a failure mode added
+    later falls back correctly without anyone remembering to extend a tuple.
+
+    Deliberately disjoint from `UpstreamUnavailableError`: the live source is
+    what the fallback falls back *to*, so a live failure that also read as a
+    snapshot failure would send routing round the loop again.
+
+    Caller errors (`InvalidPostcodeError`) and coverage refusals
+    (`PPDCoverageError`) are NOT snapshot failures. Retrying either against the
+    live source would hide the very fact the caller needs.
+    """
+
+    code = "snapshot_failure"
+    retryable = True
+
+
+class SnapshotUnavailableError(SnapshotFailure):
     """No verified snapshot is open. Distinct from 'no rows matched'."""
 
     code = "snapshot_unavailable"

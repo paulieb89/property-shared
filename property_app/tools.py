@@ -536,9 +536,14 @@ def search_ppd_transactions(
         limit=limit,
         property_type=property_type,
     )
+    provenance = result.get("provenance")
     return {
-        **{k: v for k, v in result.items() if k != "results"},
-        "results": [_slim(t.model_dump(mode="json", exclude_none=True)) for t in result["results"]],
+        **{k: v for k, v in result.items() if k not in ("results", "provenance")},
+        "results": [_slim(t.model_dump(mode="json", exclude_none=True))
+                    for t in result["results"]],
+        # Serialised, not dropped: coverage and completeness are what make this
+        # payload readable without over-claiming.
+        "provenance": provenance.model_dump(mode="json") if provenance else None,
     }
 
 
@@ -556,14 +561,17 @@ def ppd_transactions(
 ) -> dict:
     """Land Registry Price Paid transactions for a postcode, most recent first.
 
-    Returns up to `limit` most recent transactions currently available from the
-    live Land Registry source. Unfiltered by default -- category-B bulk transfers
-    and commercial sales are included. Pass `property_type` (F=flat, D=detached,
-    S=semi, T=terraced, O=other) to restrict the result to a single type.
+    Returns up to `limit` most recent transactions **within snapshot coverage**
+    (`coverage_from`-`coverage_to` in the response's `provenance`).
+    Unfiltered by default -- category-B bulk transfers and commercial sales are
+    included. Pass `property_type` (F=flat, D=detached, S=semi, T=terraced,
+    O=other) to restrict the result to a single type.
 
-    This is a bounded result, not a complete property history: older sales may
-    exist beyond what is returned, and the result carries no completeness
-    guarantee. For clean residential comparable sales, use `search_comps` instead.
+    **Not a complete property history.** Check `provenance.older_records_exist`
+    and `provenance.sample_complete` before saying anything about what a
+    property has or has not sold for. An empty result means "no sales within
+    the stated coverage" -- never "never sold". For clean residential
+    comparable sales, use `search_comps`.
     """
     return search_ppd_transactions(
         postcode=postcode,

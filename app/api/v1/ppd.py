@@ -15,7 +15,9 @@ from app.schemas.ppd import (
 from property_core.block_service import analyze_blocks
 from property_core.models.block import BlockAnalysisResponse
 from property_core.exceptions import (
+    InvalidDateRangeError,
     InvalidPostcodeError,
+    PPDCoverageError,
     TransactionNotFoundError,
     UpstreamUnavailableError,
 )
@@ -100,6 +102,15 @@ def transactions(
             include_raw=include_raw,
         )
         return PPDSearchResponse(**result)
+    except InvalidDateRangeError as exc:
+        # The caller's input, not an upstream failure. An unparseable date used
+        # to reach SPARQL's own validator and surface as a 502; an inverted
+        # range returned an empty 200 that looked like an answer.
+        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
+    except PPDCoverageError as exc:
+        # 422, not 404 or a partial 200: the request is unsatisfiable as stated,
+        # and the body carries both ranges so the caller can reformulate it.
+        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
     except InvalidPostcodeError as exc:
         # Caller error, not an upstream failure.
         raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
@@ -227,6 +238,10 @@ async def comps(
             address=address,
             auto_escalate=auto_escalate,
         )
+    except PPDCoverageError as exc:
+        # 422, not 404 or a partial 200: the request is unsatisfiable as stated,
+        # and the body carries both ranges so the caller can reformulate it.
+        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
     except InvalidPostcodeError as exc:
         # Caller error, not an upstream failure.
         raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
@@ -287,6 +302,10 @@ def blocks(
             min_transactions=min_transactions,
             search_level=search_level,
         )
+    except PPDCoverageError as exc:
+        # `months` is unbounded here, so a caller can ask for a window the
+        # snapshot cannot cover. Refused with both ranges, never clamped.
+        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
     except InvalidPostcodeError as exc:
         # Caller error, not an upstream failure.
         raise HTTPException(status_code=422, detail=exc.to_dict()) from exc

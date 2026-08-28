@@ -155,17 +155,37 @@ def test_importing_property_core_does_not_import_the_snapshot_runtime():
 
 
 def test_no_request_path_boots_a_snapshot():
-    """Nothing wires the runtime in yet -- routing arrives later, behind the flag."""
+    """Boot happens at startup only -- never on the path of a request.
+
+    PR 4 added routing, so these modules may now *consult* an already-installed
+    adapter. What none of them may do is construct the boot runtime: that would
+    put a download in the path of whichever request arrived first, which is the
+    exact failure the lifespan rule (spec 4.10) exists to prevent.
+    """
     import inspect
 
     import app.api.v1.ppd as rest
     import app.mcp.server as plain
     import property_core.ppd_service as svc
+    import property_core.ppd_source as routing
 
-    for module in (rest, plain, svc):
+    for module in (rest, plain, svc, routing):
         src = inspect.getsource(module)
-        assert "SnapshotRuntime" not in src, f"{module.__name__} boots a snapshot"
-        assert "property_core.snapshot" not in src, f"{module.__name__} imports it"
+        assert "SnapshotRuntime" not in src, (
+            f"{module.__name__} constructs the boot runtime on a request path")
+
+
+def test_only_the_bootstrap_module_constructs_the_runtime():
+    """One place boots, and it is the one the lifespan calls."""
+    # Walked from disk, not `git grep`: a new caller that has not been staged
+    # yet is exactly the one this needs to catch.
+    callers = sorted(
+        str(path.relative_to(REPO))
+        for package in ("property_core", "app", "property_app", "property_cli")
+        for path in (REPO / package).rglob("*.py")
+        if "SnapshotRuntime(" in path.read_text()
+    )
+    assert callers == ["property_core/snapshot/bootstrap.py"], callers
 
 
 def test_the_snapshot_extra_declares_a_zstd_reader():

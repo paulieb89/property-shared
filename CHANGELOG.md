@@ -1,9 +1,16 @@
 # Changelog
 
-## Unreleased — v1.15.0 (pending): PPD snapshot foundations + live-path correctness containment
+## Unreleased — v1.15.0 (pending): PPD snapshot source routing + live-path correctness containment
 
-Not released. No version bump. Two merged/pending PRs against the frozen design in
+Not released. No version bump. Four PRs against the frozen design in
 `docs/design/ppd-source-routing.md`.
+
+**`PPD_SNAPSHOT_ENABLED` is off by default, and nothing about the deployed
+behaviour changes while it stays off.** With no snapshot materialized every PPD
+surface answers from live SPARQL exactly as before, with one addition: an
+additive `provenance` block declaring `source: "sparql"` and null coverage
+fields. The behavioural changes listed under *Changed* below that mention
+coverage take effect only once a snapshot is enabled and materialized.
 
 ### Changed — behavioural, read before upgrading
 
@@ -38,8 +45,56 @@ Not released. No version bump. Two merged/pending PRs against the frozen design 
   A failure warns; a genuine no-match does not. Previously both were a silent
   `null`.
 - Both `ppd_transactions` tool descriptions no longer claim "every recorded
-  transaction"; they state a bounded, most-recent result that is not a complete
-  history.
+  transaction"; they state a coverage-bounded, most-recent result that is not a
+  complete history, and point at `provenance.older_records_exist` and
+  `provenance.sample_complete`.
+
+**Only when a snapshot is enabled and materialized:**
+
+- **`GET /v1/ppd/transactions` and `GET /v1/ppd/blocks` return a typed 422
+  `ppd_coverage_error`** when the requested range starts before
+  `coverage_from`, instead of a 200 from live SPARQL. The body carries
+  structured `requested` and `available` ranges plus a remedy — never prose to
+  parse, and never a partial 200, which would be indistinguishable from a
+  complete answer. **Callers passing an old `from_date` must narrow the range
+  or use `GET /v1/ppd/transaction/{id}`,** which stays on Linked Data and keeps
+  working for transactions of any age. The CLI equivalents exit non-zero and
+  print both ranges.
+- **An absent `from_date` is narrowed to `coverage_from` and warned**, rather
+  than continuing to mean "all time".
+- **`comps` and everything derived from it narrow rather than refuse.** Their
+  `months` is bounded by every surface that exposes it (60 or 120), and the
+  snapshot is sized to cover the maximum, so a window reaching past coverage
+  means a stale snapshot rather than an impossible request.
+- **An empty dateless result is never allowed to read as "never sold".** On zero
+  rows from a narrowed window, one bounded existence probe runs against the live
+  source: `LIMIT 1`, three-second timeout, no retries. `older_records_exist` is
+  `true` (warn), `false` (honest empty, no warning) or `null` (warn). A probe
+  that failed or timed out yields `null` and never `false` — `false` is a
+  positive claim about the world and only a completed probe may make it. No
+  probe is issued when the snapshot returned rows.
+- **Every typed snapshot failure falls back to the live source** and says so in
+  a warning. A coverage refusal and a malformed postcode are not snapshot
+  failures and are never softened into a live retry.
+- **The whole requested interval is checked against coverage, not just its
+  start.** A range disjoint from coverage — one beginning after `coverage_to`,
+  or ending before `coverage_from` — is refused with a remedy naming the
+  boundary that was crossed. A range extending past `coverage_to`, which
+  includes every request with no `to_date`, is clamped to `coverage_to` with a
+  warning naming what was excluded. On bounded-`months` surfaces a disjoint
+  window is a `snapshot_coverage_gap` failure and the live source answers,
+  because the caller never chose that window.
+- **`offset` is honoured on the snapshot path.** Paging is exact — the ordering
+  is total, so successive pages neither repeat nor omit a row.
+- **Malformed and inverted date ranges are typed caller errors (422
+  `invalid_date_range`), on both sources, before either is queried.** Coverage
+  decisions compare ISO strings lexically, which is meaningful only for
+  well-formed dates: `"nonsense"` sorts after `"2026-06-30"`, so a garbage
+  `to_date` read as "beyond coverage" and was silently clamped to it. An
+  inverted range (`from_date` after `to_date`) describes an empty window, so it
+  passed both coverage checks, matched nothing, and was reported as a
+  **complete** empty result. On the live path the same inputs previously gave a
+  **502** (a caller error dressed as an upstream outage) and an empty **200**.
 
 ### Added
 
@@ -83,12 +138,66 @@ Not released. No version bump. Two merged/pending PRs against the frozen design 
   and unified dashboards — including each dashboard's LLM-facing text, not only
   its visual tree. A derived figure is never presented without the caveat
   attached to the data it came from.
+- **Provenance block on every PPD-bearing response** — `source`,
+  `source_release`, `snapshot_imported_at`, `coverage_from`/`coverage_to`,
+  `freshness_days`, `recent_period_provisional`, `older_records_exist`,
+  `sample_count`/`sample_limit`/`sample_complete`, `completeness_basis`,
+  `attribution_ref` and `warnings`. Additive and nullable: a caller that ignores
+  it sees no change. Carried through REST (`/v1/ppd/comps`,
+  `/v1/ppd/transactions`, `/v1/ppd/address-search`, `/v1/ppd/transaction/{id}`),
+  both MCP servers, and the CLI. **Mixed-source responses declare both halves
+  separately:** comps may come from the snapshot while `subject_property`
+  carries its own `source: "sparql"`, because a property's history routinely
+  predates coverage. `YieldAnalysis` carries `sale_provenance` for the same
+  reason a yield carries its comps warnings.
+- **`sample_complete` is never inferred from counts.** It defaults `false` and
+  is `true` only with a stated `completeness_basis`: `limit_plus_one` from the
+  snapshot adapter, or `source_exhausted` from an explicit transport-layer
+  observation. `sample_count = 3` against `sample_limit = 5` is legitimately
+  incomplete. It is additionally **scoped to the requested interval** — an
+  interval reaching past either coverage bound was only partly searched — and is
+  **withdrawn whenever `offset > 0`**, because a short final page says the page
+  ended, not that the pages skipped over were examined. Both withdrawals happen
+  where the block is built, so no call site can omit one — and `SnapshotPage`,
+  which is exported, no longer hands out a basis at a non-zero offset in the
+  first place. Its `exhausted` flag remains page-scoped and true.
+- **Every Parquet partition is validated individually** before the union view
+  exists. `union_by_name` fills a column a partition lacks with NULLs, so a
+  single partition missing `outcode` passed a check over the combined view,
+  silently contributed no rows to any outcode search, and the short result was
+  then reported as exhaustive — a whole year of sales gone, with the response
+  saying nothing was missing.
+- **Coverage metadata is a routing precondition.** Both bounds must be present,
+  valid ISO dates and correctly ordered, and `provisional_from` must lie inside
+  them; anything else is a typed `snapshot_metadata_invalid` failure and the
+  caller uses live. A record with no bounds previously answered a 1995 request
+  from an eleven-year snapshot, reported null coverage, and claimed the sample
+  was complete.
+- **DuckDB snapshot adapter** (`property_core.snapshot.adapter`) — the layer that
+  turns a structurally verified snapshot into a routable one. Before it answers
+  anything it validates the column schema and types, checks the row count
+  against the verification record, and executes a real query. Each failure is a
+  typed `SnapshotFailure`, so an unusable snapshot becomes a live fallback and
+  never an empty result set. Geography is `outcode = ?` / `sector = ?` against
+  materialized columns, so `B5` cannot match `B50` by construction; filters are
+  pushed into SQL, which is what makes its `limit + 1` completeness evidence
+  independent of the caller's page size.
+- **Boot wiring through the FastMCP lifespan** (`property_core.snapshot.bootstrap`)
+  — once per server process, never per request and never lazily on first use.
+  `app/main.py` awaits the FastMCP lifespan explicitly from inside its FastAPI
+  lifespan, because mounting does not chain them. Runtime state is
+  process-scoped, never MCP session state, and the filesystem single-flight lock
+  still coordinates the workers on a Machine. **A boot failure is not a startup
+  error:** the server comes up and serves from the live source.
+- **HM Land Registry attribution at `GET /v1/meta`**, in CLI `meta`, and in both
+  MCP `instructions` strings. Responses carry the compact `attribution_ref`
+  pointing there; licence prose is never inlined into a data payload.
 - Provenance and evidence models (`PPDProvenance`, `TransportEvidence`,
-  `SourceKind`, `CompletenessBasis`) and the typed error taxonomy
-  (`PPDError`, `PPDCoverageError`, `InvalidPostcodeError`,
-  `TransactionNotFoundError`, `UpstreamShapeError`, `SnapshotUnavailableError`,
-  `UpstreamUnavailableError`), all exported from `property_core`. Provenance is
-  **not yet wired into any response**.
+  `SourceKind`, `CompletenessBasis`), `CoveragePolicy`, and the typed error
+  taxonomy (`PPDError`, `PPDCoverageError`, `InvalidPostcodeError`,
+  `TransactionNotFoundError`, `UpstreamShapeError`, `SnapshotFailure`,
+  `SnapshotUnavailableError`, `UpstreamUnavailableError`), all exported from
+  `property_core`.
 - Optional `snapshot` extra (`duckdb==1.5.5`) and `PPD_SNAPSHOT_ENABLED`
   (default **off**). The published library gains no required dependency.
 - `docs/design/ppd-source-routing.md` — the frozen specification governing this
@@ -99,7 +208,32 @@ Not released. No version bump. Two merged/pending PRs against the frozen design 
 - `record_status` filtering stays disabled, but its documented rationale was
   factually wrong: `lrppi:recordStatus` **does** exist on the SPARQL transaction
   and binds to `.../ppi/add`. The honest reason is that it is not yet supported
-  under the verified binding and performance contract.
+  under the verified binding and performance contract. It is now rejected before
+  routing, so the snapshot path gives the same explanation and remedy as live.
+- **The HM Land Registry attribution statement was emitting the wrong year.**
+  `hmlr_attribution()` substituted the current year, so it rendered "2026". The
+  year is part of the wording HM Land Registry prescribes, not a copyright
+  notice for today: the required statement pins **2021**, as the frozen
+  specification quotes it and as the Price Paid Data downloads page states
+  (checked 2026-08-28). Now a fixed constant, with the runtime value pinned in
+  test alongside the specification — the existing test checked only the
+  specification, which is how the wrong year passed review.
+- **CLI JSON output is parseable again.** `_echo_json` went through rich's
+  `print`, which soft-wraps at the terminal width, so a long value — a coverage
+  warning, say — came out with a newline inserted mid-string and the document no
+  longer parsed. JSON output exists to be machine-read.
+
+### Not in this work
+
+- **Auto-escalation stays disabled on both sources.** The snapshot adapter does
+  supply the limit-independent evidence that would make widening defensible, but
+  changing which area a caller's request covers is a behaviour change of its
+  own. Both paths return the requested area with a warning saying why, and the
+  reason differs by source because the reasons genuinely differ.
+- The build pipeline, artifact distribution, the shadow corpus, and rollout
+  gates G1–G3. No Dockerfile, Fly config, image, secret or deployment is touched
+  here, and neither production image installs the `snapshot` extra yet — which
+  G3 requires **before** the flag may be enabled.
 
 
 ## v1.14.2 (2026-08-26) — MCP server card version; inferred-GBP warning ordering

@@ -97,6 +97,22 @@ def _timed_tool(fn):
         return _wrapped
 
 
+def _with_provenance(result: dict) -> dict:
+    """Serialise a service search result, provenance included.
+
+    The provenance block is a Pydantic model; left as-is it is not JSON
+    serialisable, and dropping it would silently remove the coverage and
+    completeness facts an LLM needs to read this payload honestly.
+    """
+    provenance = result.get("provenance")
+    return {
+        **{k: v for k, v in result.items() if k not in ("results", "provenance")},
+        "results": [t.model_dump(mode="json", exclude_none=True)
+                    for t in result["results"]],
+        "provenance": provenance.model_dump(mode="json") if provenance else None,
+    }
+
+
 def _slim(obj: Any) -> Any:
     """Strip bulk fields (raw, images, floorplans, epc_match) recursively.
 
@@ -111,20 +127,35 @@ def _slim(obj: Any) -> Any:
         return [_slim(item) for item in obj]
     return obj
 
+from property_core.snapshot.bootstrap import fastmcp_lifespan, mark_installed
+
 mcp = FastMCP(
     "property-data",
     version=_pkg_version("property-shared"),
+    # Boot the PPD snapshot once per server process (spec 4.10). Not per
+    # request and not lazily on first use: a lazy boot would put the download in
+    # the path of whichever request happened to arrive first. `app/main.py`
+    # awaits this lifespan explicitly from inside the FastAPI one, because
+    # mounting does not chain lifespans -- a lifespan that is never awaited is a
+    # boot that never happens.
+    lifespan=fastmcp_lifespan(None),
     instructions=(
         "UK property data tools. For a comprehensive single-property analysis, "
         "invoke the `full_property_analysis` prompt — it instructs you to call "
         "property_comps, property_yield, property_epc and rightmove_search and "
         "synthesise. For postcode-only data fetches use property_comps and "
-        "property_yield separately. ppd_transactions for recent transactions at a postcode (bounded, not a full history), "
+        "property_yield separately. ppd_transactions for recent transactions at "
+        "a postcode -- bounded by the stated coverage in each response's "
+        "`provenance`, never a full property history; an empty result means "
+        "'no sales in coverage', not 'never sold'. "
         "rightmove_search to browse listings by postcode, rightmove_listing for "
         "full detail on one listing, property_epc for energy certificates, "
         "rental_analysis for rental market figures, stamp_duty for SDLT, "
         "property_blocks for block-buy analysis, planning_search for council "
-        "planning portals, company_search to find a company by name."
+        "planning portals, company_search to find a company by name. "
+        "Price Paid Data: contains HM Land Registry data (c) Crown copyright and "
+        "database right, licensed under the Open Government Licence v3.0; see "
+        "GET /v1/meta."
     ),
 )
 
@@ -568,14 +599,17 @@ def ppd_transactions(
 ) -> dict:
     """Land Registry Price Paid transactions for a postcode, most recent first.
 
-    Returns up to `limit` most recent transactions currently available from the
-    live Land Registry source. Unfiltered by default -- category-B bulk transfers
-    and commercial sales are included. Pass `property_type` (F=flat, D=detached,
-    S=semi, T=terraced, O=other) to restrict the result to a single type.
+    Returns up to `limit` most recent transactions **within snapshot coverage**
+    (`coverage_from`-`coverage_to` in the response's `provenance`).
+    Unfiltered by default -- category-B bulk transfers and commercial sales are
+    included. Pass `property_type` (F=flat, D=detached, S=semi, T=terraced,
+    O=other) to restrict the result to a single type.
 
-    This is a bounded result, not a complete property history: older sales may
-    exist beyond what is returned, and the result carries no completeness
-    guarantee. For clean residential comparable sales, use `property_comps` instead.
+    **Not a complete property history.** Check `provenance.older_records_exist`
+    and `provenance.sample_complete` before saying anything about what a
+    property has or has not sold for. An empty result means "no sales within
+    the stated coverage" -- never "never sold". For clean residential
+    comparable sales, use `property_comps`.
     """
     from property_core import PPDService
     result = PPDService().search_transactions(
@@ -584,10 +618,7 @@ def ppd_transactions(
         limit=limit,
         property_type=property_type,
     )
-    return _slim({
-        **{k: v for k, v in result.items() if k != "results"},
-        "results": [t.model_dump(mode="json", exclude_none=True) for t in result["results"]],
-    })
+    return _slim(_with_provenance(result))
 
 
 @mcp.resource("councils://list")
@@ -813,6 +844,8 @@ Then synthesise (3–5 short paragraphs):
 
 # Must be registered BEFORE create_streamable_http_app below — that call builds the
 # served ASGI app, and middleware added afterwards would never reach a request.
+mark_installed(mcp)
+
 mcp.add_middleware(ClientTrackingMiddleware())
 
 _http_app = create_streamable_http_app(

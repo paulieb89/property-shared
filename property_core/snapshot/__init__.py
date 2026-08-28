@@ -1,14 +1,21 @@
-"""Snapshot boot runtime.
+"""Snapshot boot runtime and query adapter.
 
-Fetches, verifies and activates a PPD snapshot bundle at process start. It does
-NOT query the snapshot, route any request, or change any response: reading data
-from an activated snapshot is a later piece of work.
+Two layers with deliberately different claims:
+
+* the **boot runtime** fetches, verifies and activates a bundle at process
+  start, establishing *structural* facts only -- digest, member safety, file
+  inventory. It never opens the snapshot;
+* the **adapter** turns that into a routable source, and only after it has
+  checked the schema, the row count, and an executed query. That gap is the
+  point: a well-formed archive can still be unusable, and reporting the weaker
+  claim as the stronger one would serve nonsense.
 
 Disabled by default -- see `property_core.config.ppd_snapshot_enabled`.
 """
 
 from __future__ import annotations
 
+from property_core.snapshot.adapter import SnapshotAdapter, SnapshotPage
 from property_core.snapshot.archive import ExtractionLimits, ExtractionStats, safe_extract
 from property_core.snapshot.errors import (
     ArchiveRejected,
@@ -16,6 +23,10 @@ from property_core.snapshot.errors import (
     DownloadDeadlineExceeded,
     InsufficientDiskSpaceError,
     SnapshotExtraMissingError,
+    SnapshotNotQueryableError,
+    SnapshotQueryError,
+    SnapshotRowCountError,
+    SnapshotSchemaError,
 )
 from property_core.snapshot.fetch import DownloadResult, download_verified
 from property_core.snapshot.lock import LockTimeout, single_flight
@@ -46,8 +57,14 @@ __all__ = [
     "LockTimeout",
     "ObjectSource",
     "Readiness",
+    "SnapshotAdapter",
     "SnapshotExtraMissingError",
     "SnapshotManifest",
+    "SnapshotNotQueryableError",
+    "SnapshotPage",
+    "SnapshotQueryError",
+    "SnapshotRowCountError",
+    "SnapshotSchemaError",
     "SnapshotStore",
     "VerificationRecord",
     "download_verified",

@@ -39,7 +39,38 @@ def _maybe_http_client(api_url: Optional[str]) -> Optional["HTTPClient"]:
 
 
 def _echo_json(data: object) -> None:
-    rprint(json.dumps(data, indent=2, default=str))
+    """Emit JSON a caller can pipe into `jq`.
+
+    Deliberately NOT rich's `print`: it soft-wraps at the terminal width and
+    interprets square brackets as markup, so a long value -- a coverage warning,
+    say -- came out with a newline inserted mid-string and the document no
+    longer parsed. JSON output exists to be machine-read.
+    """
+    # ensure_ascii=False so the attribution's (c) renders as a character rather
+    # than an escape. Still valid JSON either way.
+    typer.echo(json.dumps(data, indent=2, default=str, ensure_ascii=False))
+
+
+def _ppd_errors(fn):
+    """Turn a typed PPD failure into a non-zero exit with a readable payload.
+
+    A coverage refusal is the CLI's answer, not a crash: the caller needs both
+    the range they asked for and the range that exists, or they cannot
+    reformulate the request. A bare traceback prints neither.
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def _wrapped(*args, **kwargs):
+        from property_core.exceptions import PPDError
+
+        try:
+            return fn(*args, **kwargs)
+        except PPDError as exc:
+            _echo_json(exc.to_dict())
+            raise typer.Exit(code=1) from exc
+
+    return _wrapped
 
 
 def _join_tokens(tokens: Iterable[str] | str) -> str:
@@ -56,11 +87,19 @@ def meta(api_url: Optional[str] = typer.Option(None, help="Call API instead of c
         data = client.get("/v1/meta/integrations")
         _echo_json(data)
         return
-    rprint(
+    from property_core.attribution import HMLR_LICENCE_URL, hmlr_attribution
+    from property_core.snapshot.bootstrap import snapshot_status
+
+    _echo_json(
         {
             "ppd": True,
             "epc": bool(EPCClient().is_configured()),
             "rightmove": True,
+            # The licence requires the statement to be discoverable. Responses
+            # carry a reference; this is where the reference resolves offline.
+            "attribution": hmlr_attribution(),
+            "licence_url": HMLR_LICENCE_URL,
+            "ppd_snapshot": snapshot_status(),
         }
     )
 
@@ -70,6 +109,7 @@ app.add_typer(ppd, name="ppd")
 
 
 @ppd.command("comps")
+@_ppd_errors
 def ppd_comps(
     postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
     property_type: Optional[str] = typer.Option(
@@ -162,6 +202,7 @@ def ppd_comps(
 
 
 @ppd.command("transaction")
+@_ppd_errors
 def ppd_transaction(
     transaction_id: str = typer.Argument(...),
     include_raw: bool = typer.Option(False, help="Include raw linked-data JSON"),
@@ -182,6 +223,7 @@ def ppd_transaction(
 
 
 @ppd.command("search")
+@_ppd_errors
 def ppd_search(
     postcode: Optional[str] = typer.Option(None),
     postcode_prefix: Optional[str] = typer.Option(None),
@@ -213,6 +255,7 @@ def ppd_search(
 
 
 @ppd.command("address-search")
+@_ppd_errors
 def ppd_address_search(
     paon: Optional[str] = typer.Option(None, help="Building name/number (e.g., '10' or 'Rose Cottage')"),
     saon: Optional[str] = typer.Option(None, help="Secondary address (e.g., 'Flat 2')"),
@@ -294,6 +337,7 @@ def ppd_download_url(
 
 
 @ppd.command("blocks")
+@_ppd_errors
 def ppd_blocks(
     postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
     months: int = typer.Option(24, help="Lookback months"),
@@ -1070,6 +1114,7 @@ app.add_typer(analysis, name="analysis")
 
 
 @analysis.command("yield")
+@_ppd_errors
 def analysis_yield(
     postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
     months: int = typer.Option(24, help="PPD lookback months"),
@@ -1124,6 +1169,7 @@ def analysis_yield(
 
 
 @analysis.command("rental")
+@_ppd_errors
 def analysis_rental(
     postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
     radius: float = typer.Option(0.5, help="Search radius (miles)"),
@@ -1254,6 +1300,7 @@ app.add_typer(report, name="report")
 
 
 @report.command("generate")
+@_ppd_errors
 def report_generate(
     address: list[str] = typer.Argument(..., help="Address with postcode, e.g. '10 Downing Street SW1A 2AA'"),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Output file path"),

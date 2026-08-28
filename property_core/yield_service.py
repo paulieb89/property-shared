@@ -69,6 +69,7 @@ async def calculate_yield(
         return YieldAnalysis(
             postcode=postcode,
             warnings=tuple(comps.warnings),
+            sale_provenance=comps.provenance,
             median_sale_price=comps.median,
             sale_count=comps.count,
             thin_market=comps.thin_market,
@@ -115,6 +116,7 @@ async def calculate_yield(
         return YieldAnalysis(
             postcode=postcode,
             warnings=tuple(comps.warnings),
+            sale_provenance=comps.provenance,
             median_sale_price=comps.median,
             sale_count=comps.count,
             thin_market=comps.thin_market,
@@ -133,6 +135,7 @@ async def calculate_yield(
         # The yield divides rent by the comps median, so an incomplete sales
         # window makes this figure equally uncertain. The caveat travels with it.
         warnings=tuple(comps.warnings),
+        sale_provenance=comps.provenance,
         median_sale_price=comps.median,
         sale_count=comps.count,
         median_monthly_rent=median_rent,

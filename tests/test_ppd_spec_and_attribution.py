@@ -27,7 +27,7 @@ def test_governing_specification_ships_with_the_code():
 
 def test_specification_is_version_stamped():
     head = SPEC.read_text().splitlines()[0]
-    assert "rev 5" in head and "FROZEN" in head, head
+    assert "rev 6" in head and "FROZEN" in head, head
 
 
 def _normalised(text: str) -> str:
@@ -41,6 +41,19 @@ def _normalised(text: str) -> str:
 
 def test_specification_states_the_exact_attribution():
     assert _normalised(REQUIRED_ATTRIBUTION) in _normalised(SPEC.read_text())
+
+
+def test_the_runtime_emits_the_exact_attribution():
+    """The gap this file used to leave open.
+
+    It pinned the literal against the SPECIFICATION only, so a runtime that
+    computed the statement from the current year satisfied every assertion here
+    while emitting the wrong sentence. The year is part of the prescribed
+    wording, not a copyright notice rendered for today.
+    """
+    from property_core.attribution import hmlr_attribution
+
+    assert hmlr_attribution() == REQUIRED_ATTRIBUTION
 
 
 def test_runtime_attribution_ref_is_compact_and_carries_no_prose():

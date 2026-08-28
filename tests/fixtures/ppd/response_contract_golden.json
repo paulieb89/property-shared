@@ -1,7 +1,7 @@
 {
   "cli.ppd_comps": {
     "exit_code": 0,
-    "stdout": "{\n  \"query\": {\n    \"postcode\": \"B5 4BX\",\n    \"property_type\": null,\n    \"months\": 24,\n    \"search_level\": \"sector\",\n    \"address\": null\n  },\n  \"count\": 3,\n  \"median\": 250000,\n  \"mean\": 250000,\n  \"percentile_25\": null,\n  \"percentile_75\": null,\n  \"min\": 190000,\n  \"max\": 310000,\n  \"thin_market\": true,\n  \"warnings\": [\n    \"auto-escalation not applied: live-source completeness cannot establish safe\nescalation from sector to district; returning the requested area\"\n  ],\n  \"escalated_from\": null,\n  \"escalated_to\": null,\n  \"median_price_per_sqft\": null,\n  \"epc_match_rate\": null,\n  \"subject_price_percentile\": null,\n  \"subject_vs_median_pct\": null,\n  \"transactions\": [\n    {\n      \"transaction_id\": \"{AAAAAAAA-0000-0000-0000-000000000001}\",\n      \"price\": 250000,\n      \"date\": \"2025-06-01\",\n      \"postcode\": \"B5 4BX\",\n      \"property_type\": \"F\",\n      \"estate_type\": \"L\",\n      \"transaction_category\": \"A\",\n      \"new_build\": false,\n      \"paon\": \"33\",\n      \"saon\": \"APARTMENT 1\",\n      \"street\": \"ESSEX STREET\",\n      \"town\": \"BIRMINGHAM\",\n      \"county\": \"WEST MIDLANDS\",\n      \"locality\": \"\",\n      \"district\": \"BIRMINGHAM\",\n      \"epc_match\": null,\n      \"epc_match_score\": null,\n      \"epc_match_method\": null,\n      \"epc_floor_area_sqm\": null,\n      \"epc_floor_area_sqft\": null,\n      \"price_per_sqm\": null,\n      \"price_per_sqft\": null,\n      \"epc_rating\": null,\n      \"epc_score\": null,\n      \"epc_construction_age\": null,\n      \"epc_built_form\": null\n    },\n    {\n      \"transaction_id\": \"{AAAAAAAA-0000-0000-0000-000000000002}\",\n      \"price\": 310000,\n      \"date\": \"2025-03-14\",\n      \"postcode\": \"B5 4BX\",\n      \"property_type\": \"T\",\n      \"estate_type\": \"F\",\n      \"transaction_category\": \"A\",\n      \"new_build\": false,\n      \"paon\": \"35\",\n      \"saon\": \"\",\n      \"street\": \"ESSEX STREET\",\n      \"town\": \"BIRMINGHAM\",\n      \"county\": \"WEST MIDLANDS\",\n      \"locality\": \"\",\n      \"district\": \"BIRMINGHAM\",\n      \"epc_match\": null,\n      \"epc_match_score\": null,\n      \"epc_match_method\": null,\n      \"epc_floor_area_sqm\": null,\n      \"epc_floor_area_sqft\": null,\n      \"price_per_sqm\": null,\n      \"price_per_sqft\": null,\n      \"epc_rating\": null,\n      \"epc_score\": null,\n      \"epc_construction_age\": null,\n      \"epc_built_form\": null\n    },\n    {\n      \"transaction_id\": \"{AAAAAAAA-0000-0000-0000-000000000003}\",\n      \"price\": 190000,\n      \"date\": \"2024-11-02\",\n      \"postcode\": \"B5 4BY\",\n      \"property_type\": \"F\",\n      \"estate_type\": \"L\",\n      \"transaction_category\": \"A\",\n      \"new_build\": true,\n      \"paon\": \"12\",\n      \"saon\": \"\",\n      \"street\": \"GOOCH STREET\",\n      \"town\": \"BIRMINGHAM\",\n      \"county\": \"WEST MIDLANDS\",\n      \"locality\": \"\",\n      \"district\": \"BIRMINGHAM\",\n      \"epc_match\": null,\n      \"epc_match_score\": null,\n      \"epc_match_method\": null,\n      \"epc_floor_area_sqm\": null,\n      \"epc_floor_area_sqft\": null,\n      \"price_per_sqm\": null,\n      \"price_per_sqft\": null,\n      \"epc_rating\": null,\n      \"epc_score\": null,\n      \"epc_construction_age\": null,\n      \"epc_built_form\": null\n    }\n  ],\n  \"subject_property\": null\n}\n"
+    "stdout": "{\n  \"query\": {\n    \"postcode\": \"B5 4BX\",\n    \"property_type\": null,\n    \"months\": 24,\n    \"search_level\": \"sector\",\n    \"address\": null\n  },\n  \"count\": 3,\n  \"median\": 250000,\n  \"mean\": 250000,\n  \"percentile_25\": null,\n  \"percentile_75\": null,\n  \"min\": 190000,\n  \"max\": 310000,\n  \"thin_market\": true,\n  \"warnings\": [\n    \"auto-escalation not applied: live-source completeness cannot establish safe escalation from sector to district; returning the requested area\"\n  ],\n  \"escalated_from\": null,\n  \"escalated_to\": null,\n  \"median_price_per_sqft\": null,\n  \"epc_match_rate\": null,\n  \"subject_price_percentile\": null,\n  \"subject_vs_median_pct\": null,\n  \"transactions\": [\n    {\n      \"transaction_id\": \"{AAAAAAAA-0000-0000-0000-000000000001}\",\n      \"price\": 250000,\n      \"date\": \"2025-06-01\",\n      \"postcode\": \"B5 4BX\",\n      \"property_type\": \"F\",\n      \"estate_type\": \"L\",\n      \"transaction_category\": \"A\",\n      \"new_build\": false,\n      \"paon\": \"33\",\n      \"saon\": \"APARTMENT 1\",\n      \"street\": \"ESSEX STREET\",\n      \"town\": \"BIRMINGHAM\",\n      \"county\": \"WEST MIDLANDS\",\n      \"locality\": \"\",\n      \"district\": \"BIRMINGHAM\",\n      \"epc_match\": null,\n      \"epc_match_score\": null,\n      \"epc_match_method\": null,\n      \"epc_floor_area_sqm\": null,\n      \"epc_floor_area_sqft\": null,\n      \"price_per_sqm\": null,\n      \"price_per_sqft\": null,\n      \"epc_rating\": null,\n      \"epc_score\": null,\n      \"epc_construction_age\": null,\n      \"epc_built_form\": null\n    },\n    {\n      \"transaction_id\": \"{AAAAAAAA-0000-0000-0000-000000000002}\",\n      \"price\": 310000,\n      \"date\": \"2025-03-14\",\n      \"postcode\": \"B5 4BX\",\n      \"property_type\": \"T\",\n      \"estate_type\": \"F\",\n      \"transaction_category\": \"A\",\n      \"new_build\": false,\n      \"paon\": \"35\",\n      \"saon\": \"\",\n      \"street\": \"ESSEX STREET\",\n      \"town\": \"BIRMINGHAM\",\n      \"county\": \"WEST MIDLANDS\",\n      \"locality\": \"\",\n      \"district\": \"BIRMINGHAM\",\n      \"epc_match\": null,\n      \"epc_match_score\": null,\n      \"epc_match_method\": null,\n      \"epc_floor_area_sqm\": null,\n      \"epc_floor_area_sqft\": null,\n      \"price_per_sqm\": null,\n      \"price_per_sqft\": null,\n      \"epc_rating\": null,\n      \"epc_score\": null,\n      \"epc_construction_age\": null,\n      \"epc_built_form\": null\n    },\n    {\n      \"transaction_id\": \"{AAAAAAAA-0000-0000-0000-000000000003}\",\n      \"price\": 190000,\n      \"date\": \"2024-11-02\",\n      \"postcode\": \"B5 4BY\",\n      \"property_type\": \"F\",\n      \"estate_type\": \"L\",\n      \"transaction_category\": \"A\",\n      \"new_build\": true,\n      \"paon\": \"12\",\n      \"saon\": \"\",\n      \"street\": \"GOOCH STREET\",\n      \"town\": \"BIRMINGHAM\",\n      \"county\": \"WEST MIDLANDS\",\n      \"locality\": \"\",\n      \"district\": \"BIRMINGHAM\",\n      \"epc_match\": null,\n      \"epc_match_score\": null,\n      \"epc_match_method\": null,\n      \"epc_floor_area_sqm\": null,\n      \"epc_floor_area_sqft\": null,\n      \"price_per_sqm\": null,\n      \"price_per_sqft\": null,\n      \"epc_rating\": null,\n      \"epc_score\": null,\n      \"epc_construction_age\": null,\n      \"epc_built_form\": null\n    }\n  ],\n  \"subject_property\": null,\n  \"provenance\": {\n    \"source\": \"sparql\",\n    \"source_release\": null,\n    \"snapshot_imported_at\": null,\n    \"coverage_from\": null,\n    \"coverage_to\": null,\n    \"freshness_days\": null,\n    \"recent_period_provisional\": false,\n    \"older_records_exist\": null,\n    \"sample_count\": 3,\n    \"sample_limit\": 50,\n    \"sample_complete\": true,\n    \"completeness_basis\": \"source_exhausted\",\n    \"attribution_ref\": \"/v1/meta#attribution\",\n    \"warnings\": [\n      \"auto-escalation not applied: live-source completeness cannot establish safe escalation from sector to district; returning the requested area\"\n    ]\n  }\n}\n"
   },
   "core.comps": {
     "count": 3,
@@ -15,6 +15,22 @@
     "min": 190000,
     "percentile_25": null,
     "percentile_75": null,
+    "provenance": {
+      "attribution_ref": "/v1/meta#attribution",
+      "completeness_basis": "source_exhausted",
+      "coverage_from": null,
+      "coverage_to": null,
+      "freshness_days": null,
+      "older_records_exist": null,
+      "recent_period_provisional": false,
+      "sample_complete": true,
+      "sample_count": 3,
+      "sample_limit": 50,
+      "snapshot_imported_at": null,
+      "source": "sparql",
+      "source_release": null,
+      "warnings": []
+    },
     "query": {
       "address": null,
       "months": 24,
@@ -118,6 +134,22 @@
     "count": 3,
     "limit": 10,
     "offset": 0,
+    "provenance": {
+      "attribution_ref": "/v1/meta#attribution",
+      "completeness_basis": "source_exhausted",
+      "coverage_from": null,
+      "coverage_to": null,
+      "freshness_days": null,
+      "older_records_exist": null,
+      "recent_period_provisional": false,
+      "sample_complete": true,
+      "sample_count": 3,
+      "sample_limit": 10,
+      "snapshot_imported_at": null,
+      "source": "sparql",
+      "source_release": null,
+      "warnings": []
+    },
     "raw": null,
     "results": [
       {
@@ -178,6 +210,22 @@
     "count": 3,
     "limit": 10,
     "offset": 0,
+    "provenance": {
+      "attribution_ref": "/v1/meta#attribution",
+      "completeness_basis": "source_exhausted",
+      "coverage_from": null,
+      "coverage_to": null,
+      "freshness_days": null,
+      "older_records_exist": null,
+      "recent_period_provisional": false,
+      "sample_complete": true,
+      "sample_count": 3,
+      "sample_limit": 10,
+      "snapshot_imported_at": null,
+      "source": "sparql",
+      "source_release": null,
+      "warnings": []
+    },
     "raw": null,
     "results": [
       {
@@ -238,6 +286,22 @@
     "count": 3,
     "limit": 10,
     "offset": 0,
+    "provenance": {
+      "attribution_ref": "/v1/meta#attribution",
+      "completeness_basis": "source_exhausted",
+      "coverage_from": null,
+      "coverage_to": null,
+      "freshness_days": null,
+      "older_records_exist": null,
+      "recent_period_provisional": false,
+      "sample_complete": true,
+      "sample_count": 3,
+      "sample_limit": 10,
+      "snapshot_imported_at": null,
+      "source": "sparql",
+      "source_release": null,
+      "warnings": []
+    },
     "results": [
       {
         "county": "WEST MIDLANDS",
@@ -306,6 +370,24 @@
       "min": 190000,
       "percentile_25": null,
       "percentile_75": null,
+      "provenance": {
+        "attribution_ref": "/v1/meta#attribution",
+        "completeness_basis": "source_exhausted",
+        "coverage_from": null,
+        "coverage_to": null,
+        "freshness_days": null,
+        "older_records_exist": null,
+        "recent_period_provisional": false,
+        "sample_complete": true,
+        "sample_count": 3,
+        "sample_limit": 50,
+        "snapshot_imported_at": null,
+        "source": "sparql",
+        "source_release": null,
+        "warnings": [
+          "auto-escalation not applied: live-source completeness cannot establish safe escalation from sector to district; returning the requested area"
+        ]
+      },
       "query": {
         "address": null,
         "months": 24,
@@ -434,6 +516,22 @@
       "count": 3,
       "limit": 10,
       "offset": 0,
+      "provenance": {
+        "attribution_ref": "/v1/meta#attribution",
+        "completeness_basis": "source_exhausted",
+        "coverage_from": null,
+        "coverage_to": null,
+        "freshness_days": null,
+        "older_records_exist": null,
+        "recent_period_provisional": false,
+        "sample_complete": true,
+        "sample_count": 3,
+        "sample_limit": 10,
+        "snapshot_imported_at": null,
+        "source": "sparql",
+        "source_release": null,
+        "warnings": []
+      },
       "raw": null,
       "results": [
         {

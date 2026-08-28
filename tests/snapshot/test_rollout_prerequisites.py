@@ -286,14 +286,25 @@ def test_the_lifespan_rule_is_recorded_in_the_specification(requirement):
     )
 
 
-def test_no_lifespan_wiring_exists_yet():
-    """The rule is recorded; PR 4 implements it. Nothing boots a snapshot now."""
+def test_the_lifespan_rule_is_wired_in_both_deployments():
+    """PR 4 implements the rule recorded above, in both deployed servers.
+
+    `property-shared` mounts the MCP app inside FastAPI, so its FastAPI lifespan
+    must await the FastMCP one explicitly -- mounting does not chain them.
+    `propertydata` is deployed on its own and carries the lifespan directly.
+    """
     import inspect
 
-    import app.main as api
-    import property_app.server as mcp_app
+    from property_core.snapshot.bootstrap import lifespan_is_installed
 
-    for module in (api, mcp_app):
-        src = inspect.getsource(module)
-        assert "SnapshotRuntime" not in src, f"{module.__name__} boots a snapshot"
-        assert "property_core.snapshot" not in src
+    import app.main as api
+    from app.mcp.server import mcp as plain_server
+    from property_app.server import mcp as app_server
+
+    for server in (plain_server, app_server):
+        assert lifespan_is_installed(server), f"{server.name} never boots"
+
+    assert "_mcp_http_app.lifespan" in inspect.getsource(api.lifespan), (
+        "app/main.py no longer awaits the FastMCP lifespan; the mounted "
+        "deployment would never boot a snapshot"
+    )

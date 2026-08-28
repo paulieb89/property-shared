@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from statistics import mean, median, quantiles
 from typing import Any, Dict, List, Optional
 
-from property_core.exceptions import InvalidPostcodeError
+from property_core.exceptions import InvalidPostcodeError, SnapshotFailure
 from property_core.models.ppd import (
     PPDCompsQuery,
     PPDCompsResponse,
@@ -19,6 +19,16 @@ from property_core.models.ppd import (
     SubjectProperty,
 )
 from property_core.ppd_client import PricePaidDataClient
+from property_core.ppd_source import (
+    CoveragePolicy,
+    active_adapter,
+    fallback_warning,
+    live_provenance,
+    resolve_coverage,
+    snapshot_provenance,
+    validate_date_range,
+)
+from property_core.provenance import SourceKind
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
@@ -40,8 +50,19 @@ class PPDService:
     guardrails, stats computation, and subject-property matching.
     All methods are synchronous.
     """
-    def __init__(self, client: Optional[PricePaidDataClient] = None):
+    def __init__(self, client: Optional[PricePaidDataClient] = None,
+                 adapter: Optional[Any] = None):
         self.client = client or PricePaidDataClient()
+        #: An explicit adapter overrides process state; `None` means "ask the
+        #: process at call time". Resolved per call rather than per instance
+        #: because the routers construct one service at import, long before boot.
+        self._adapter_override = adapter
+
+    def _active_adapter(self) -> Optional[Any]:
+        """The snapshot adapter to route to, or None for the live source."""
+        if self._adapter_override is not None:
+            return self._adapter_override
+        return active_adapter()
 
     def download_url(
         self,
@@ -82,11 +103,28 @@ class PPDService:
         order_desc: bool = True,
         include_raw: bool = False,
     ) -> Dict[str, Any]:
-        """Search PPD via SPARQL with guardrails on limit/offset.
+        """Search PPD transactions, from the snapshot when one is routable.
 
-        Returns a dict with keys: count, limit, offset, results, warnings, raw.
+        Returns a dict with keys: count, limit, offset, results, warnings, raw,
+        provenance.
+
+        This surface takes explicit dates, so it uses the EXPLICIT coverage
+        policy: a `from_date` before `coverage_from` is refused with
+        `PPDCoverageError` rather than answered partially. An absent `from_date`
+        means "all time" on the live source and "coverage" here, so it is
+        narrowed with a warning rather than silently.
+
+        When the window was narrowed and the result is empty, one bounded
+        existence probe runs against the live source (spec 2.4): an empty list
+        from a dateless call otherwise reads as "never sold", which is a
+        confident false claim.
         """
         warnings: List[str] = []
+
+        # Before routing, so neither source is queried on input that cannot mean
+        # anything -- and so the same bad input gets the same typed answer
+        # whichever source would have served it.
+        validate_date_range(from_date, to_date)
 
         if limit <= 0:
             limit = DEFAULT_LIMIT
@@ -102,7 +140,81 @@ class PPDService:
                 "or omit rows across pages"
             )
 
-        results = self.client.sparql_search(
+        if record_status is not None:
+            # Rejected before any routing decision, so the snapshot path has
+            # exactly the live path's behaviour (spec test 19). Raised by the
+            # client normally; done here because the snapshot path never calls it.
+            from property_core.ppd_client import (
+                RECORD_STATUS_UNSUPPORTED,
+                UnsupportedRecordStatusFilterError,
+            )
+
+            raise UnsupportedRecordStatusFilterError(RECORD_STATUS_UNSUPPORTED)
+
+        adapter = self._active_adapter()
+        if adapter is not None:
+            try:
+                # Inside the try on purpose. `resolve_coverage` can raise a
+                # SnapshotCoverageGapError, which belongs to the fallback
+                # taxonomy; PPDCoverageError and InvalidPostcodeError do not
+                # subclass SnapshotFailure and so still reach the caller, which
+                # is the point -- retrying either against live would hide the
+                # fact the caller needs.
+                decision = resolve_coverage(
+                    adapter, from_date=from_date, to_date=to_date,
+                    policy=CoveragePolicy.EXPLICIT)
+                page = adapter.search(
+                    postcode=postcode,
+                    postcode_prefix=postcode_prefix,
+                    from_date=decision.from_date,
+                    to_date=decision.to_date,
+                    min_price=min_price,
+                    max_price=max_price,
+                    property_types={property_type} if property_type else None,
+                    estate_type=estate_type,
+                    transaction_category=transaction_category,
+                    new_build=new_build,
+                    limit=limit,
+                    offset=offset,
+                    order_desc=order_desc,
+                )
+            except SnapshotFailure as exc:
+                warnings.append(fallback_warning(exc))
+            else:
+                results = page.transactions
+                warnings.extend(decision.warnings)
+                older = None
+                # `from_narrowed`, NOT `narrowed`: the probe asks whether
+                # anything exists BEFORE coverage begins, which is only a
+                # question for a caller who did not choose the lower bound. A
+                # caller who named `from_date` already excluded that period
+                # deliberately, and an upstream request to tell them so is noise.
+                if (not results and decision.from_narrowed and offset == 0
+                        and adapter.coverage_from):
+                    # No probe when there ARE rows: the question is already
+                    # answered, and a probe would be a second upstream call
+                    # for nothing (spec test 13).
+                    older = self._probe_older_records(
+                        postcode=postcode, postcode_prefix=postcode_prefix,
+                        coverage_from=adapter.coverage_from)
+                    warnings.extend(_older_records_warnings(
+                        older, adapter.coverage_from, adapter.coverage_to))
+
+                return {
+                    "count": len(results),
+                    "limit": limit,
+                    "offset": offset,
+                    "results": results,
+                    "warnings": warnings,
+                    "raw": [t.raw for t in results] if include_raw else None,
+                    "provenance": snapshot_provenance(
+                        adapter, decision=decision, sample_count=len(results),
+                        sample_limit=limit, offset=offset,
+                        completeness_basis=page.completeness_basis,
+                        older_records_exist=older, warnings=tuple(warnings)),
+                }
+
+        page = self.client.search_with_evidence(
             postcode=postcode,
             postcode_prefix=postcode_prefix,
             from_date=from_date,
@@ -112,12 +224,12 @@ class PPDService:
             property_type=property_type,
             estate_type=estate_type,
             transaction_category=transaction_category,
-            record_status=record_status,
             new_build=new_build,
             limit=limit,
             offset=offset,
             order_desc=order_desc,
         )
+        results = page.transactions
 
         return {
             "count": len(results),
@@ -126,7 +238,20 @@ class PPDService:
             "results": results,
             "warnings": warnings,
             "raw": [t.raw for t in results] if include_raw else None,
+            "provenance": live_provenance(
+                evidence=page.evidence, sample_count=len(results),
+                sample_limit=limit, warnings=tuple(warnings)),
         }
+
+    def _probe_older_records(self, *, postcode: Optional[str],
+                             postcode_prefix: Optional[str],
+                             coverage_from: str) -> Optional[bool]:
+        """One bounded probe. Any failure is None -- never False."""
+        from property_core.ppd_probe import ExistenceProbe
+
+        return ExistenceProbe().older_records_exist(
+            postcode=postcode, postcode_prefix=postcode_prefix,
+            coverage_from=coverage_from)
 
     def address_search(
         self,
@@ -143,9 +268,10 @@ class PPDService:
         limit: int = 25,
         include_raw: bool = False,
     ) -> Dict[str, Any]:
-        """Address-form search with strict limits.
+        """Address-form search with strict limits. Always the live source.
 
-        Returns a dict with keys: count, limit, offset, results, warnings, raw.
+        Returns a dict with keys: count, limit, offset, results, warnings, raw,
+        provenance.
         """
         warnings: List[str] = []
         if limit <= 0:
@@ -190,6 +316,12 @@ class PPDService:
             "results": results,
             "warnings": warnings,
             "raw": [t.raw for t in results] if include_raw else None,
+            # Always live (spec 2.6). This search takes no dates and means "this
+            # property's history", which is routinely older than snapshot
+            # coverage; bounding it would turn a real history into a partial one.
+            "provenance": live_provenance(
+                sample_count=len(results), sample_limit=limit,
+                warnings=tuple(warnings)),
         }
 
     def comps(
@@ -205,6 +337,7 @@ class PPDService:
         address: Optional[str] = None,
         auto_escalate: bool = True,
         thin_market_threshold: int = 5,
+        coverage_policy: CoveragePolicy = CoveragePolicy.GUARANTEED,
     ) -> PPDCompsResponse:
         """Return comparable sales and summary stats for a postcode.
 
@@ -269,44 +402,21 @@ class PPDService:
             sparql_property_type = property_type
             apply_residential_filter = False
 
-        # 3. Fetch transactions via SPARQL (client handles post-fetch filtering)
+        # 3. Fetch transactions, from the snapshot when one is routable.
         from_date = (date.today() - timedelta(days=months * 30)).isoformat()
-
-        page = self.client.search_with_evidence(
-            postcode=exact_postcode,
-            postcode_prefix=prefix,
-            from_date=from_date,
-            property_type=sparql_property_type,
-            transaction_category=transaction_category,
-            limit=limit,
-            order_desc=True,
-        )
-        transactions = page.transactions
         warnings: list[str] = []
 
-        # Completeness. `source_exhausted` is tri-state; only True proves the
-        # upstream window was not truncated. It is derived from a fetch limit
-        # that itself scales with the caller's presentation limit, so it is
-        # reported but never used to widen geography on the live path.
-        # Containment and exhaustion are independent facts and are reported
-        # separately. An earlier version reported containment only inside the
-        # exhausted branch while calling the page "saturated" -- a contradiction
-        # that meant the message could never appear when it was true.
-        if page.contained_out:
-            warnings.append(
-                f"{page.contained_out} out-of-area row(s) returned by the upstream "
-                "were removed by geography containment"
-            )
-        if page.evidence.source_exhausted is not True:
-            warnings.append(
-                "result may be incomplete: the upstream window was not exhausted, "
-                "so thin_market reflects the returned sample rather than the market"
-            )
-
-        # 4. Apply residential post-filter when property_type=None.
-        # transaction_category filtering happens server-side via SPARQL above.
-        if apply_residential_filter:
-            transactions = [t for t in transactions if t.property_type in _RESIDENTIAL_TYPES]
+        transactions, provenance_for, from_snapshot = self._fetch_comps(
+            exact_postcode=exact_postcode,
+            prefix=prefix,
+            from_date=from_date,
+            sparql_property_type=sparql_property_type,
+            apply_residential_filter=apply_residential_filter,
+            transaction_category=transaction_category,
+            limit=limit,
+            coverage_policy=coverage_policy,
+            warnings=warnings,
+        )
 
         # 5. Subject property matching
         subject_property = None
@@ -381,8 +491,42 @@ class PPDService:
             address=address,
         )
 
-        response = PPDCompsResponse(
+        thin_market = count < thin_market_threshold
+
+        # Auto-escalation stays DISABLED, on both sources.
+        #
+        # On the live path (PR 2) the only exhaustion evidence is
+        # `raw_bindings_returned < fetch_limit`, and `fetch_limit` derives from
+        # the caller's presentation limit -- so the evidence, and therefore the
+        # geography, would move with page size. The snapshot adapter does supply
+        # limit-independent evidence, which would make widening defensible, but
+        # changing which area a caller's request covers is a behaviour change of
+        # its own and is not in this PR's scope. Both paths return the requested
+        # area and say why.
+        if auto_escalate and thin_market:
+            next_level = {"postcode": "sector", "sector": "district"}.get(search_level)
+            if next_level:
+                # Source-specific, because the reason differs. Saying
+                # "live-source completeness" over a snapshot answer would be
+                # false: the snapshot DOES establish completeness, and what
+                # stops it widening is scope, not evidence.
+                warnings.append(
+                    f"auto-escalation not applied: the snapshot could establish "
+                    f"safe escalation from {search_level} to {next_level}, but "
+                    f"widening is not enabled; returning the requested area"
+                    if from_snapshot else
+                    "auto-escalation not applied: live-source completeness cannot "
+                    f"establish safe escalation from {search_level} to "
+                    f"{next_level}; returning the requested area")
+
+        # Provenance is built ONCE, here, from evidence that is now complete --
+        # the counts are final and every warning has been gathered. The block is
+        # frozen, so a block built earlier and patched afterwards is not
+        # available, and pydantic's validation-bypassing copy hatch is
+        # prohibited for it.
+        return PPDCompsResponse(
             query=query,
+            provenance=provenance_for(count, tuple(warnings)),
             count=count,
             median=computed_median,
             mean=computed_mean,
@@ -390,7 +534,7 @@ class PPDService:
             percentile_75=p75,
             min=min(prices) if prices else None,
             max=max(prices) if prices else None,
-            thin_market=count < thin_market_threshold,
+            thin_market=thin_market,
             warnings=tuple(warnings),
             transactions=transactions,
             subject_property=subject_property,
@@ -398,25 +542,108 @@ class PPDService:
             subject_vs_median_pct=subject_vs_median_pct,
         )
 
-        # Auto-escalation is DISABLED on the live path (PR 2).
-        #
-        # Widening sector -> district needs proof that the narrower search was
-        # exhausted. The only available evidence is `raw_bindings_returned <
-        # fetch_limit`, and `fetch_limit` is derived from the caller's
-        # presentation limit -- so the evidence, and therefore the geography,
-        # would still change with page size. That is the defect being contained,
-        # not a fix for it. Snapshot routing may re-enable escalation in PR 4
-        # using limit-independent deterministic evidence.
-        if auto_escalate and response.thin_market:
-            next_level = {"postcode": "sector", "sector": "district"}.get(search_level)
-            if next_level:
-                response.warnings = response.warnings + (
-                    "auto-escalation not applied: live-source completeness cannot "
-                    f"establish safe escalation from {search_level} to {next_level}; "
-                    "returning the requested area",
-                )
+    def _fetch_comps(
+        self,
+        *,
+        exact_postcode: Optional[str],
+        prefix: Optional[str],
+        from_date: str,
+        sparql_property_type: Optional[str],
+        apply_residential_filter: bool,
+        transaction_category: Optional[str],
+        limit: int,
+        coverage_policy: CoveragePolicy,
+        warnings: List[str],
+    ) -> tuple[List[PPDTransaction], Any, bool]:
+        """Fetch comparables from the snapshot if routable, else live.
 
-        return response
+        Returns the rows, a callable that builds the provenance block once the
+        final count and the complete warning list are known, and whether the
+        snapshot answered -- the block is
+        frozen and must be constructed atomically, so it cannot be built here
+        and refined later. Patching one through pydantic's validation-bypassing
+        copy hatch is prohibited for provenance.
+
+        Appends to `warnings` in place: coverage narrowing, provisional-period
+        and fallback notices all belong to the same list the response carries.
+        """
+        adapter = self._active_adapter()
+        if adapter is not None:
+            try:
+                # Inside the try: a window the snapshot cannot reach raises
+                # SnapshotCoverageGapError, and comps must still answer -- from
+                # the live source, with a warning, like any snapshot failure.
+                decision = resolve_coverage(
+                    adapter, from_date=from_date, to_date=None,
+                    policy=coverage_policy)
+                page = adapter.search(
+                    postcode=exact_postcode,
+                    postcode_prefix=prefix,
+                    from_date=decision.from_date,
+                    # Type filtering is pushed into the query rather than applied
+                    # afterwards. That is what makes limit+1 mean what it says:
+                    # a short answer proves the SOURCE was exhausted, not merely
+                    # that our own post-filter discarded most of a full page.
+                    property_types=(
+                        set(_RESIDENTIAL_TYPES) if apply_residential_filter
+                        else ({sparql_property_type} if sparql_property_type else None)
+                    ),
+                    transaction_category=transaction_category,
+                    limit=limit,
+                    order_desc=True,
+                )
+            except SnapshotFailure as exc:
+                warnings.append(fallback_warning(exc))
+            else:
+                warnings.extend(decision.warnings)
+
+                def _provenance(count: int, gathered: tuple[str, ...]):
+                    return snapshot_provenance(
+                        adapter, decision=decision, sample_count=count,
+                        sample_limit=limit,
+                        completeness_basis=page.completeness_basis,
+                        warnings=gathered)
+
+                return list(page.transactions), _provenance, True
+
+        live = self.client.search_with_evidence(
+            postcode=exact_postcode,
+            postcode_prefix=prefix,
+            from_date=from_date,
+            property_type=sparql_property_type,
+            transaction_category=transaction_category,
+            limit=limit,
+            order_desc=True,
+        )
+        transactions = live.transactions
+
+        # Containment and exhaustion are independent facts, reported separately.
+        # An earlier version reported containment only inside the exhausted
+        # branch while calling the page "saturated" -- a contradiction that meant
+        # the message could never appear when it was true.
+        if live.contained_out:
+            warnings.append(
+                f"{live.contained_out} out-of-area row(s) returned by the upstream "
+                "were removed by geography containment"
+            )
+        if live.evidence.source_exhausted is not True:
+            warnings.append(
+                "result may be incomplete: the upstream window was not exhausted, "
+                "so thin_market reflects the returned sample rather than the market"
+            )
+
+        # The live path cannot push the residential set down, so it filters here
+        # -- which is exactly why its completeness evidence is untrustworthy.
+        if apply_residential_filter:
+            transactions = [t for t in transactions
+                            if t.property_type in _RESIDENTIAL_TYPES]
+
+        def _live_provenance(count: int, gathered: tuple[str, ...]):
+            return live_provenance(
+                evidence=live.evidence, sample_count=count, sample_limit=limit,
+                warnings=gathered)
+
+        return transactions, _live_provenance, False
 
     def _subject_property_lookup(
         self, postcode: str, address: str
@@ -484,6 +711,11 @@ class PPDService:
             last_sale=first,
             transaction_count=len(transactions),
             transaction_history=transactions,
+            # Its own block. A property's history routinely predates snapshot
+            # coverage, so this is always live -- and a mixed-source response
+            # that labelled both halves `snapshot` would misstate one of them.
+            provenance=live_provenance(sample_count=len(transactions),
+                                       sample_limit=50),
         )
 
     @staticmethod
@@ -526,7 +758,42 @@ class PPDService:
     ) -> Dict[str, Any]:
         """Fetch a single transaction record and normalize the result.
 
-        Returns dict with keys: record (PPDTransactionRecord), raw (optional).
+        Returns dict with keys: record (PPDTransactionRecord), raw (optional),
+        provenance.
+
+        **Always Linked Data, never the snapshot.** An exact id is a request for
+        one specific transaction, which is frequently older than snapshot
+        coverage; routing it to a bounded source would turn "here it is" into
+        "not found" for every pre-coverage sale. This is also the remedy the
+        coverage error points callers at, so it has to keep working.
         """
         record = self.client.get_transaction_record(transaction_id, view=view)
-        return {"record": record, "raw": record.raw if include_raw else None}
+        return {
+            "record": record,
+            "raw": record.raw if include_raw else None,
+            # One record, fetched by id: the sample is the record, and the
+            # lookup is exhaustive by construction.
+            "provenance": live_provenance(
+                source=SourceKind.LINKED_DATA, sample_count=1, sample_limit=1),
+        }
+
+
+def _older_records_warnings(older: Optional[bool], coverage_from: Optional[str],
+                            coverage_to: Optional[str]) -> tuple[str, ...]:
+    """What an empty in-coverage result is allowed to say (spec 2.4).
+
+    Asymmetric on purpose. `False` is the only value that licenses a bare empty
+    result, because it is the only one backed by a probe that completed. `True`
+    and `None` both warn, and neither response may read as "never sold".
+    """
+    if older is True:
+        return (
+            f"no sales within coverage {coverage_from}..{coverage_to}; earlier "
+            f"records exist outside coverage",
+        )
+    if older is None:
+        return (
+            "coverage probe unavailable; cannot determine whether earlier "
+            "records exist outside coverage",
+        )
+    return ()
