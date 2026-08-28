@@ -76,6 +76,16 @@ coverage take effect only once a snapshot is enabled and materialized.
 - **Every typed snapshot failure falls back to the live source** and says so in
   a warning. A coverage refusal and a malformed postcode are not snapshot
   failures and are never softened into a live retry.
+- **The whole requested interval is checked against coverage, not just its
+  start.** A range disjoint from coverage — one beginning after `coverage_to`,
+  or ending before `coverage_from` — is refused with a remedy naming the
+  boundary that was crossed. A range extending past `coverage_to`, which
+  includes every request with no `to_date`, is clamped to `coverage_to` with a
+  warning naming what was excluded. On bounded-`months` surfaces a disjoint
+  window is a `snapshot_coverage_gap` failure and the live source answers,
+  because the caller never chose that window.
+- **`offset` is honoured on the snapshot path.** Paging is exact — the ordering
+  is total, so successive pages neither repeat nor omit a row.
 
 ### Added
 
@@ -135,7 +145,23 @@ coverage take effect only once a snapshot is enabled and materialized.
   is `true` only with a stated `completeness_basis`: `limit_plus_one` from the
   snapshot adapter, or `source_exhausted` from an explicit transport-layer
   observation. `sample_count = 3` against `sample_limit = 5` is legitimately
-  incomplete.
+  incomplete. It is additionally **scoped to the requested interval** — an
+  interval reaching past either coverage bound was only partly searched — and is
+  **withdrawn whenever `offset > 0`**, because a short final page says the page
+  ended, not that the pages skipped over were examined. Both withdrawals happen
+  where the block is built, so no call site can omit one.
+- **Every Parquet partition is validated individually** before the union view
+  exists. `union_by_name` fills a column a partition lacks with NULLs, so a
+  single partition missing `outcode` passed a check over the combined view,
+  silently contributed no rows to any outcode search, and the short result was
+  then reported as exhaustive — a whole year of sales gone, with the response
+  saying nothing was missing.
+- **Coverage metadata is a routing precondition.** Both bounds must be present,
+  valid ISO dates and correctly ordered, and `provisional_from` must lie inside
+  them; anything else is a typed `snapshot_metadata_invalid` failure and the
+  caller uses live. A record with no bounds previously answered a 1995 request
+  from an eleven-year snapshot, reported null coverage, and claimed the sample
+  was complete.
 - **DuckDB snapshot adapter** (`property_core.snapshot.adapter`) — the layer that
   turns a structurally verified snapshot into a routable one. Before it answers
   anything it validates the column schema and types, checks the row count
@@ -173,6 +199,14 @@ coverage take effect only once a snapshot is enabled and materialized.
   and binds to `.../ppi/add`. The honest reason is that it is not yet supported
   under the verified binding and performance contract. It is now rejected before
   routing, so the snapshot path gives the same explanation and remedy as live.
+- **The HM Land Registry attribution statement was emitting the wrong year.**
+  `hmlr_attribution()` substituted the current year, so it rendered "2026". The
+  year is part of the wording HM Land Registry prescribes, not a copyright
+  notice for today: the required statement pins **2021**, as the frozen
+  specification quotes it and as the Price Paid Data downloads page states
+  (checked 2026-08-28). Now a fixed constant, with the runtime value pinned in
+  test alongside the specification — the existing test checked only the
+  specification, which is how the wrong year passed review.
 - **CLI JSON output is parseable again.** `_echo_json` went through rich's
   `print`, which soft-wraps at the terminal width, so a long value — a coverage
   warning, say — came out with a newline inserted mid-string and the document no

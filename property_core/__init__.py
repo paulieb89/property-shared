@@ -15,7 +15,11 @@ from property_core.interpret import (
 )
 from property_core.companies_house_client import CompaniesHouseClient
 from property_core.config import ppd_snapshot_enabled
-from property_core.attribution import HMLR_LICENCE_URL, hmlr_attribution
+from property_core.attribution import (
+    HMLR_ATTRIBUTION,
+    HMLR_LICENCE_URL,
+    hmlr_attribution,
+)
 from property_core.exceptions import (
     InvalidPostcodeError,
     PPDCoverageError,
@@ -97,6 +101,7 @@ __all__ = [
     "ATTRIBUTION_REF",
     "CompletenessBasis",
     "CoveragePolicy",
+    "HMLR_ATTRIBUTION",
     "HMLR_LICENCE_URL",
     "InvalidPostcodeError",
     "PPDCoverageError",

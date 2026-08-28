@@ -26,7 +26,7 @@ from property_core.provenance import (  # noqa: E402
 #: it from the same source would let a corrupted constant pass this test.
 REQUIRED_ATTRIBUTION = (
     "Contains HM Land Registry data © Crown copyright and database right "
-    "2026. This data is licensed under the Open Government Licence v3.0."
+    "2021. This data is licensed under the Open Government Licence v3.0."
 )
 
 
@@ -73,14 +73,34 @@ def test_live_sparql_may_claim_completeness_only_on_observed_exhaustion(live_onl
 
 
 def test_snapshot_exhaustion_establishes_completeness(snapshot_routing):
-    """Spec test 21b, end to end through the service."""
+    """Spec test 21b, end to end through the service.
+
+    The window is named explicitly and sits inside coverage. That matters: the
+    adapter's `limit + 1` evidence covers what it searched, so it can only
+    establish completeness for an interval that was entirely searchable.
+    """
     from property_core.ppd_service import PPDService
 
     result = PPDService().search_transactions(postcode=None, postcode_prefix="M3 7",
-                                              limit=50)
+                                              from_date="2016-01-01",
+                                              to_date="2026-06-30", limit=50)
     provenance = result["provenance"]
     assert provenance.sample_complete is True
     assert provenance.completeness_basis is CompletenessBasis.LIMIT_PLUS_ONE
+
+
+def test_the_same_query_open_ended_is_not_complete(snapshot_routing):
+    """No `to_date` means "up to now", and now is past `coverage_to`.
+
+    Same postcode, same limit, same exhausted page -- and honestly incomplete,
+    because part of what was asked for lies outside the snapshot entirely.
+    """
+    from property_core.ppd_service import PPDService
+
+    result = PPDService().search_transactions(postcode=None, postcode_prefix="M3 7",
+                                              from_date="2016-01-01", limit=50)
+    assert result["provenance"].sample_complete is False
+    assert result["provenance"].completeness_basis is None
 
 
 def test_snapshot_result_at_the_limit_is_incomplete(snapshot_routing):

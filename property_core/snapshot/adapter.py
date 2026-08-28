@@ -26,6 +26,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
+from datetime import date
 from typing import Any, Iterable, Optional, Sequence
 
 from property_core.models.ppd import PPDTransaction
@@ -37,6 +38,7 @@ from property_core.postcode_rules import (
 from property_core.provenance import CompletenessBasis
 from property_core.snapshot.duckdb_support import require_duckdb
 from property_core.snapshot.errors import (
+    SnapshotMetadataError,
     SnapshotNotQueryableError,
     SnapshotQueryError,
     SnapshotRowCountError,
@@ -72,6 +74,9 @@ class SnapshotPage:
     transactions: list[PPDTransaction]
     exhausted: bool
     fetch_limit: int
+    #: The offset this page started at. `exhausted` is scoped to the page, so a
+    #: non-zero offset means it cannot speak for the whole matching set.
+    offset: int = 0
     completeness_basis: Optional[CompletenessBasis] = None
 
 
@@ -186,6 +191,16 @@ class SnapshotAdapter:
         return self.record.verified_at
 
     # -- validation -----------------------------------------------------
+    @staticmethod
+    def _quote(path: str) -> str:
+        """A SQL string literal for a path we produced ourselves.
+
+        These come from our own rglob over the verified directory, never from a
+        caller. Quotes are still escaped so an odd filename on disk cannot break
+        out of the literal.
+        """
+        return "'" + path.replace("'", "''") + "'"
+
     def _connect(self) -> None:
         duckdb = require_duckdb("the PPD snapshot adapter")
         files = sorted(str(p) for p in self.directory.rglob("*.parquet"))
@@ -194,16 +209,21 @@ class SnapshotAdapter:
                 f"no parquet files under {self.directory}")
         self._files = tuple(files)
         self._connection = duckdb.connect()
+
+    def _create_view(self) -> None:
         # `hive_partitioning=false`: the build lays partitions out as
         # `year=<YYYY>/`, and letting DuckDB synthesise a `year` column from the
         # directory name would collide with the real column the build projects.
-        # `union_by_name` so an added column in one partition cannot fail the
-        # scan -- the schema gate is what decides whether the shape is usable.
-        # DDL cannot take a prepared parameter, so the file list is inlined.
-        # These paths come from our own rglob over the verified directory, never
-        # from a caller; single quotes are still escaped so an odd filename on
-        # disk cannot break out of the literal.
-        listed = ", ".join("'" + f.replace("'", "''") + "'" for f in self._files)
+        #
+        # `union_by_name=true` is safe ONLY because every partition has already
+        # been validated individually. On its own it is actively dangerous: it
+        # fills a column one partition lacks with NULLs, so a partition missing
+        # `outcode` passes a check over the combined view, silently contributes
+        # no rows to any outcode search, and the short result is then reported
+        # as exhaustive. A whole year of sales disappears and the response says
+        # nothing is missing. With the per-file gate ahead of it, all it now
+        # tolerates is a partition carrying EXTRA columns.
+        listed = ", ".join(self._quote(f) for f in self._files)
         try:
             self._execute(
                 f"CREATE VIEW {VIEW} AS SELECT * FROM read_parquet([{listed}], "
@@ -219,30 +239,84 @@ class SnapshotAdapter:
             ) from exc
 
     def _validate(self) -> None:
-        self._validate_schema()
+        # Order matters. Every partition is checked on its own BEFORE the union
+        # exists, because the union is what hides a partition-level defect.
+        self._validate_coverage()
+        for path in self._files:
+            self._validate_partition(path)
+        self._create_view()
+        self._validate_schema(f"SELECT * FROM {VIEW}", source="the combined view")
         self._validate_row_count()
         self._validate_queryable()
 
-    def _validate_schema(self) -> None:
+    def _validate_coverage(self) -> None:
+        """Coverage metadata must be sound before it can decide anything.
+
+        Routing answers every coverage question from these three fields -- what
+        to refuse, what to narrow, what a warning says. Absent or contradictory
+        bounds do not degrade those decisions, they remove them silently, so an
+        unusable record is a typed failure and the caller uses the live source.
+        """
+        def _parsed(value: Optional[str], field: str) -> date:
+            if value is None:
+                raise SnapshotMetadataError(
+                    f"snapshot declares no {field}; routing cannot state what "
+                    f"coverage it is answering within",
+                    field=field,
+                )
+            try:
+                return date.fromisoformat(value)
+            except (TypeError, ValueError) as exc:
+                raise SnapshotMetadataError(
+                    f"snapshot {field} {value!r} is not an ISO date", field=field
+                ) from exc
+
+        coverage_from = _parsed(self.record.coverage_from, "coverage_from")
+        coverage_to = _parsed(self.record.coverage_to, "coverage_to")
+        if coverage_from > coverage_to:
+            raise SnapshotMetadataError(
+                f"snapshot coverage is inverted: coverage_from "
+                f"{self.record.coverage_from} is after coverage_to "
+                f"{self.record.coverage_to}",
+                field="coverage_from",
+            )
+
+        provisional = self.record.provisional_from
+        if provisional is not None:
+            boundary = _parsed(provisional, "provisional_from")
+            if not (coverage_from <= boundary <= coverage_to):
+                raise SnapshotMetadataError(
+                    f"snapshot provisional_from {provisional} is outside coverage "
+                    f"{self.record.coverage_from}..{self.record.coverage_to}; a "
+                    f"provisional tail that is not inside the data marks nothing",
+                    field="provisional_from",
+                )
+
+    def _validate_partition(self, path: str) -> None:
+        """One Parquet file, on its own terms. See `_create_view` for why."""
+        self._validate_schema(f"SELECT * FROM read_parquet({self._quote(path)})",
+                              source=path)
+
+    def _validate_schema(self, relation: str, *, source: str) -> None:
         try:
-            described = self._execute(f"DESCRIBE SELECT * FROM {VIEW}").fetchall()
+            described = self._execute(f"DESCRIBE {relation}").fetchall()
         except Exception as exc:
             raise SnapshotNotQueryableError(
-                f"snapshot could not be described: {type(exc).__name__}: {exc}"
+                f"{source} could not be described: {type(exc).__name__}: {exc}"
             ) from exc
 
         found = {str(row[0]): normalise_type(str(row[1])) for row in described}
         for column, accepted in REQUIRED_COLUMNS.items():
             if column not in found:
                 raise SnapshotSchemaError(
-                    f"snapshot is missing required column {column!r}; routing "
+                    f"{source} is missing required column {column!r}; routing "
                     f"cannot answer a query it has no column for",
                     column=column,
                 )
             if found[column] not in accepted:
                 raise SnapshotSchemaError(
-                    f"column {column!r} has type {found[column]}, expected one "
-                    f"of {sorted(accepted)}",
+                    f"{source}: column {column!r} has type {found[column]}, "
+                    f"expected one of {sorted(accepted)}",
                     column=column,
                 )
 
@@ -299,6 +373,7 @@ class SnapshotAdapter:
         transaction_category: Optional[str] = None,
         new_build: Optional[bool] = None,
         limit: int = 20,
+        offset: int = 0,
         order_desc: bool = True,
     ) -> SnapshotPage:
         """Rows matching the filters, plus completeness evidence.
@@ -307,6 +382,13 @@ class SnapshotAdapter:
         is what makes `limit + 1` mean what it says: a short answer proves the
         source was exhausted, not merely that our own post-filter discarded a
         lot.
+
+        `offset` is honoured. Unlike the live path, paging here is exact: the
+        ORDER BY is total (date, then transaction id), so successive pages
+        neither repeat nor omit a row. `exhausted` still describes only the page
+        that was fetched -- a short final page says nothing about the pages
+        skipped over, so the caller must not read it as whole-sample
+        completeness.
         """
         where: list[str] = []
         params: list[Any] = []
@@ -350,6 +432,7 @@ class SnapshotAdapter:
             params.append(bool(new_build))
 
         limit = max(1, int(limit))
+        offset = max(0, int(offset))
         # One more than asked for. The extra row is evidence, never data.
         fetch_limit = limit + 1
         direction = "DESC" if order_desc else "ASC"
@@ -359,7 +442,7 @@ class SnapshotAdapter:
             # transaction_id breaks same-date ties, so the order is total and
             # repeating a query cannot repeat or omit a row.
             + f" ORDER BY transfer_date {direction}, transaction_id ASC"
-            + f" LIMIT {fetch_limit}"
+            + f" LIMIT {fetch_limit} OFFSET {offset}"
         )
 
         with self._lock:
@@ -375,5 +458,6 @@ class SnapshotAdapter:
             transactions=[_row_to_transaction(r) for r in rows[:limit]],
             exhausted=exhausted,
             fetch_limit=fetch_limit,
+            offset=offset,
             completeness_basis=CompletenessBasis.LIMIT_PLUS_ONE if exhausted else None,
         )

@@ -24,7 +24,7 @@ from property_core.provenance import SourceKind  # noqa: E402
 #: Pinned literally. See the module docstring.
 REQUIRED_ATTRIBUTION = (
     "Contains HM Land Registry data © Crown copyright and database right "
-    "2026. This data is licensed under the Open Government Licence v3.0."
+    "2021. This data is licensed under the Open Government Licence v3.0."
 )
 
 

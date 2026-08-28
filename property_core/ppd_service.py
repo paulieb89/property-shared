@@ -147,13 +147,16 @@ class PPDService:
 
         adapter = self._active_adapter()
         if adapter is not None:
-            # A coverage refusal and a caller error both propagate: neither is a
-            # snapshot failure, and retrying either against live would hide the
-            # fact the caller needs.
-            decision = resolve_coverage(
-                adapter, from_date=from_date, to_date=to_date,
-                policy=CoveragePolicy.EXPLICIT)
             try:
+                # Inside the try on purpose. `resolve_coverage` can raise a
+                # SnapshotCoverageGapError, which belongs to the fallback
+                # taxonomy; PPDCoverageError and InvalidPostcodeError do not
+                # subclass SnapshotFailure and so still reach the caller, which
+                # is the point -- retrying either against live would hide the
+                # fact the caller needs.
+                decision = resolve_coverage(
+                    adapter, from_date=from_date, to_date=to_date,
+                    policy=CoveragePolicy.EXPLICIT)
                 page = adapter.search(
                     postcode=postcode,
                     postcode_prefix=postcode_prefix,
@@ -166,6 +169,7 @@ class PPDService:
                     transaction_category=transaction_category,
                     new_build=new_build,
                     limit=limit,
+                    offset=offset,
                     order_desc=order_desc,
                 )
             except SnapshotFailure as exc:
@@ -174,7 +178,13 @@ class PPDService:
                 results = page.transactions
                 warnings.extend(decision.warnings)
                 older = None
-                if not results and decision.narrowed and adapter.coverage_from:
+                # `from_narrowed`, NOT `narrowed`: the probe asks whether
+                # anything exists BEFORE coverage begins, which is only a
+                # question for a caller who did not choose the lower bound. A
+                # caller who named `from_date` already excluded that period
+                # deliberately, and an upstream request to tell them so is noise.
+                if (not results and decision.from_narrowed and offset == 0
+                        and adapter.coverage_from):
                     # No probe when there ARE rows: the question is already
                     # answered, and a probe would be a second upstream call
                     # for nothing (spec test 13).
@@ -193,7 +203,7 @@ class PPDService:
                     "raw": [t.raw for t in results] if include_raw else None,
                     "provenance": snapshot_provenance(
                         adapter, decision=decision, sample_count=len(results),
-                        sample_limit=limit,
+                        sample_limit=limit, offset=offset,
                         completeness_basis=page.completeness_basis,
                         older_records_exist=older, warnings=tuple(warnings)),
                 }
@@ -553,9 +563,13 @@ class PPDService:
         """
         adapter = self._active_adapter()
         if adapter is not None:
-            decision = resolve_coverage(
-                adapter, from_date=from_date, to_date=None, policy=coverage_policy)
             try:
+                # Inside the try: a window the snapshot cannot reach raises
+                # SnapshotCoverageGapError, and comps must still answer -- from
+                # the live source, with a warning, like any snapshot failure.
+                decision = resolve_coverage(
+                    adapter, from_date=from_date, to_date=None,
+                    policy=coverage_policy)
                 page = adapter.search(
                     postcode=exact_postcode,
                     postcode_prefix=prefix,

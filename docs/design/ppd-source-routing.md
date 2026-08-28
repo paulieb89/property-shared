@@ -1,7 +1,12 @@
-# PPD source-routing and implementation specification (rev 5 — FROZEN)
+# PPD source-routing and implementation specification (rev 6 — FROZEN)
 
-**Status:** **FROZEN.** Accepted. No further architecture work. Changes to this
-document require a new decision round, not an edit in passing.
+**Status:** **FROZEN at rev 6.** Accepted. No further architecture work. Changes
+to this document require a new decision round, not an edit in passing.
+
+**Revision 6** was authorised by the PR 4 review, which found that §2.5 checked
+only the lower coverage bound. It adds the disjoint and extends-past cases, the
+guaranteed-surface gap fallback (§2.5), the completeness scoping rule (§3.1.1a),
+and the coverage-metadata precondition (§2.5.1). No other section changed.
 
 **Implementation status.** Implemented by **PR 1**: this specification, the
 provenance and transport-evidence models, the protocol-neutral exception types,
@@ -185,14 +190,67 @@ No response may state or imply "never sold" while `older_records_exist` is `null
 
 ### 2.5 Explicit out-of-coverage dates — decision O2
 
+**Amended after PR 4 review (rev 6).** Rev 5 specified only the *lower* bound.
+That left a request for a period entirely after `coverage_to` — next month, say
+— running against the snapshot, matching nothing, and returning an empty result
+marked `sample_complete: true`: a confident statement that no such sales exist,
+made by a source that could not have known. **The whole interval is checked.**
+
 For surfaces taking explicit dates (`/v1/ppd/transactions`, `/v1/ppd/blocks` via
 `months`, and CLI equivalents), evaluated in order:
 
 1. Requested range inside coverage → SNAPSHOT, `source: "snapshot"`.
-2. Range starts before `coverage_from` → **HTTP 422, typed, structured. Never a
-   partial 200 that looks complete.**
-3. No `from_date` → treated as `coverage_from`, with warning
+2. **Range disjoint from coverage** — it starts after `coverage_to`, or ends
+   before `coverage_from` → **HTTP 422, typed, structured.** The remedy names
+   the boundary that was crossed; telling a caller who asked for next month to
+   "set `from_date >= coverage_from`" is advice that cannot work.
+3. Range starts before `coverage_from` (overlapping) → **HTTP 422, typed,
+   structured. Never a partial 200 that looks complete.**
+4. No `from_date` → treated as `coverage_from`, with warning
    `"unbounded from_date narrowed to snapshot coverage"`.
+5. **Range extends past `coverage_to`** — including every request with no
+   `to_date`, since that means "up to now" → the queried window is **clamped to
+   `coverage_to`**, a warning names what was excluded, and the response
+   **may not claim completeness** (§3.1.1a). This is deliberately not a refusal:
+   the overlap is a useful answer, and refusing every open-ended request would
+   make the snapshot unusable.
+
+**Guaranteed surfaces differ only in case 2 and 3.** Their `months` is bounded
+and the snapshot is sized for the maximum, so a window reaching past coverage
+means a *stale snapshot*, not a request the caller got wrong:
+
+* starts before `coverage_from` → narrow to `coverage_from` and warn;
+* **disjoint from coverage** → a typed `snapshot_coverage_gap` failure, which
+  routes to the **live source** with a warning. A refusal would blame the caller
+  for a window they never chose; an empty result would be a false claim.
+
+### 3.1.1a `sample_complete` is scoped to the requested interval
+
+`sample_complete` may be `true` **only when the caller's entire requested
+interval lies inside `[coverage_from, coverage_to]`.** The adapter's
+`limit_plus_one` evidence is a fact about what it searched; where part of the
+requested window was never in the snapshot, exhausting the remainder proves
+nothing about the rest.
+
+Likewise **`offset > 0` withdraws the basis.** A short final page establishes
+that the page ended, not that the pages skipped over were examined, and
+`sample_complete` is a claim about the whole matching set.
+
+Both withdrawals happen centrally, where the provenance block is built, so no
+call site can omit one.
+
+### 2.5.1 Coverage metadata is a routing precondition
+
+Routing answers every coverage question from `coverage_from`, `coverage_to` and
+`provisional_from`. Absent or contradictory values do not degrade those answers,
+they **remove them silently**: a verification record with no bounds answered a
+1995 request from an eleven-year snapshot, reported null coverage, and claimed
+the sample was complete.
+
+Before the adapter may route, it requires **both bounds present, valid ISO
+dates, and correctly ordered**, and `provisional_from` — if present — inside
+them. Anything else is a typed `snapshot_metadata_invalid` failure and the
+caller uses the live source.
 
 ```json
 { "error": "ppd_coverage_error",

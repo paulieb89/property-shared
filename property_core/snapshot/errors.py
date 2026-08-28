@@ -154,3 +154,39 @@ class SnapshotQueryError(SnapshotFailure):
 
     code = "snapshot_query_failed"
     retryable = True
+
+
+class SnapshotMetadataError(SnapshotFailure):
+    """Coverage metadata that routing cannot answer coverage questions from.
+
+    Routing decides what to refuse, what to narrow, and what a warning must say
+    entirely from `coverage_from`/`coverage_to`/`provisional_from`. Missing,
+    unparseable or contradictory bounds do not degrade those decisions -- they
+    silently remove them: a record with no bounds answered a 1995 request from an
+    eleven-year snapshot, reported null coverage, and claimed the sample was
+    complete. Rejected before routing, so the caller gets the live source.
+    """
+
+    code = "snapshot_metadata_invalid"
+    retryable = False
+
+    def __init__(self, detail: str, *, field: str = ""):
+        self.field = field
+        super().__init__(detail)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**super().to_dict(), "field": self.field}
+
+
+class SnapshotCoverageGapError(SnapshotFailure):
+    """The snapshot holds nothing in the window this surface must answer.
+
+    Distinct from `PPDCoverageError`, and the distinction is who the answer is
+    for. A caller who named dates outside coverage gets a refusal they can act
+    on. A caller of a bounded-`months` surface named no dates at all -- the
+    window was derived for them -- so refusing would blame them for a stale
+    snapshot. This is a snapshot failure, and the live source answers.
+    """
+
+    code = "snapshot_coverage_gap"
+    retryable = True

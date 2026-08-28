@@ -47,6 +47,7 @@ class PPDCoverageError(PPDError):
         requested_to: Optional[str] = None,
         source_release: Optional[str] = None,
         detail: str = "requested range precedes available coverage",
+        remedy: Optional[str] = None,
     ):
         if not coverage_from or not coverage_to:
             raise ValueError(
@@ -58,6 +59,13 @@ class PPDCoverageError(PPDError):
         self.requested_from = requested_from
         self.requested_to = requested_to
         self.source_release = source_release
+        # The remedy differs by which boundary was crossed. Telling a caller who
+        # asked for next month to "set from_date >= 2016-01-01" is advice that
+        # cannot work, and advice that cannot work is worse than none.
+        self.remedy = remedy or (
+            f"set from_date >= {coverage_from}, or look up a known transaction "
+            f"by its id"
+        )
         super().__init__(detail)
 
     def to_dict(self) -> dict[str, Any]:
@@ -71,10 +79,7 @@ class PPDCoverageError(PPDError):
             },
             "source_release": self.source_release,
             "retryable": self.retryable,
-            "remedy": (
-                f"set from_date >= {self.coverage_from}, or look up a known "
-                f"transaction by its id"
-            ),
+            "remedy": self.remedy,
         }
 
 

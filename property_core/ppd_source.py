@@ -62,8 +62,26 @@ class CoverageDecision:
     from_date: Optional[str]
     to_date: Optional[str]
     warnings: tuple[str, ...]
-    narrowed: bool
+    #: The caller gave no `from_date`, so the lower bound became `coverage_from`.
+    #: Kept separate from `to_clamped` because only this one licenses the
+    #: existence probe: the probe asks whether records exist BEFORE coverage,
+    #: which is a question only a caller who did not choose the lower bound is
+    #: asking. Conflating the two fired a probe -- an upstream request -- on
+    #: every request that merely ran up to the present.
+    from_narrowed: bool
+    #: The requested window reached past `coverage_to` and was clamped to it.
+    to_clamped: bool
     recent_period_provisional: bool
+    #: Whether the caller's ENTIRE requested interval lies inside coverage.
+    #: `sample_complete` may only be true when this is -- see
+    #: `snapshot_provenance`. An interval that reaches past either bound was
+    #: only partly answered, however exhaustively the overlap was searched.
+    fully_contained: bool = False
+
+    @property
+    def narrowed(self) -> bool:
+        """Whether the queried window differs from the requested one, either end."""
+        return self.from_narrowed or self.to_clamped
 
 
 def active_adapter() -> Optional[Any]:
@@ -103,20 +121,78 @@ def resolve_coverage(
     to_date: Optional[str],
     policy: CoveragePolicy,
 ) -> CoverageDecision:
-    """Decide the queried window, or refuse. Raises `PPDCoverageError`."""
+    """Decide the queried window over the COMPLETE interval, or refuse.
+
+    Both bounds are checked. Testing only the lower one let a request for a
+    period entirely *after* `coverage_to` -- next month, say -- run against the
+    snapshot, match nothing, and come back as an empty result marked complete:
+    a confident statement that no such sales exist, made by a source that could
+    not have known.
+
+    Four cases, in order:
+
+    1. **Disjoint** -- the interval and coverage do not overlap at all. Under
+       EXPLICIT this is a typed refusal naming the boundary that was crossed;
+       under GUARANTEED it is a `SnapshotCoverageGapError`, so the live source
+       answers. The difference is who chose the dates: an EXPLICIT caller can
+       act on a refusal, while a GUARANTEED caller never named a window and
+       would just be blamed for a stale snapshot.
+    2. **Starts before coverage** -- refuse (EXPLICIT) or narrow and warn
+       (GUARANTEED, whose `months` is bounded and whose snapshot is sized for
+       the maximum).
+    3. **No `from_date`** -- narrow to `coverage_from` and warn. Silently
+       turning "all time" into eleven years is the lie this exists to prevent.
+    4. **Extends past `coverage_to`** (including every request with no
+       `to_date`, since that means "up to now") -- clamp to `coverage_to`, warn
+       naming what was excluded, and record that the interval was NOT fully
+       contained, which forbids any completeness claim.
+
+    Raises `PPDCoverageError` or `SnapshotCoverageGapError`.
+    """
+    from property_core.snapshot.errors import SnapshotCoverageGapError
+
     coverage_from = adapter.coverage_from
     coverage_to = adapter.coverage_to
     warnings: list[str] = []
-    narrowed = False
+    from_narrowed = False
+    to_clamped = False
     resolved_from = from_date
+    resolved_to = to_date
 
+    # The adapter's metadata gate guarantees both bounds are present, ordered
+    # ISO dates before it will route, so there is no "unknown coverage" branch
+    # here. If that gate is ever loosened, this falls back to serving the window
+    # verbatim rather than inventing bounds.
     if coverage_from and coverage_to:
+        starts_after_coverage = from_date is not None and from_date > coverage_to
+        ends_before_coverage = to_date is not None and to_date < coverage_from
+
+        if starts_after_coverage or ends_before_coverage:
+            side = "follows" if starts_after_coverage else "precedes"
+            if policy is CoveragePolicy.EXPLICIT:
+                raise PPDCoverageError(
+                    coverage_from=coverage_from,
+                    coverage_to=coverage_to,
+                    requested_from=from_date,
+                    requested_to=to_date,
+                    source_release=adapter.version,
+                    detail=f"requested range {side} available coverage entirely",
+                    remedy=(
+                        f"request a range within {coverage_from}..{coverage_to}; "
+                        f"sales after {coverage_to} are not yet in this release"
+                        if starts_after_coverage else
+                        f"request a range within {coverage_from}..{coverage_to}, "
+                        f"or look up a known transaction by its id"
+                    ),
+                )
+            raise SnapshotCoverageGapError(
+                f"snapshot coverage {coverage_from}..{coverage_to} does not "
+                f"overlap the requested window {from_date}..{to_date}"
+            )
+
         if from_date is None:
-            # "No start date" means "all time" on the live source and "coverage"
-            # here. Narrowing silently would turn 31 years into 11 without
-            # telling anyone.
             resolved_from = coverage_from
-            narrowed = True
+            from_narrowed = True
             warnings.append(
                 f"unbounded from_date narrowed to snapshot coverage "
                 f"{coverage_from}")
@@ -130,10 +206,18 @@ def resolve_coverage(
                     source_release=adapter.version,
                 )
             resolved_from = coverage_from
-            narrowed = True
+            from_narrowed = True
             warnings.append(
                 f"requested window starts {from_date}, before snapshot coverage; "
                 f"narrowed to {coverage_from}")
+
+        if to_date is None or to_date > coverage_to:
+            resolved_to = coverage_to
+            to_clamped = True
+            warnings.append(
+                f"requested window extends to "
+                f"{to_date or 'the present'}, beyond snapshot coverage "
+                f"{coverage_to}; sales after {coverage_to} are not included")
 
         age = freshness_days(coverage_to)
         if age is not None and age > FRESHNESS_WARNING_DAYS:
@@ -141,8 +225,14 @@ def resolve_coverage(
                 f"snapshot is {age} days behind its coverage end {coverage_to}; "
                 f"recent sales may be missing")
 
+    fully_contained = bool(
+        coverage_from and coverage_to
+        and from_date is not None and from_date >= coverage_from
+        and to_date is not None and to_date <= coverage_to
+    )
+
     provisional = _intersects_provisional(
-        adapter, from_date=resolved_from, to_date=to_date)
+        adapter, from_date=resolved_from, to_date=resolved_to)
     if provisional:
         warnings.append(
             f"the window overlaps the provisional period from "
@@ -151,10 +241,12 @@ def resolve_coverage(
 
     return CoverageDecision(
         from_date=resolved_from,
-        to_date=to_date,
+        to_date=resolved_to,
         warnings=tuple(warnings),
-        narrowed=narrowed,
+        from_narrowed=from_narrowed,
+        to_clamped=to_clamped,
         recent_period_provisional=provisional,
+        fully_contained=fully_contained,
     )
 
 
@@ -182,6 +274,7 @@ def snapshot_provenance(
     sample_count: int,
     sample_limit: int,
     completeness_basis: Optional[CompletenessBasis],
+    offset: int = 0,
     older_records_exist: Optional[bool] = None,
     warnings: Iterable[str] = (),
 ) -> PPDProvenance:
@@ -190,7 +283,21 @@ def snapshot_provenance(
     `sample_complete` is derived from `completeness_basis` rather than passed
     alongside it, so the pair cannot disagree: a basis means complete, no basis
     means not complete, and there is no third spelling.
+
+    **Two things withdraw the basis here, centrally, so no call site can forget
+    them.** The adapter's `limit + 1` evidence is a fact about the page it
+    fetched, and a page is not the sample when either holds:
+
+    * the requested interval was not fully inside coverage -- part of what was
+      asked for was never searched, so exhausting the rest proves nothing about
+      it;
+    * `offset > 0` -- a short final page says the page ended, not that the pages
+      skipped over were seen.
     """
+    basis = completeness_basis
+    if basis is not None and (not decision.fully_contained or offset > 0):
+        basis = None
+    completeness_basis = basis
     return PPDProvenance(
         source=SourceKind.SNAPSHOT,
         source_release=adapter.version,
