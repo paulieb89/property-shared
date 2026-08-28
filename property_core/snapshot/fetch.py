@@ -30,22 +30,30 @@ DEFAULT_CHUNK_SIZE = 1024 * 1024
 #: snapshot is ~214 MiB, so this leaves roughly 4.8x margin.
 DEFAULT_MAX_BUNDLE_BYTES = 1 * 1024 ** 3
 
-#: Whole-transfer budget. A download that never finishes is a boot that never
-#: finishes, and readiness would hang instead of falling back to the live source.
+#: Whole-transfer budget, evaluated BETWEEN reads. A download that never
+#: finishes is a boot that never finishes, and readiness would hang instead of
+#: falling back to the live source.
+#:
+#: This bounds total wall time only as tightly as the reads are themselves
+#: bounded. `HttpObjectSource` uses `read1`, which returns after one underlying
+#: socket read, so the budget is evaluated at real intervals. A source whose
+#: `read()` loops internally -- plain `HTTPResponse.read(n)` does -- could keep a
+#: single call active past this budget, and it would then be detected on return
+#: rather than enforced at the limit.
 DEFAULT_TOTAL_DEADLINE_SECONDS = 300.0
 
 #: Post-read stall DETECTION budget.
 #:
-#: This is not an interrupt and does not bound how long a read may block:
-#: ``stream.read()`` is synchronous, and the elapsed time can only be inspected
-#: once it returns. A read that blocks for ten minutes is detected after ten
-#: minutes, not aborted at this limit.
+#: Not an interrupt, and it does not bound how long a read may block:
+#: ``stream.read()`` is synchronous, so elapsed time can only be inspected once
+#: it returns. A read that blocks for ten minutes is detected after ten minutes,
+#: not aborted at this limit.
 #:
 #: **What actually bounds a blocked read is the transport's socket timeout**
-#: (`HttpObjectSource(read_timeout=...)`), which the OS enforces per socket
-#: operation. This value is the backstop for sources that cannot honour one --
-#: a local file, a test double -- and for a connection that dribbles rather than
-#: going silent.
+#: (`HttpObjectSource(socket_timeout=...)`), which the OS enforces per socket
+#: operation and which the stream translates into DownloadDeadlineExceeded. This
+#: value is the backstop for sources that cannot honour one -- a local file, a
+#: test double -- and for a connection that dribbles rather than going silent.
 DEFAULT_STALL_SECONDS = 60.0
 
 #: Free space required before the transfer starts: the bundle, plus room to

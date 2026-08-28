@@ -505,19 +505,30 @@ one undifferentiated label.
 * Bundle **streamed** to a temp file in 1 MiB chunks, SHA-256 incremental. **The
   body is never held in memory** — verified at scale: a 945.5 MiB bundle booted at
   199.5 MB peak RSS.
-* Limits: `MAX_BUNDLE_BYTES` **1 GiB** (~4.8x margin over 214 MiB); connect
+* Limits: `MAX_BUNDLE_BYTES` **1 GiB** (~4.8x margin over 214 MiB); socket
   timeout **10 s**; total download deadline **300 s**; stall detection
   **60 s**. Any breach aborts and deletes the temp file. Both time budgets are
   checked after **every** read, the one returning EOF included — checking only
   on a non-empty chunk let a read that blocked past the budget and then returned
   EOF finish successfully.
-* **What "stall detection" does and does not promise.** It is not an interrupt.
+* **One socket timeout, not separate connect and read timeouts.**
+  `urlopen(timeout=...)` takes a single value covering connection setup and every
+  blocking socket operation, so advertising two was a fiction: passing a second
+  value to the bundle request simply changed that connection's timeout as well.
+  `HttpObjectSource(socket_timeout=...)` is used for both control and bundle
+  requests, and is the only real interrupt in this design.
+* **Transport timeouts are translated into the typed taxonomy.** A socket
+  timeout surfaces as `DownloadDeadlineExceeded` with the original
+  `TimeoutError` preserved as its cause, so callers handle one taxonomy rather
+  than a bare `builtins.TimeoutError` escaping from urllib.
+* **What the time budgets do and do not promise.** Neither is an interrupt.
   `read()` is synchronous, so elapsed time can only be inspected once it
   returns: a read that blocks for ten minutes is *detected* after ten minutes,
-  not aborted at 60 s. The real per-read bound is the **transport's socket
-  timeout** (`HttpObjectSource(read_timeout=...)`), which the OS enforces on
-  each socket operation. The 60 s budget is the backstop for sources that cannot
-  honour one — a local file, a test double — and for a connection that dribbles
+  not aborted at 60 s. The bundle stream uses `read1`, which returns after one
+  underlying socket read, so the 300 s budget is evaluated at real intervals
+  rather than being deferred behind a single `read(n)` that loops internally.
+  The 60 s value remains the backstop for sources that cannot honour a socket
+  timeout — a local file, a test double — and for a connection that dribbles
   rather than going silent.
 * `Content-Length` mismatch = interrupted transfer, not a valid object.
 

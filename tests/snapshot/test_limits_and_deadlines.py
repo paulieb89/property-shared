@@ -92,7 +92,7 @@ def _spec_text() -> str:
         ("`MAX_BUNDLE_BYTES` **1 GiB**", 1 * 1024 ** 3, DEFAULT_MAX_BUNDLE_BYTES),
         ("total download deadline **300 s**", 300.0, DEFAULT_TOTAL_DEADLINE_SECONDS),
         ("stall detection **60 s**", 60.0, DEFAULT_STALL_SECONDS),
-        ("connect timeout **10 s**", 10.0, DEFAULT_TIMEOUT),
+        ("socket\n  timeout **10 s**".replace("\n  ", " "), 10.0, DEFAULT_TIMEOUT),
         ("`MAX_MEMBERS` (**5,000**", 5_000, ExtractionLimits().max_members),
         ("`MAX_TOTAL_BYTES` (**2 GiB**", 2 * 1024 ** 3,
          ExtractionLimits().max_total_bytes),
@@ -373,11 +373,15 @@ def test_stall_detection_detects_late_it_does_not_interrupt(tmp_path):
     )
 
 
-def test_the_http_transport_bounds_each_read_at_the_socket(monkeypatch):
-    """The real interrupt: urllib passes the timeout to the socket."""
+def test_one_socket_timeout_is_used_for_both_control_and_bundle_requests(monkeypatch):
+    """urlopen takes ONE timeout covering connect and every socket operation.
+
+    Advertising separate connect and read timeouts was a fiction: the second
+    value simply changed the bundle connection's timeout too.
+    """
     from property_core.snapshot import source as source_mod
 
-    seen = {}
+    seen = []
 
     class FakeResponse:
         headers = {"Content-Length": "4"}
@@ -385,27 +389,73 @@ def test_the_http_transport_bounds_each_read_at_the_socket(monkeypatch):
         def read(self, n=-1):
             return b"data"
 
+        read1 = read
+
         def close(self):
             pass
 
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *e):
+            return False
+
     def fake_urlopen(request, timeout=None):
-        seen["timeout"] = timeout
+        seen.append(timeout)
         return FakeResponse()
 
     monkeypatch.setattr(source_mod.urllib.request, "urlopen", fake_urlopen)
-    src = source_mod.HttpObjectSource("https://example.invalid", read_timeout=7.5)
+    src = source_mod.HttpObjectSource("https://example.invalid", socket_timeout=7.5)
+    src.read_bytes("current.json")
     src.open_stream("b.tar")
-    assert seen["timeout"] == 7.5, (
-        "the streaming request must carry a socket timeout; without it nothing "
-        "actually bounds a blocked read"
-    )
+    assert seen == [7.5, 7.5], seen
 
 
-def test_read_timeout_defaults_to_the_connect_timeout(monkeypatch):
+def test_the_socket_timeout_defaults_to_the_published_value():
     from property_core.snapshot import source as source_mod
 
-    src = source_mod.HttpObjectSource("https://example.invalid")
-    assert src.read_timeout == DEFAULT_TIMEOUT
+    assert source_mod.HttpObjectSource("https://x.invalid").socket_timeout == DEFAULT_TIMEOUT
+
+
+def test_there_is_no_separate_read_timeout_setting():
+    """Two settings would imply independent enforcement urllib cannot provide."""
+    import inspect
+
+    from property_core.snapshot.source import HttpObjectSource
+
+    params = inspect.signature(HttpObjectSource.__init__).parameters
+    assert "read_timeout" not in params
+    assert "socket_timeout" in params
+
+
+def test_the_bundle_stream_uses_a_bounded_read_primitive(monkeypatch):
+    """`HTTPResponse.read(n)` loops internally until it has n bytes, so a
+    dribbling server can keep one call active past the total budget. `read1`
+    returns after one underlying socket read, so the budget is evaluated at a
+    real interval."""
+    from property_core.snapshot import source as source_mod
+
+    calls = []
+
+    class FakeResponse:
+        headers = {"Content-Length": "4"}
+
+        def read(self, n=-1):
+            calls.append("read")
+            return b"data"
+
+        def read1(self, n=-1):
+            calls.append("read1")
+            return b"data"
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(source_mod.urllib.request, "urlopen",
+                        lambda request, timeout=None: FakeResponse())
+    stream = source_mod.HttpObjectSource("https://x.invalid").open_stream("b.tar")
+    stream.read(1024)
+    assert calls == ["read1"], calls
 
 
 # --- verification record constraints ---------------------------------------
@@ -443,6 +493,7 @@ def test_bundle_object_is_required_and_validated():
 @pytest.mark.parametrize(
     "mutate",
     [
+        # ordinary mutator calls
         lambda inv: inv.__setitem__("a.parquet", 999),
         lambda inv: inv.update({"b.parquet": 1}),
         lambda inv: inv.pop("a.parquet"),
@@ -450,12 +501,26 @@ def test_bundle_object_is_required_and_validated():
         lambda inv: inv.setdefault("c.parquet", 1),
         lambda inv: inv.__delitem__("a.parquet"),
         lambda inv: inv.popitem(),
+        # base-class descriptors -- a dict SUBCLASS cannot block these, which is
+        # why the evidence is a read-only mapping and not a subclass.
+        lambda inv: dict.__setitem__(inv, "a.parquet", 999),
+        lambda inv: dict.update(inv, {"b.parquet": 2}),
+        lambda inv: dict.pop(inv, "a.parquet"),
+        lambda inv: dict.clear(inv),
+        lambda inv: dict.__delitem__(inv, "a.parquet"),
+        lambda inv: dict.setdefault(inv, "c.parquet", 1),
     ],
-    ids=["setitem", "update", "pop", "clear", "setdefault", "delitem", "popitem"],
+    ids=["setitem", "update", "pop", "clear", "setdefault", "delitem", "popitem",
+         "dict.__setitem__", "dict.update", "dict.pop", "dict.clear",
+         "dict.__delitem__", "dict.setdefault"],
 )
 def test_the_inventory_cannot_be_mutated_in_place(mutate):
-    """The inventory IS the evidence is_verified compares against; frozen=True
-    only stopped rebinding the attribute, not editing the mapping."""
+    """The inventory IS the evidence is_verified compares against.
+
+    frozen=True only stopped rebinding the attribute, and a dict subclass only
+    stopped ordinary calls -- `dict.__setitem__(inv, ...)` went straight through
+    the base-class descriptor. A read-only mapping has no mutators to reach.
+    """
     from property_core.snapshot.models import VerificationRecord
 
     record = VerificationRecord(
@@ -463,7 +528,7 @@ def test_the_inventory_cannot_be_mutated_in_place(mutate):
         bundle_object="s.tar", parquet_files=1, rows=1, verified_at="x",
         inventory={"a.parquet": 4})
     before = record.model_dump_json()
-    with pytest.raises(TypeError):
+    with pytest.raises((TypeError, AttributeError)):
         mutate(record.inventory)
     assert record.model_dump_json() == before
 

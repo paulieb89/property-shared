@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import re
 from enum import Enum
-from typing import Literal, Mapping, Optional
+from types import MappingProxyType
+from typing import Annotated, Literal, Mapping, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    field_validator,
+)
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -130,35 +137,26 @@ class BootReport(BaseModel):
         return self.readiness is Readiness.READY
 
 
-class FrozenInventory(dict):
-    """A dict that refuses in-place mutation.
+#: Verification evidence is exposed as a genuinely read-only mapping.
+#:
+#: A dict subclass cannot protect anything: `dict.__setitem__(inv, k, v)` and
+#: `dict.update(inv, ...)` reach the base-class descriptors directly and edited
+#: the evidence in place. MappingProxyType has no mutators to bypass -- writes
+#: raise regardless of how they are spelled.
+Inventory = Mapping[str, int]
 
-    The inventory IS the verification evidence: it is what `is_verified` compares
-    the directory against. `frozen=True` on the model only stops rebinding the
-    attribute, so `record.inventory["a"] = 999` silently rewrote the evidence and
-    changed the record's serialisation. Subclassing dict keeps the JSON shape and
-    equality with plain dicts unchanged while closing every mutator.
+
+def _freeze_inventory(value: Mapping[str, int]) -> Inventory:
+    return MappingProxyType(dict(value))
+
+
+def _serialize_inventory(value: Mapping[str, int]) -> dict[str, int]:
+    """Explicit serializer: pydantic has no built-in rule for MappingProxyType.
+
+    Asserted by test to produce the same JSON shape as a plain object, so the
+    on-disk record format is unchanged by the immutability work.
     """
-
-    __slots__ = ()
-
-    def _immutable(self, *args, **kwargs):
-        raise TypeError(
-            "the verification inventory is immutable evidence; build a new "
-            "VerificationRecord rather than editing one"
-        )
-
-    __setitem__ = _immutable
-    __delitem__ = _immutable
-    __ior__ = _immutable
-    clear = _immutable
-    pop = _immutable
-    popitem = _immutable
-    setdefault = _immutable
-    update = _immutable
-
-    def __reduce__(self):
-        return (self.__class__, (dict(self),))
+    return dict(value)
 
 
 class VerificationRecord(BaseModel):
@@ -176,6 +174,10 @@ class VerificationRecord(BaseModel):
     Strict and validated on the way IN and on the way OUT. Reading it back with
     ad-hoc `int(...)` calls let a malformed value raise out of the readiness
     check and escape boot entirely, which is the opposite of failing closed.
+
+    The inventory is exposed as a genuinely read-only mapping: it is the evidence
+    `is_verified` compares a directory against, so it must not be editable by any
+    spelling, including through base-class descriptors.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -202,10 +204,12 @@ class VerificationRecord(BaseModel):
     bundle_object: str
 
     #: Relative POSIX path -> exact byte size, for every file in the snapshot.
-    #: Annotated as a plain mapping so pydantic can build a schema and
-    #: serialise it unchanged; an after-validator swaps in the immutable
-    #: representation once validation has finished.
-    inventory: dict[str, int] = Field(min_length=1)
+    #: Validated as a plain mapping, stored as a read-only view. The explicit
+    #: serializer keeps the JSON shape identical to a plain object.
+    inventory: Annotated[
+        dict[str, int],
+        PlainSerializer(_serialize_inventory, return_type=dict),
+    ] = Field(min_length=1)
 
     #: What this layer verified. A Literal, not a free string: the boot runtime
     #: can only ever establish structural verification, and a record reading
@@ -252,7 +256,7 @@ class VerificationRecord(BaseModel):
 
     @field_validator("inventory", mode="after")
     @classmethod
-    def _inventory_is_immutable(cls, v: dict[str, int]) -> "FrozenInventory":
-        # Runs last, so the stored value is the frozen representation while the
-        # declared schema stays a plain mapping.
-        return FrozenInventory(v)
+    def _inventory_is_read_only(cls, v: Mapping[str, int]) -> Inventory:
+        # Runs last, so the stored value is a read-only view while the declared
+        # schema stays a plain mapping.
+        return _freeze_inventory(v)

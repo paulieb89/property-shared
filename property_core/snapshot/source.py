@@ -7,12 +7,22 @@ transport can change without touching verification or activation logic.
 
 from __future__ import annotations
 
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from property_core.snapshot.errors import DownloadDeadlineExceeded
 from typing import IO, Optional, Protocol, runtime_checkable
 
 #: Connect/read timeout, per the governing specification section 4.1.
+#: The single socket timeout urllib actually supports.
+#:
+#: `urlopen(timeout=...)` takes ONE value covering connection setup and every
+#: blocking socket operation. Advertising separate connect and read timeouts was
+#: a fiction: passing a second value to the bundle request simply changed that
+#: connection's timeout too, so `timeout=1, read_timeout=60` gave the bundle a
+#: 60-second connect. One honest setting instead.
 DEFAULT_TIMEOUT = 10.0
 #: Small control objects only (current.json, the manifest). The bundle is
 #: NEVER read through this path -- it is streamed.
@@ -37,13 +47,38 @@ class ObjectSource(Protocol):
 class _HttpStream:
     """A response wrapper exposing the declared length alongside read()."""
 
-    def __init__(self, response):
+    def __init__(self, response, *, socket_timeout: float):
         self._response = response
+        self._socket_timeout = socket_timeout
         length = response.headers.get("Content-Length")
         self.declared_length = int(length) if length and length.isdigit() else None
 
     def read(self, size: int) -> bytes:
-        return self._response.read(size)
+        """One bounded read.
+
+        Uses `read1` where available: `HTTPResponse.read(n)` loops internally
+        until it has n bytes, so a dribbling server can keep a single call
+        active indefinitely and the caller's total-budget check never runs.
+        `read1` returns after one underlying socket read, which the socket
+        timeout bounds -- so the budget is evaluated at a real interval.
+
+        A socket timeout is translated into the typed failure here, at the seam
+        where it is raised, so callers handle one taxonomy rather than a bare
+        builtins.TimeoutError.
+        """
+        reader = getattr(self._response, "read1", None)
+        try:
+            return reader(size) if reader is not None else self._response.read(size)
+        except (TimeoutError, socket.timeout) as exc:
+            raise DownloadDeadlineExceeded(
+                f"transport read timed out after {self._socket_timeout}s"
+            ) from exc
+        except OSError as exc:
+            if isinstance(exc.args[0] if exc.args else None, socket.timeout):
+                raise DownloadDeadlineExceeded(
+                    f"transport read timed out after {self._socket_timeout}s"
+                ) from exc
+            raise
 
     def __enter__(self) -> "_HttpStream":
         return self
@@ -56,15 +91,14 @@ class _HttpStream:
 class HttpObjectSource:
     """Read-only HTTP object source rooted at a base URL."""
 
-    def __init__(self, base_url: str, *, timeout: float = DEFAULT_TIMEOUT,
-                 read_timeout: Optional[float] = None,
+    def __init__(self, base_url: str, *,
+                 socket_timeout: float = DEFAULT_TIMEOUT,
                  user_agent: str = "property-shared-snapshot/1"):
         self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
-        #: Applied to the streaming request. urllib passes this to the socket,
-        #: so the OS bounds each read operation -- this is the real interrupt,
-        #: as opposed to the post-read detection in fetch.py.
-        self.read_timeout = timeout if read_timeout is None else read_timeout
+        #: One value, used for both control and bundle requests, because that is
+        #: all urllib enforces. It bounds connection setup and every blocking
+        #: socket operation -- and so is the only real interrupt in this design.
+        self.socket_timeout = socket_timeout
         self.user_agent = user_agent
 
     def _url(self, name: str) -> str:
@@ -78,7 +112,8 @@ class HttpObjectSource:
 
     def read_bytes(self, name: str, *, max_bytes: Optional[int] = None) -> bytes:
         cap = MAX_CONTROL_BYTES if max_bytes is None else max_bytes
-        with urllib.request.urlopen(self._request(name), timeout=self.timeout) as resp:
+        with urllib.request.urlopen(self._request(name),
+                                    timeout=self.socket_timeout) as resp:
             # Read one byte past the cap so an oversized control object is an
             # error rather than a silent truncation.
             body = resp.read(cap + 1)
@@ -87,10 +122,12 @@ class HttpObjectSource:
         return body
 
     def open_stream(self, name: str) -> _HttpStream:
-        # The socket timeout bounds every read on this stream. A silent
-        # connection raises here rather than being noticed afterwards.
-        resp = urllib.request.urlopen(self._request(name), timeout=self.read_timeout)
-        return _HttpStream(resp)
+        # The socket timeout bounds connection setup and every read on this
+        # stream. A silent connection raises here rather than being noticed
+        # afterwards, and the stream translates it into the typed failure.
+        resp = urllib.request.urlopen(self._request(name),
+                                      timeout=self.socket_timeout)
+        return _HttpStream(resp, socket_timeout=self.socket_timeout)
 
 
 class LocalDirectorySource:
