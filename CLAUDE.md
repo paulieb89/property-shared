@@ -40,8 +40,11 @@ uv run --extra cli property-cli ppd comps "SW1A 1AA" --api-url http://localhost:
 
 # Tests — all four extras are required: `api` provides fastapi (test_http_metrics,
 # test_mcp_server), `apps` provides fastmcp[apps], `cli` provides typer.
-uv run --extra dev --extra api --extra apps --extra cli pytest                  # unit tests (mocked)
-RUN_LIVE_TESTS=1 uv run --extra dev --extra api --extra apps --extra cli pytest # live network tests
+# Add `--extra snapshot` as well, or the ~200 tests under tests/snapshot/ that
+# need DuckDB SKIP rather than fail (they use importorskip), and a green run
+# says nothing about them.
+uv run --extra dev --extra api --extra apps --extra cli --extra snapshot pytest  # unit tests (mocked)
+RUN_LIVE_TESTS=1 uv run --extra dev --extra api --extra apps --extra cli --extra snapshot pytest
 
 # Single test
 uv run --extra dev --extra api --extra apps --extra cli pytest tests/test_ppd_service_live.py -v
@@ -115,6 +118,11 @@ property_app/               # FastMCP MCP app server (4th consumer of property_c
 ├── server.py               # FastMCP tools + Prefab dashboards entry point
 ├── tools.py                # @mcp.tool() definitions
 └── dashboards/             # Prefab UI dashboard views
+
+tools/                      # Local operator tooling. NOT in the published wheel.
+└── ppd_snapshot/           # PPD snapshot build + validation pipeline. Local
+                            # build only, no distribution — see
+                            # docs/ops/ppd-snapshot-build.md
 ```
 
 **Three-layer separation**:

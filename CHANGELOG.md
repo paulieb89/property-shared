@@ -198,6 +198,81 @@ coverage take effect only once a snapshot is enabled and materialized.
   `TransactionNotFoundError`, `UpstreamShapeError`, `SnapshotFailure`,
   `SnapshotUnavailableError`, `UpstreamUnavailableError`), all exported from
   `property_core`.
+- **Local snapshot build and validation pipeline** (`tools/ppd_snapshot/`),
+  deliberately outside the published wheel. Builds the eleven year-only Parquet
+  partitions from `pp-complete.csv`, publishes the immutable manifest the runtime
+  reads plus a separate build report, and gates the artifact on schema and column
+  types (per partition, never over the union), row count, `transaction_id`
+  uniqueness, declared-coverage containment, the 120-month guarantee, the
+  provisional boundary, the file inventory, the bundle digest and deterministic
+  ordering. It then boots the result through the real `SnapshotRuntime` and opens
+  it with the real `SnapshotAdapter`, which is the only claim worth making about
+  a build. Also carries the section 4.9 release check: a `HEAD` on
+  `pp-complete.csv` comparing `ETag`/`Last-Modified`/`Content-Length` against the
+  recorded release, with the seven-day uningested alert measured from
+  observation. **Local only** — no upload, bucket, cloud resource, Fly command,
+  secret, image or deployment change (§4.8). Runbook:
+  `docs/ops/ppd-snapshot-build.md`.
+- **A source receipt binds the CSV to the release it claims to be.** Every gate
+  downstream checks the snapshot against itself, so an internally consistent
+  snapshot of the wrong file passed all of them: a 131-byte stale CSV built,
+  validated and booted `READY` while the release record described a
+  999,999,999-byte release under a different ETag. The receipt records the
+  SHA-256 and length computed from the file alongside the release's validators,
+  and the build refuses unless file, receipt and latest observation all agree.
+  A missing receipt is a refusal, not a default, and a receipt cannot be minted
+  from a file alone: it requires the SHA-256 captured when the release was
+  downloaded, since length agreement lets same-length bytes through under any
+  ETag. `download` mints one while streaming the release, taking bytes, digest
+  and validators from a single response; `receipt --expected-sha256` is the
+  weaker path for a file already on disk, and the receipt records which was
+  used. The release check now uses the
+  official **HTTPS** endpoint published on GOV.UK rather than the plaintext S3
+  website endpoint, so neither the validators nor the body are open to tampering
+  in transit.
+- **The build fails closed on malformed required source values.** `TRY_CAST`
+  silently turned an unparseable price into NULL and published the row as a sale
+  with no price, while an unparseable date made a row vanish; every count-based
+  gate was happy either way. An unparseable `transfer_date` anywhere, or an
+  unparseable `price` or blank `transaction_id` inside the window, now stops the
+  build, and two new gates enforce it independently: `required_values` (no NULL
+  in a required column) and `reconciliation` (rows counted from the source equal
+  rows written). A price must be **written as digits**, not merely be castable:
+  `TRY_CAST` silently turns `1.5` into 2, `2.5` into 3, `1e3` into 1000, `0x10`
+  into 16 and `1_000` into 1000, each landing in the snapshot as a plausible
+  integer no gate can question.
+- **Releases are assembled outside the publishing directory and promoted only
+  after booting.** A forced-`UNREADY` boot previously left the bundle, manifest
+  and `current.json` in the final directory — a publishable release nobody had
+  validated. Candidates now live under the work directory, not under `dist/`,
+  and `current.json` is replaced **last and atomically**: `write_text`
+  truncates before writing, so an interrupted promotion used to leave an empty
+  pointer where a working release's pointer had been.
+- **The expected coverage end cannot be passed in.** `build` and `all` derive it
+  from the bound release's publication date; there is no `--source-coverage-end`
+  on either. Setting both dates so they agreed published a 28 July release as
+  covering 31 July. The declaration is compared with the derived end **before
+  the build runs**, so a mismatch writes no Parquet at all rather than leaving a
+  failed snapshot directory behind.
+- **A failed refresh no longer destroys the release already held.** The
+  downloader streams into a unique sibling temporary file and replaces the
+  destination only after the transfer's length is confirmed; writing the
+  destination directly truncated a working CSV as soon as a refresh began, and
+  a mid-stream failure erased it while its receipt survived to describe it. The
+  CSV and its receipt are committed as a pair by an explicit transaction that
+  removes the renamed-aside backup only after publication or a confirmed
+  restoration — if the rollback itself fails the backup is kept and its path
+  reported, because it is then the only copy of the previous release — with the
+  CSV rolled back if the receipt cannot be written, and a destination that resolves to the receipt path
+  is refused before any request. Every document the pipeline replaces — release
+  state, receipt, manifest, build report, `current.json` — is now written by
+  sibling-and-rename; the release state in particular carries the timestamp the
+  seven-day uningested alert is measured from.
+- **Promotion is a rename, on one filesystem, and says so.** The device IDs of
+  the candidate and dist directories are compared before anything moves;
+  `shutil.move` across a boundary would silently copy 266 MiB, which is neither
+  atomic nor within the transient-disk and timing model G1 was measured
+  against.
 - Optional `snapshot` extra (`duckdb==1.5.5`) and `PPD_SNAPSHOT_ENABLED`
   (default **off**). The published library gains no required dependency.
 - `docs/design/ppd-source-routing.md` — the frozen specification governing this
@@ -230,10 +305,18 @@ coverage take effect only once a snapshot is enabled and materialized.
   changing which area a caller's request covers is a behaviour change of its
   own. Both paths return the requested area with a warning saying why, and the
   reason differs by source because the reasons genuinely differ.
-- The build pipeline, artifact distribution, the shadow corpus, and rollout
-  gates G1–G3. No Dockerfile, Fly config, image, secret or deployment is touched
-  here, and neither production image installs the `snapshot` extra yet — which
-  G3 requires **before** the flag may be enabled.
+- Artifact distribution, the shadow corpus, and rollout gates G1–G3. No
+  Dockerfile, Fly config, image, secret or deployment is touched here, and
+  neither production image installs the `snapshot` extra yet — which G3 requires
+  **before** the flag may be enabled. The build pipeline produces a bundle on a
+  workstation and stops there; where one would be hosted is separately approved.
+- **A measurement the rollout needs, recorded rather than acted on:** the real
+  eleven-partition **year-only** bundle is **266.2 MiB**, not the 214 MiB §1.1
+  estimates — that figure is a year+area measurement, while §1.2 mandates
+  year-only, which the same Phase 3 run measured at +22%. This moves §1.1's
+  download estimate and the G1 transient-disk budget. The specification is frozen
+  and is not edited here; correcting its sizing table is a decision round that
+  belongs before G1.
 
 
 ## v1.14.2 (2026-08-26) — MCP server card version; inferred-GBP warning ordering
