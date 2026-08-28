@@ -18,6 +18,7 @@ from property_core.models.ppd import (  # noqa: F401
     PPDTransactionRecord,
     SubjectProperty,
 )
+from property_core.provenance import PPDProvenance  # noqa: F401
 
 
 class PPDSearchResponse(BaseModel):
@@ -28,6 +29,10 @@ class PPDSearchResponse(BaseModel):
     results: List[PPDTransaction] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     raw: Optional[List[dict[str, Any]]] = None
+    #: Where these rows came from, over what coverage, and how much of the
+    #: source was examined. Additive and nullable, so an existing caller that
+    #: ignores it sees no change.
+    provenance: Optional[PPDProvenance] = None
 
 
 class PPDDownloadURLResponse(BaseModel):
@@ -39,3 +44,6 @@ class PPDTransactionRecordResponse(BaseModel):
     """Normalized record with optional raw Linked Data payload."""
     record: PPDTransactionRecord
     raw: Optional[dict[str, Any]] = None
+    #: Always `linked_data`: exact-ID lookup never routes to the snapshot, so it
+    #: keeps working for transactions older than coverage.
+    provenance: Optional[PPDProvenance] = None

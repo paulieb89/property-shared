@@ -124,7 +124,28 @@ class TransactionNotFoundError(PPDError):
         return {**super().to_dict(), "transaction_id": self.transaction_id}
 
 
-class SnapshotUnavailableError(PPDError):
+class SnapshotFailure(PPDError):
+    """The snapshot path could not serve this request.
+
+    **This type is the fallback contract.** A caller that sees it uses the live
+    source and says so; it never returns empty data. Routing catches this base
+    class rather than an enumeration of known subclasses, so a failure mode added
+    later falls back correctly without anyone remembering to extend a tuple.
+
+    Deliberately disjoint from `UpstreamUnavailableError`: the live source is
+    what the fallback falls back *to*, so a live failure that also read as a
+    snapshot failure would send routing round the loop again.
+
+    Caller errors (`InvalidPostcodeError`) and coverage refusals
+    (`PPDCoverageError`) are NOT snapshot failures. Retrying either against the
+    live source would hide the very fact the caller needs.
+    """
+
+    code = "snapshot_failure"
+    retryable = True
+
+
+class SnapshotUnavailableError(SnapshotFailure):
     """No verified snapshot is open. Distinct from 'no rows matched'."""
 
     code = "snapshot_unavailable"

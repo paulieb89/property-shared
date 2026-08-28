@@ -14,8 +14,14 @@ from fastmcp.server.middleware.caching import (
     ResponseCachingMiddleware,
 )
 # Main server — all tools registered directly via @mcp.tool()
+from property_core.snapshot.bootstrap import fastmcp_lifespan, mark_installed
+
 mcp = FastMCP(
     "property-app",
+    # Same boot, same rule (spec 4.10). This server is deployed on its own, so
+    # it must carry the lifespan itself -- there is no FastAPI app here to chain
+    # it from.
+    lifespan=fastmcp_lifespan(None),
     # Without this, FastMCP advertises its OWN version on the MCP card, so the
     # `initialize` response reported the framework version (3.2.4) while the
     # /.well-known/mcp/server-card.json route below reported the real one. The
@@ -28,9 +34,16 @@ mcp = FastMCP(
         "Use comps_dashboard, yield_dashboard, rental_dashboard, listings_dashboard for focused single-topic views. "
         "Use search_comps, get_yield, get_rental for raw data. "
         "Use stamp_duty, planning_search, epc_lookup, rightmove_search for quick lookups. "
-        "Use company_search to find a company by name."
+        "Use company_search to find a company by name. "
+        "Price Paid Data results are bounded by the coverage stated in each "
+        "response's `provenance`; an empty result means 'no sales in coverage', "
+        "never 'never sold'. Contains HM Land Registry data (c) Crown copyright "
+        "and database right, licensed under the Open Government Licence v3.0."
     ),
 )
+
+
+mark_installed(mcp)
 
 
 @mcp.resource("councils://list")

@@ -11,6 +11,7 @@ from statistics import mean
 
 from property_core.models.block import BlockAnalysisResponse, BlockBuilding, BlockUnit
 from property_core.ppd_service import PPDService
+from property_core.ppd_source import CoveragePolicy
 
 
 def analyze_blocks(
@@ -51,6 +52,10 @@ def analyze_blocks(
         transaction_category=None,
         filter_outliers=False,
         auto_escalate=False,
+        # `months` has no upper bound on this surface, so a caller can name a
+        # window the snapshot cannot cover. Refused with both ranges rather than
+        # silently clamped: a clamped answer looks like a complete one.
+        coverage_policy=CoveragePolicy.EXPLICIT,
     )
 
     # Group transactions by building: (paon, street, postcode)

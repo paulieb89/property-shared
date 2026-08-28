@@ -93,6 +93,18 @@ class UnsupportedRecordStatusFilterError(ValueError):
     by. Rejecting is a scope decision, not an ontology unknown.
     """
 
+#: The single wording for the record_status rejection. Raised from the client on
+#: the live path and from the service before routing, so the snapshot path gives
+#: the caller exactly the same explanation and the same remedy.
+RECORD_STATUS_UNSUPPORTED = (
+    "record_status filtering is not supported on SPARQL search: results are "
+    "PPDTransaction rows, which do not carry a record status. The predicate "
+    "does exist upstream (lrppi:recordStatus), but is not yet supported under "
+    "this search's verified binding and performance contract. Use "
+    "PricePaidDataClient.get_transaction_record(transaction_id) / "
+    "PPDService.transaction_record() to read record_status for a known transaction."
+)
+
 # The Land Registry site currently splits some recent years into two files.
 YEARS_WITH_PARTS = {2018, 2019, 2020, 2021, 2022, 2023}
 
@@ -140,7 +152,12 @@ class PricePaidDataClient:
     linked_data_base: str = LINKED_DATA_BASE
     sparql_endpoint: str = SPARQL_ENDPOINT
     user_agent: str = "ppd-wrapper/0.1"
-    timeout: int = 120
+    timeout: float = 120
+    #: Attempts for a SPARQL request, retries included. The bounded existence
+    #: probe (property_core.ppd_probe) sets this to 1: a retried probe is no
+    #: longer bounded, and the probe's whole contract is that it costs at most
+    #: one short request.
+    retry_attempts: int = SPARQL_RETRY_ATTEMPTS
 
     # --------
     # Download URLs
@@ -284,14 +301,7 @@ class PricePaidDataClient:
             UnsupportedRecordStatusFilterError: If record_status is not None.
         """
         if record_status is not None:
-            raise UnsupportedRecordStatusFilterError(
-                "record_status filtering is not supported on SPARQL search: results are "
-                "PPDTransaction rows, which do not carry a record status. The predicate "
-                "does exist upstream (lrppi:recordStatus), but is not yet supported under "
-                "this search's verified binding and performance contract. Use "
-                "PricePaidDataClient.get_transaction_record(transaction_id) / "
-                "PPDService.transaction_record() to read record_status for a known transaction."
-            )
+            raise UnsupportedRecordStatusFilterError(RECORD_STATUS_UNSUPPORTED)
 
         values_clauses = []
         filters = []
@@ -486,7 +496,8 @@ class PricePaidDataClient:
 
     def _fetch_sparql(self, encoded_query: bytes) -> Dict:
         last_exc: Exception | None = None
-        for attempt in range(1, SPARQL_RETRY_ATTEMPTS + 1):
+        attempts = max(1, int(self.retry_attempts))
+        for attempt in range(1, attempts + 1):
             req = urllib.request.Request(
                 self.sparql_endpoint,
                 data=encoded_query,
@@ -502,7 +513,7 @@ class PricePaidDataClient:
             except (TimeoutError, urllib.error.URLError) as exc:
                 last_exc = exc
 
-            if attempt < SPARQL_RETRY_ATTEMPTS:
+            if attempt < attempts:
                 backoff = SPARQL_RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1))
                 time.sleep(backoff)
 

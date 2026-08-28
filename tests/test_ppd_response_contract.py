@@ -11,9 +11,25 @@ same harness run on the pre-PR-2 tree (377a553). Every difference was intended:
   `sector`, `escalated_from`/`escalated_to` are null, and a warning explains
   why (live-source completeness cannot authorise escalation).
 
-Everything else -- `core.search_transactions`, both MCP `ppd_transactions`
-tools, `rest.transactions`, `rest.meta_integrations` -- is byte-identical to
-pre-PR-2, which is the point: containment changed comps and nothing else.
+**PR 4 adds source routing**, so the golden was regenerated again and that
+delta reviewed line by line. It is additive apart from one line:
+
+* every PPD-bearing surface gains a `provenance` block. With no snapshot
+  materialized -- which is what this harness captures -- it reports
+  `source: "sparql"`, null coverage fields, and whatever completeness the
+  transport actually observed;
+* `cli.ppd_comps` stdout changes for a second reason: `_echo_json` no longer
+  goes through rich's `print`, which soft-wrapped long strings and left a
+  newline inside a JSON value, so the document did not parse. JSON output
+  exists to be machine-read.
+
+Nothing else moved. `rest.meta_integrations` is untouched, the live-path
+warning strings are byte-identical, and no row of data changed -- routing is
+inert until a snapshot is materialized and the flag is on.
+
+The harness also clears `PPD_SNAPSHOT_ENABLED`: this golden pins the LIVE-path
+contract, and a developer with the flag set in their shell would otherwise
+capture a different one.
 
 This is a change-detector, not a correctness oracle. Input is a fixed binding
 fixture patched in at the real transport boundary (`_fetch_sparql`) with sockets
@@ -67,8 +83,9 @@ def test_golden_covers_every_named_surface(golden):
 )
 def test_surface_is_unchanged(surface, golden, actual):
     assert actual[surface] == golden[surface], (
-        f"{surface} changed; PR 1 must add no behaviour. "
-        f"If this change is intended it belongs in a later PR with its own tests."
+        f"{surface} changed. If the change is intended, regenerate the golden "
+        f"(`python -m tests.ppd_golden_harness`), review the delta line by line, "
+        f"and record it in this module's docstring and the changelog."
     )
 
 
@@ -114,9 +131,42 @@ def test_surfaces_pr2_should_not_have_touched_carry_no_warnings(actual):
         assert actual[surface]["warnings"] == [], actual[surface]
 
 
-def test_no_provenance_fields_leaked_into_responses(actual):
-    """The provenance model exists but is still wired nowhere (PR 4 does that)."""
+def test_every_ppd_bearing_surface_carries_provenance(actual):
+    """PR 4 wires the block in. Inverted from PR 1's inertness assertion.
+
+    `rest.meta_integrations` is excluded: it carries no PPD rows, so a
+    provenance block there would describe nothing.
+    """
+    for surface in ("core.comps", "core.search_transactions",
+                    "mcp.plain.ppd_transactions", "mcp.app.ppd_transactions"):
+        provenance = actual[surface]["provenance"]
+        assert provenance is not None, surface
+        assert provenance["source"] == "sparql", surface
+        assert provenance["attribution_ref"] == "/v1/meta#attribution", surface
+
+    for surface in ("rest.comps", "rest.transactions"):
+        assert actual[surface]["body"]["provenance"]["source"] == "sparql", surface
+
+    assert "provenance" not in actual["rest.meta_integrations"]["body"]
+
+
+def test_licence_prose_is_never_inlined_into_a_response(actual):
+    """Spec test 28c. Responses carry a reference; the licence lives at /v1/meta."""
     blob = json.dumps(actual)
-    for field in ("attribution_ref", "completeness_basis", "source_release",
-                  "older_records_exist", "sample_complete"):
-        assert field not in blob, f"{field} was wired into a response in PR 1"
+    assert "Open Government Licence" not in blob
+    assert "Crown copyright" not in blob
+
+
+def test_the_live_path_declares_no_snapshot_coverage(actual):
+    """With nothing materialized, the snapshot fields must be null, not empty.
+
+    A `coverage_from` of `""` or `0` would read as a stated bound. Null is the
+    only honest value for "this answer has no coverage bounds".
+    """
+    for surface in ("core.comps", "core.search_transactions"):
+        provenance = actual[surface]["provenance"]
+        assert provenance["source_release"] is None, surface
+        assert provenance["coverage_from"] is None, surface
+        assert provenance["coverage_to"] is None, surface
+        assert provenance["freshness_days"] is None, surface
+        assert provenance["older_records_exist"] is None, surface

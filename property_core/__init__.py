@@ -15,15 +15,18 @@ from property_core.interpret import (
 )
 from property_core.companies_house_client import CompaniesHouseClient
 from property_core.config import ppd_snapshot_enabled
+from property_core.attribution import HMLR_LICENCE_URL, hmlr_attribution
 from property_core.exceptions import (
     InvalidPostcodeError,
     PPDCoverageError,
     PPDError,
+    SnapshotFailure,
     SnapshotUnavailableError,
     TransactionNotFoundError,
     UpstreamShapeError,
     UpstreamUnavailableError,
 )
+from property_core.ppd_source import CoveragePolicy
 from property_core.provenance import (
     ATTRIBUTION_REF,
     CompletenessBasis,
@@ -87,15 +90,19 @@ __all__ = [
     "fetch_listing",
     "fetch_listings",
     "generate_insights",
+    "hmlr_attribution",
     "match_epc_address",
     "ppd_snapshot_enabled",
-    # Provenance and typed errors (PR 1 foundations; not yet wired to responses)
+    # Provenance, attribution and typed errors
     "ATTRIBUTION_REF",
     "CompletenessBasis",
+    "CoveragePolicy",
+    "HMLR_LICENCE_URL",
     "InvalidPostcodeError",
     "PPDCoverageError",
     "PPDError",
     "PPDProvenance",
+    "SnapshotFailure",
     "SnapshotUnavailableError",
     "SourceKind",
     "TransactionNotFoundError",

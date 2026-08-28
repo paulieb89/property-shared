@@ -92,10 +92,15 @@ def _bindings():
 #: suite, where other tests clear these vars.
 AMBIENT_CREDENTIAL_VARS = ("EPC_API_TOKEN", "EPC_API_EMAIL", "EPC_API_KEY")
 
+#: Also cleared. The golden captures the LIVE-path contract; a developer with
+#: the snapshot flag set in their shell would otherwise capture a different one,
+#: and the same run would then fail for everyone else.
+AMBIENT_FLAG_VARS = ("PPD_SNAPSHOT_ENABLED",)
+
 
 @contextmanager
 def deterministic_ppd():
-    """Patch the transport seam, neutralise ambient credentials, block sockets."""
+    """Patch the transport seam, neutralise the ambient environment, block sockets."""
     import os
     import socket
 
@@ -110,7 +115,7 @@ def deterministic_ppd():
         "property_core.ppd_client.PricePaidDataClient._fetch_sparql",
         return_value=payload,
     ), patch.object(socket.socket, "connect", _no_network):
-        for var in AMBIENT_CREDENTIAL_VARS:
+        for var in AMBIENT_CREDENTIAL_VARS + AMBIENT_FLAG_VARS:
             os.environ.pop(var, None)
         yield
 
@@ -134,9 +139,15 @@ def capture() -> dict:
         search = svc.search_transactions(postcode="B5 4BX", postcode_prefix=None, limit=10)
         out["core.search_transactions"] = _sortable(
             {
-                **{k: v for k, v in search.items() if k != "results"},
+                **{k: v for k, v in search.items()
+                   if k not in ("results", "provenance")},
                 "results": [t.model_dump(mode="json", exclude_none=True)
                             for t in search["results"]],
+                # Dumped like `results`: the core service returns models, and
+                # comparing their repr() would lock the repr rather than the
+                # response contract.
+                "provenance": (search["provenance"].model_dump(mode="json")
+                               if search.get("provenance") else None),
             }
         )
 

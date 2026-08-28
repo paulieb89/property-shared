@@ -6,13 +6,28 @@ document require a new decision round, not an edit in passing.
 **Implementation status.** Implemented by **PR 1**: this specification, the
 provenance and transport-evidence models, the protocol-neutral exception types,
 the optional `snapshot` dependency declaration, and the disabled
-`PPD_SNAPSHOT_ENABLED` flag. PR 1 changes no observable behaviour.
+`PPD_SNAPSHOT_ENABLED` flag (no observable behaviour change). By **PR 2**: the
+live-path correctness containment of section 2.7, the exact-ID taxonomy of
+section 2.8, and the subject-property taxonomy of section 2.6. By **PR 3**: the
+boot runtime of sections 4.1-4.7 — streaming fetch, verification, hardened
+extraction, atomic activation, single-flight locking and readiness states, all
+structural and wired to nothing. By **PR 4**: the DuckDB snapshot adapter with
+schema, row-count and queryability validation before it may route; lifespan
+wiring per section 4.10; coverage routing and the bounded existence probe of
+sections 2.4-2.5; live fallback on every typed snapshot failure; and response
+wiring of the provenance block across all four consumers.
 
-**Still unimplemented:** the snapshot adapter, the boot runtime (streaming fetch,
-verification, hardened extraction, atomic activation, locking, readiness,
-retention), source routing and coverage handling, the existence probe, response
-wiring of the provenance block, the build pipeline, and every rollout stage.
-No PPD response carries provenance yet, and no request is served from a snapshot.
+**Still unimplemented:** the build pipeline (PR 5), the fixed shadow corpus
+(PR 6), and rollout gates G1-G3 (PR 7) with the staged enablement that follows.
+`PPD_SNAPSHOT_ENABLED` remains off, neither production image installs the
+`snapshot` extra, and no request is served from a snapshot in production.
+
+**Deliberately not implemented, and not deferred by omission:** auto-escalation
+stays disabled on both sources. The snapshot adapter does supply the
+limit-independent evidence section 8 anticipated, but re-enabling widening
+changes which area a caller's request covers, which is a behaviour change of its
+own and was not in PR 4's scope. Both paths return the requested geography with
+a source-specific warning.
 
 **Governing rule:** this specification governs PRs 1–4; **no implementation PR
 may land before the specification that governs it.**

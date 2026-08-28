@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
+from property_core.provenance import PPDProvenance
 
 
 class SaleRecord(BaseModel):
@@ -102,6 +103,10 @@ class YieldAnalysis(BaseModel):
     """
 
     warnings: tuple[str, ...] = ()
+    #: The sale side's provenance, carried through from the comps this yield
+    #: divides by. The rental side is Rightmove and has no PPD provenance, so
+    #: this describes the denominator, not the whole figure.
+    sale_provenance: Optional[PPDProvenance] = None
     postcode: str
     median_sale_price: Optional[int] = None
     sale_count: int = 0
