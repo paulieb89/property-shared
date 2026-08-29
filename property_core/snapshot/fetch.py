@@ -26,8 +26,8 @@ from property_core.snapshot.models import SnapshotManifest
 
 DEFAULT_CHUNK_SIZE = 1024 * 1024
 #: Hard ceiling regardless of what a manifest claims. A manifest is data from
-#: outside this process; it does not get to size our disk usage. An 11-partition
-#: snapshot is ~214 MiB, so this leaves roughly 4.8x margin.
+#: outside this process; it does not get to size our disk usage. The measured
+#: 11-partition snapshot is 266.2 MiB, so this leaves roughly 3.8x margin.
 DEFAULT_MAX_BUNDLE_BYTES = 1 * 1024 ** 3
 
 #: Whole-transfer budget, evaluated BETWEEN reads. A download that never

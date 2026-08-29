@@ -2,8 +2,8 @@
 
 ## Unreleased — v1.15.0 (pending): PPD snapshot source routing + live-path correctness containment
 
-Not released. No version bump. Four PRs against the frozen design in
-`docs/design/ppd-source-routing.md`.
+Not released. No version bump. **Five** PRs against the design in
+`docs/design/ppd-source-routing.md`, now at rev 7.
 
 **`PPD_SNAPSHOT_ENABLED` is off by default, and nothing about the deployed
 behaviour changes while it stays off.** With no snapshot materialized every PPD
@@ -310,13 +310,15 @@ coverage take effect only once a snapshot is enabled and materialized.
   neither production image installs the `snapshot` extra yet — which G3 requires
   **before** the flag may be enabled. The build pipeline produces a bundle on a
   workstation and stops there; where one would be hosted is separately approved.
-- **A measurement the rollout needs, recorded rather than acted on:** the real
-  eleven-partition **year-only** bundle is **266.2 MiB**, not the 214 MiB §1.1
-  estimates — that figure is a year+area measurement, while §1.2 mandates
-  year-only, which the same Phase 3 run measured at +22%. This moves §1.1's
-  download estimate and the G1 transient-disk budget. The specification is frozen
-  and is not edited here; correcting its sizing table is a decision round that
-  belongs before G1.
+- **A measurement the rollout needs:** the real eleven-partition **year-only**
+  bundle is **266.2 MiB**, not the 214 MiB §1.1 previously estimated — that figure is a
+  year+area measurement, while §1.2 mandates year-only, which the same Phase 3
+  run measured at +22%. **Corrected in specification rev 7** by the
+  rollout-premise decision round: §1.1 now publishes the measured 266.2 MiB with
+  22.3 s labelled as calculated, G1 is split into G1a (`property-shared`, 2 GB)
+  and G1b (`propertydata`, 512 MB), and G3's ordering clause is replaced with the
+  deploy-and-observe invariant. No gate is relaxed, no image or flag is touched,
+  and nothing is enabled.
 
 
 ## v1.14.2 (2026-08-26) — MCP server card version; inferred-GBP warning ordering

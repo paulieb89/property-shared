@@ -27,7 +27,7 @@ def test_governing_specification_ships_with_the_code():
 
 def test_specification_is_version_stamped():
     head = SPEC.read_text().splitlines()[0]
-    assert "rev 6" in head and "FROZEN" in head, head
+    assert "rev 7" in head and "FROZEN" in head, head
 
 
 def _normalised(text: str) -> str:
