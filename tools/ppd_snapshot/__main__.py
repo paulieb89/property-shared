@@ -459,7 +459,48 @@ def build_parser() -> argparse.ArgumentParser:
     every.add_argument("--source-receipt", required=True,
                        help="the receipt binding the CSV to a release")
     every.set_defaults(handler=_cmd_all)
+
+    rehearse = sub.add_parser(
+        "rehearse",
+        help="run the shadow-corpus Definition against a local artifact")
+    rehearse.add_argument("--instance", required=True,
+                          help="rehearsal instance JSON (untracked, not a Stage 1 instance)")
+    rehearse.add_argument("--dist", required=True,
+                          help="published dist directory: current.json, manifest, bundle")
+    rehearse.add_argument("--cache-dir", required=True,
+                          help="where the snapshot is materialized; ephemeral, put it under /tmp")
+    rehearse.add_argument("--report", required=True,
+                          help="rehearsal report JSON; aggregates only, never rows")
+    rehearse.set_defaults(handler=_cmd_rehearse)
     return parser
+
+
+def _cmd_rehearse(args) -> int:
+    """Run the corpus Definition against one local artifact. Not Stage 1.
+
+    Exit 2 refuses the instance before anything is materialized; 1 means the
+    rehearsal ran and an invariant failed; 0 means every case passed.
+    """
+    from tools.ppd_snapshot.rehearse import InstanceRefused, load_instance
+
+    dist_dir = Path(args.dist)
+    try:
+        instance = load_instance(Path(args.instance), dist_dir)
+    except InstanceRefused as exc:
+        print(f"instance refused: {exc}", file=sys.stderr)
+        return 2
+
+    from tools.ppd_snapshot.rehearse import run_rehearsal
+
+    outcome = run_rehearsal(
+        instance=instance,
+        dist_dir=dist_dir,
+        cache_dir=Path(args.cache_dir),
+        report_path=Path(args.report),
+    )
+    print(f"rehearsal: {outcome['cases_passed']}/{outcome['cases_total']} cases "
+          f"passed; report {args.report}")
+    return 0 if outcome["passed"] else 1
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
