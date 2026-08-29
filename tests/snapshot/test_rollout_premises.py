@@ -495,6 +495,16 @@ def test_the_specification_records_the_corpus_and_rehearsal_as_merged():
     assert "ppd-shadow-corpus.md" in normalised, (
         "the specification never names the corpus document it governs"
     )
+    status = _paragraph(SPEC, "By **GitHub PR #30**")
+    for pr in ("#30", "#31"):
+        assert pr in status, (
+            f"the implementation status does not name GitHub PR {pr}. "
+            f'"PR 6"/"PR 7" are step numbers from section 10 and are not '
+            f"resolvable to anything a reader can look up"
+        )
+    assert "rehearse.py" in status, (
+        "the status names the corpus but not the rehearsal that corrected it"
+    )
 
 
 def test_the_specification_no_longer_denies_the_adapter_it_documents():
@@ -567,6 +577,28 @@ def test_the_distribution_decision_record_exists_and_states_its_limits():
             f"the record states no re-review trigger for {trigger!r}; a "
             f"determination with no reopening condition is a permanent one"
         )
+
+
+def test_the_record_pins_what_is_permitted_and_not_only_what_is_not():
+    """A record that lists only exclusions does not say what was decided.
+
+    Both halves have to be pinned. Widening the permission is the failure this
+    catches -- an edit that quietly dropped "project-controlled Fly Machines",
+    or "read-only", would leave every exclusion below intact while changing what
+    the determination actually allows.
+    """
+    normalised = _normalised(DECISION)
+    for permitted in (
+        "Private delivery of the snapshot bundle to project-controlled Fly "
+        "Machines",
+        "Internal, read-only use for PPD price information",
+    ):
+        assert permitted in normalised, (
+            f"the record no longer states its permitted scope: {permitted!r}"
+        )
+    assert "**Permitted:**" in normalised and "Not permitted" in normalised, (
+        "the record no longer separates what it permits from what it does not"
+    )
     assert "no mutation authority" in normalised.lower(), (
         "the record does not say that permission to distribute is not "
         "permission to create a bucket, upload anything, or configure Fly"
@@ -590,6 +622,31 @@ def test_the_distribution_record_is_a_determination_not_legal_advice():
         assert still_gated in normalised, (
             f"the record does not restate that {still_gated!r} remains gated by "
             f"section 6"
+        )
+
+
+def test_no_section_still_calls_the_distribution_scope_undecided():
+    """Four places said it was open; the final sequence was the fourth.
+
+    Scoped to the phrases that assert an *undecided scope*, because the words
+    "separately authorised" must survive everywhere -- hosting, transport,
+    credentials, retention, audit and every mutation genuinely are.
+    """
+    for document, name in ((SPEC, "specification"), (RUNBOOK, "runbook")):
+        normalised = _normalised(document)
+        for undecided in (
+            "still outstanding",
+            "remains a **separately approved decision**",
+            "is a separately approved decision",
+        ):
+            assert undecided not in normalised, (
+                f"the {name} still calls the distribution scope undecided "
+                f"({undecided!r}), which the owner's determination settled"
+            )
+        assert "separately authorised" in normalised or (
+            "separate mutation authorisation" in normalised), (
+            f"the {name} no longer says the mutations remain separately "
+            f"authorised -- settling the scope does not authorise building it"
         )
 
 

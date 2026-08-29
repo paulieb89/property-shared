@@ -47,14 +47,20 @@ By **PR 5**: the local build and validation pipeline of section 4.8 — build,
 gates, packaging, source receipt, boot check and atomic promotion — local only,
 with no upload, image, deployment or flag surface touched.
 
-By **PR 6** (rollout step 6, first half): the fixed shadow corpus of section 7.2,
-as [`docs/design/ppd-shadow-corpus.md`](ppd-shadow-corpus.md) — the Definition,
-split from the artifact-bound Instance that is written when the Stage 1 artifact
-is selected. By **PR 7** (rollout step 6, second half): the local rehearsal of
-that corpus in `tools/ppd_snapshot/rehearse.py`, adapter-only and socket-blocked,
-which ran against one real artifact and corrected four defects in the Definition
-before it was frozen. **Neither is Stage 1**, and the rehearsal produces no
-Stage 1 evidence — see section 7.2.
+By **GitHub PR #30** (rollout step 6, first half): the fixed shadow corpus of
+section 7.2, as [`docs/design/ppd-shadow-corpus.md`](ppd-shadow-corpus.md) — the
+Definition, split from the artifact-bound Instance that is written when the
+Stage 1 artifact is selected. By **GitHub PR #31** (rollout step 6, second half):
+the local rehearsal of that corpus in `tools/ppd_snapshot/rehearse.py`,
+adapter-only and socket-blocked, which ran against one real artifact and
+corrected four defects in the Definition before it was frozen. **Neither is
+Stage 1**, and the rehearsal produces no Stage 1 evidence — see section 7.2.
+
+The numbering is deliberately explicit: "PR 1"–"PR 5" above are the *specified*
+sequence of section 10, which stops at the build pipeline. #30 and #31 are the
+GitHub pull requests that merged the corpus work, and conflating the two
+numbering schemes is how a reader loses track of which is a plan and which is a
+fact.
 
 **Still unimplemented or unperformed:** the **hosting, credentials, transport,
 retention and audit design** for artifact distribution, and its implementation
@@ -1286,12 +1292,16 @@ Then, each separately authorised:
 5. **Build pipeline** — *merged (PR 5).* 11-partition year-only build, manifest
    with `provisional_from`, daily release check, monthly rebuild.
    **Local build and validation only. No upload, bucket, Fly secret, cloud
-   resource or production mutation** (§4.8). Artifact distribution remains a
-   separate approval, still outstanding.
-6. **Fixed shadow corpus**, agreed before Stage 1 and frozen for its duration. A
-   local rehearsal of that corpus against an already-verified artifact is a
-   correctness exercise only: it **cannot satisfy** Stage 1's real-traffic p95 or
-   divergence exit criteria.
+   resource or production mutation** (§4.8). Artifact distribution's **scope is
+   determined** — see
+   [`ppd-artifact-distribution-decision.md`](ppd-artifact-distribution-decision.md)
+   — while its **hosting, credentials, transport, retention and audit remain a
+   separate design, and every mutation remains separately authorised.**
+6. **Fixed shadow corpus** — *merged (PR #30), and frozen.* Agreed before Stage 1
+   and frozen for its duration. Its **local rehearsal** — *merged (PR #31)* — is
+   a correctness exercise only: it **cannot satisfy** Stage 1's real-traffic p95
+   or divergence exit criteria. The artifact-bound corpus **Instance** is written
+   when the Stage 1 artifact is selected, and has not been.
 7. **Rollout gates** — G1a (`property-shared`, 2 GB), G1b (`propertydata`,
    512 MB), G2 (verified worker count, or one worker pinned) and G3
    (dependency-only images landed, deployed and observed with the flag off).
