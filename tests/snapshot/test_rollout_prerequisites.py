@@ -163,14 +163,19 @@ def test_the_definitive_gate_is_recorded_in_the_governing_specification():
 
     assert "G3" in normalised, "the image prerequisite is not listed as a rollout gate"
     assert "--extra snapshot" in normalised
-    # 1. unconditional install before routing
+    # 1. unconditional install, landed and observed with the flag off
     assert "unconditionally" in normalised
     # 2. built-image smoke tests
     assert "smoke test" in normalised
     # 3. fail closed with readiness false
     assert "fails closed" in normalised
-    # 4. flag stays off until the image checks, G1 and G2 pass
-    assert "G1 and G2" in normalised
+    # 4. flag stays off until the image checks, G2 and the target's G1 gate pass.
+    #    G1 is split per target: neither result transfers to the other app.
+    assert "G1a" in normalised and "G1b" in normalised and "G2" in normalised
+    assert "deploy and be observed" in normalised, (
+        "G3 no longer states the deploy-and-observe invariant that replaced the "
+        "now-impossible 'before routing is introduced' ordering"
+    )
 
 
 def test_the_specification_states_this_lint_is_not_sufficient():

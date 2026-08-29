@@ -131,7 +131,7 @@ async def snapshot_lifespan() -> AsyncIterator[None]:
     import anyio.to_thread
 
     # The boot does blocking I/O -- network, disk, and a flock wait of up to
-    # LOCK_WAIT_SECONDS. Off the event loop so a co-hosted FastAPI app is not
+    # lock.DEFAULT_TIMEOUT. Off the event loop so a co-hosted FastAPI app is not
     # frozen while a sibling worker holds the single-flight lock.
     await anyio.to_thread.run_sync(boot_once)
     try:

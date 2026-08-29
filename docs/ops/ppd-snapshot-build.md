@@ -159,9 +159,10 @@ through the real runtime from there, and promoted only on `READY`.
 enforced rather than advised: promotion compares their device IDs and refuses
 before moving anything if they differ. `os.replace` cannot cross devices and
 `shutil.move` silently degrades to a copy — not atomic, and it doubles both the
-transient disk and the wall time the G1 model was measured against, while
+transient disk and the wall time the G1a/G1b model is derived from, while
 leaving a window where a half-copied bundle sits in the publishing directory.
-Promotion is `os.replace` throughout, never a copy.
+That model is derived, not measured: no wall time has been observed on either
+Machine. Promotion is `os.replace` throughout, never a copy.
 
 Promotion moves the bundle, then the manifest, then the report, and replaces
 `current.json` **last and atomically** (write a unique sibling, then rename). A pointer is
@@ -329,32 +330,42 @@ depend on it: what it checks is the *logical* content digest — same rows, same
 values, same order, per partition — which is a property of the build rather than
 of the writer.
 
-### What this means for G1
+### What this means for G1a and G1b
 
-| | Specification §1.1 / §4.7 | Measured |
-|---|---|---|
-| Bundle size | 214 MiB | **266.2 MiB** (+24.4%) |
-| Download @100 Mbit/s | 18.0 s | **~22.3 s** |
-| Peak transient boot disk | ~444 MiB implied | **~534.1 MiB** (bundle and extraction both live until the bundle is unlinked) |
-| §4.7 free-space precondition (`bundle_bytes * 2.5`) | ~535 MiB | **665.4 MiB** |
+| | Superseded §1.1 / §4.7 baseline | Now | Class |
+|---|---|---|---|
+| Bundle size | 214 MiB (year+area) | **266.2 MiB** (+24.4%) | **measured** — 279,109,872 B |
+| Extracted | ~230 MiB implied | **267.9 MiB** | **measured** — 280,925,271 B |
+| Transfer @100 Mbit/s | 18.0 s | ~22.3 s | *calculated* — bytes × 8 / 1e8 |
+| Simultaneous bundle + extracted payload | ~444 MiB implied | ~534.1 MiB | *calculated* — 266.2 + 267.9, arithmetic only |
+| §4.7 free-space precondition (`bundle_bytes * 2.5`) | ~535 MiB | ~665.4 MiB | *calculated* — policy constant × measured bytes |
 
-These are inputs to G1, not a G1 result: G1 is a measurement on the real 512 MB
-Fly machine and is **not** part of this work.
+**Only the first two rows are measurements.** The remaining three are arithmetic
+over them, and are stated as inputs rather than results. In particular
+~534.1 MiB is **not** a measured peak disk figure: it is a sum that ignores
+staging directories, per-attempt temporary files and filesystem overhead, and no
+overlap has been observed on any machine.
 
-## Known correction required before G1
+These are inputs to G1a/G1b, not their outcome. **G1a** measures actual
+allocation, extraction overlap, transfer and readiness on `property-shared`
+(2 GB RAM, ephemeral rootfs); **G1b** repeats it on `propertydata` (512 MB RAM,
+ephemeral rootfs). Neither app declares a Fly Volume. Passing G1a authorises
+neither `propertydata` nor Stage 3. Neither gate is part of this work.
 
-§1.1 of the frozen specification sizes eleven partitions at **214 MiB**. That
-figure is a **year+area** measurement, while §1.2 mandates **year-only**, which
-the same Phase 3 run measured at **+22%**. The real year-only bundle is
-materially larger (see the table above), which moves two numbers the rollout
-depends on:
+## Sizing correction — applied in specification rev 7
 
-* the §1.1 download estimate (18.0 s @100 Mbit/s) understates transfer time, and
-  therefore overstates the headroom inside the 30 s readiness target; and
-* **G1** — transient boot disk on the 512 MB Fly app — must be measured against
-  the real bundle size, with §4.7's `bundle_bytes * 2.5` free-space rule applied
-  to it.
+§1.1 previously sized eleven partitions at **214 MiB** — a superseded year+area
+measurement, while §1.2 mandates **year-only**, which the same Phase 3 run
+measured at **+22%**. The real year-only bundle is materially larger (see the
+table above), which moved two numbers the rollout depends on:
 
-**The specification is frozen and is not edited by this PR.** Correcting §1.1's
-sizing table is a decision round that belongs before G1 and the rollout.
-`MAX_BUNDLE_BYTES` (1 GiB) is unaffected and still has ample margin.
+* the §1.1 transfer figure (18.0 s @100 Mbit/s) understated transfer time and so
+  overstated the headroom inside the 30 s readiness target — now ~22.3 s,
+  calculated, leaving ~7.7 s; and
+* the transient-disk budget, now split into **G1a** (`property-shared`, 2 GB) and
+  **G1b** (`propertydata`, 512 MB), each measured against the real bundle with
+  §4.7's `bundle_bytes * 2.5` free-space rule applied to it.
+
+**Specification rev 7 carries the correction**; this runbook records the
+measurement it was derived from. `MAX_BUNDLE_BYTES` (1 GiB) is unaffected and
+retains a ~3.8x margin over the measured bundle.

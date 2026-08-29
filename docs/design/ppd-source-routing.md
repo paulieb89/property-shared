@@ -1,7 +1,16 @@
-# PPD source-routing and implementation specification (rev 6 — FROZEN)
+# PPD source-routing and implementation specification (rev 7 — FROZEN)
 
-**Status:** **FROZEN at rev 6.** Accepted. No further architecture work. Changes
+**Status:** **FROZEN at rev 7.** Accepted. No further architecture work. Changes
 to this document require a new decision round, not an edit in passing.
+
+**Revision 7** was authorised by the rollout-premise decision round, after
+PR 5 produced and measured a real artifact. It corrects the §1.1 sizing baseline
+against measured bytes, separates measurements from calculations, splits G1 into
+the per-target gates G1a and G1b, replaces G3's now-impossible "before routing is
+introduced" ordering with a satisfiable deploy-and-observe invariant, updates the
+implementation status to PRs 1-5, and removes Fly-Volume language from §7.2. **No
+requirement is relaxed:** the 30 s readiness target, the `bundle_bytes * 2.5`
+headroom rule and every Stage 1 exit criterion are unchanged.
 
 **Revision 6** was authorised by the PR 4 review, which found that §2.5 checked
 only the lower coverage bound. It adds the disjoint and extends-past cases, the
@@ -22,10 +31,17 @@ wiring per section 4.10; coverage routing and the bounded existence probe of
 sections 2.4-2.5; live fallback on every typed snapshot failure; and response
 wiring of the provenance block across all four consumers.
 
-**Still unimplemented:** the build pipeline (PR 5), the fixed shadow corpus
-(PR 6), and rollout gates G1-G3 (PR 7) with the staged enablement that follows.
-`PPD_SNAPSHOT_ENABLED` remains off, neither production image installs the
-`snapshot` extra, and no request is served from a snapshot in production.
+By **PR 5**: the local build and validation pipeline of section 4.8 — build,
+gates, packaging, source receipt, boot check and atomic promotion — local only,
+with no upload, image, deployment or flag surface touched.
+
+**Still unimplemented or unperformed:** artifact distribution and the Royal Mail
+review that gates it (§6); the dependency-only image rollout; real completion of
+G1a, G1b, G2 and G3; the fixed shadow corpus and its local rehearsal; the Stage 1
+production shadow; snapshot enablement at any stage; and the v1.15 release.
+`PPD_SNAPSHOT_ENABLED` remains off in all checked-in configuration, neither
+production image installs the `snapshot` extra, and no request is served from a
+snapshot in production.
 
 **Deliberately not implemented, and not deferred by omission:** auto-escalation
 stays disabled on both sources. The snapshot adapter does supply the
@@ -69,14 +85,26 @@ not from a year boundary:
 Ten calendar-year partitions would silently under-serve a legal 120-month request
 for most of the year. **The snapshot retains the last 11 calendar-year partitions.**
 
-| Partitions | Years | Size | Download @100 Mbit/s |
+| Partitions | Years | Size | Transfer @100 Mbit/s |
 |---|---|---|---|
-| 10 | 2017–2026 | 193 MiB | 16.2 s |
-| **11** | **2016–2026** | **214 MiB** | **18.0 s** |
-| 12 | 2015–2026 | 244 MiB | 20.4 s |
+| 10 | 2017–2026 | 193 MiB — **estimated** (year+area basis) | 16.2 s — **calculated from that estimate** |
+| **11** | **2016–2026** | **266.2 MiB — measured (year-only)** | **22.3 s — calculated from the measurement** |
+| 12 | 2015–2026 | 244 MiB — **estimated** (year+area basis) | 20.4 s — **calculated from that estimate** |
 
-18.0 s transfer leaves ~12 s inside the 30 s readiness target; Phase 3 measured
-extract+probe at 2.0 s on a 4.4x larger bundle.
+**The eleven-partition row is the only measured row.** 279,109,872 bytes
+(266.2 MiB), from two independent local builds on 2026-08-28 that produced a
+byte-identical bundle (`docs/ops/ppd-snapshot-build.md`).
+An earlier revision published 214 MiB here — a superseded year+area measurement
+applied to a year-only layout, when §1.2 mandates year-only and the same Phase 3
+run measured that layout at +22%. The 10- and 12-partition rows remain year+area
+**estimates**, retained only for shape; their transfer times are calculated from
+those estimates and are therefore doubly derived.
+
+**22.3 s is arithmetic, not a measurement**: 279,109,872 × 8 / 1e8, assuming full
+link utilisation and zero protocol overhead. It leaves ~7.7 s inside the 30 s
+readiness target — down from the ~12 s the superseded figure implied. No real
+transfer has been timed on either Machine; only G1a/G1b can produce one. Phase 3
+measured extract+probe at 2.0 s on a 3.55x larger bundle (945.5 MiB).
 
 The published guarantee is **`from_date >= coverage_from`**, never "10 years".
 
@@ -578,7 +606,8 @@ one undifferentiated label.
 * Bundle **streamed** to a temp file in 1 MiB chunks, SHA-256 incremental. **The
   body is never held in memory** — verified at scale: a 945.5 MiB bundle booted at
   199.5 MB peak RSS.
-* Limits: `MAX_BUNDLE_BYTES` **1 GiB** (~4.8x margin over 214 MiB); socket
+* Limits: `MAX_BUNDLE_BYTES` **1 GiB** (~3.8x margin over the measured
+  266.2 MiB bundle); socket
   timeout **10 s**; total download deadline **300 s**; stall detection
   **60 s**. Any breach aborts and deletes the temp file. Both time budgets are
   checked after **every** read, the one returning EOF included — checking only
@@ -688,7 +717,8 @@ version identify several different snapshots.
 ### 4.6 Process-safe single-flight
 Exclusive `flock()` on `<cache>/.boot.lock` held across download → verify →
 extract → activate. A worker that cannot acquire it **blocks** (bounded by
-`LOCK_WAIT_SECONDS`, default 420 s), then re-reads `CURRENT` and activates from
+`property_core.snapshot.lock.DEFAULT_TIMEOUT`, default 420 s), then re-reads
+`CURRENT` and activates from
 cache with **no download**. The lock file records a PID for diagnosis only:
 `flock` is released by the kernel when its holder dies, so there is no stale lock
 to break, no `LOCK_STALE_SECONDS`, and no PID consulted to decide whether the
@@ -976,7 +1006,8 @@ be vacuous or need a premature stub:
 34. Concurrent startup single-flight: N workers, cold cache → exactly **one**
     download; others activate from cache.
 35. Cached restart performs **zero** additional download.
-36. Cleanup retains exactly current + previous.
+36. Cleanup retains exactly the active version; no previous version survives
+    (§4.7).
 37. Insufficient disk → typed failure before download begins.
 38. Stale verified snapshot is served rather than going unready;
     `freshness_days > 45` emits a warning.
@@ -1012,19 +1043,62 @@ explanation, not a similarity score.
 
 The corpus is agreed before Stage 1 begins and is fixed for the duration.
 
+**A local rehearsal is not Stage 1.** Exercising the fixed corpus against an
+already-verified local artifact validates routing, coverage handling and
+divergence classification. It produces no real-traffic sample, so it **cannot
+satisfy** the p95 criterion or the divergence exit criteria, and must never be
+recorded as a Stage 1 result. Consistent with the rule above, live SPARQL is
+diagnostic, not the numerical gold standard; any new live SPARQL call is a
+separately authorised action.
+
 **Stage 2 — opt-in. Hard deployment gates, measured before the flag is enabled.**
 
 The two facts Phase 3 could not evidence are now **blocking gates**, not caveats:
 
-* **G1 — transient boot disk measured on the real 512 MB Fly app.** Measure peak
-  transient disk for the **11-partition** bundle (~214 MiB streamed + ~230 MiB
-  extracted, both live until the atomic rename) on the actual machine. The
-  measurement must be taken, recorded, and fit within the machine's volume with
-  the §4.7 `bundle_bytes * 2.5` headroom rule satisfied.
+* **G1a — transient boot behaviour measured on `property-shared`, the 2 GB-RAM
+  Stage 2 target.** On that app's actual image and Machine, measure: peak
+  transient disk during materialization; the overlap window in which the bundle
+  and its extraction are both live; wall-clock transfer time; and time to
+  readiness. The materialization is on Fly's **default ephemeral rootfs** —
+  neither app declares a Volume or `persist_rootfs` (§4.5) — so the constraint is
+  free rootfs bytes, not volume capacity, and it must be observed on the Machine
+  rather than assumed. **Where the materialization root resolves
+  (`PPD_SNAPSHOT_CACHE_DIR`, default `/tmp/ppd-snapshot`) must first be
+  established as disk-backed rather than tmpfs-backed**, or the disk and RAM
+  figures mean different things than they appear to. The §4.7
+  `bundle_bytes * 2.5` free-space precondition must hold against the real
+  measured bundle. The 30 s readiness target is unchanged.
+
+  **Calculated inputs, to be confirmed or refuted by the measurement — never
+  reported as its result:** ~534.1 MiB simultaneous bundle-plus-extracted payload
+  (266.2 + 267.9, arithmetic only; excludes staging directories, per-attempt
+  temporary files and filesystem overhead); ~665.4 MiB preflight threshold
+  (`bundle_bytes * 2.5`); ~22.3 s transfer at a nominal 100 Mbit/s. **None of
+  these is a measured peak.**
+
+* **G1b — the same measurement on `propertydata`, the 512 MB-RAM Stage 3
+  target**, on its own image and Machine, likewise on ephemeral rootfs.
+
+  **Both gates test ephemeral-rootfs disk behaviour; RAM size is a separate
+  constraint measured alongside it.** The two targets differ in RAM, image,
+  entrypoint and health-check grace period (60 s against 30 s), so no result
+  transfers between them. **Passing G1a authorises neither `propertydata` nor
+  Stage 3.** Stage 2 requires G1a; Stage 3 requires G1b.
 * **G2 — worker count verified, or one worker explicitly pinned.** All Phase 2/3
   RSS figures are a single uvicorn process. Either verify the deployed worker
   count and re-derive the RSS budget for that count, **or** explicitly pin the
-  app to one worker and record that as a deployment constraint.
+  app to one worker and record that as a deployment constraint. Verification is
+  read-only; **pinning is a deployment mutation with its own authorisation.**
+
+  **Open, and blocking G2 if the deployed count exceeds one:** boot runs inside
+  the lifespan and therefore blocks startup, a worker waiting on the §4.6
+  single-flight lock can block for up to 420 s, and the Fly health-check grace
+  periods are 60 s (`property-shared`) and 30 s (`propertydata`). Those three
+  numbers are not reconciled anywhere. At one worker per Machine the lock never
+  contends and the question is moot; above one it must be answered before the
+  flag is enabled. **Rev 7 records this and deliberately does not resolve it** —
+  a resolution needs deployment evidence or a new operational policy, neither of
+  which a documentation correction may invent.
 
 * **G3 — the snapshot extra is installed in both production images, and proven
   to be.** The boot runtime imports `duckdb` and `zstandard`, which live only in
@@ -1036,9 +1110,14 @@ The two facts Phase 3 could not evidence are now **blocking gates**, not caveats
 
   G3 passes only when all four hold:
 
-  1. **Both production Dockerfiles install `--extra snapshot` unconditionally**,
-     landed *before* routing is introduced — not alongside it, so the dependency
-     change can be deployed and observed on its own.
+  1. **Both production Dockerfiles install `--extra snapshot` unconditionally.**
+     **The dependency-only image change must land, deploy and be observed with
+     `PPD_SNAPSHOT_ENABLED` off before any snapshot enablement.** An earlier
+     revision required this *before routing is introduced*; routing merged in
+     PR 4, so that ordering can no longer be satisfied by any future action and
+     was replaced rather than quietly dropped. The intent it protected is kept
+     in full: the dependency change ships and is observed on its own, carrying
+     no behavioural change with it.
   2. **Built-image smoke tests import both `duckdb` and `zstandard`** in the
      actual built image. Reading the Dockerfile is not evidence that the wheel
      resolved, installed and imports on that platform.
@@ -1046,8 +1125,9 @@ The two facts Phase 3 could not evidence are now **blocking gates**, not caveats
      raises the typed `snapshot_extra_missing` error, snapshot readiness stays
      **false**, and the live source continues to serve. A missing optional
      dependency must never take the service down or silently half-enable it.
-  4. **The production flag is not enabled until those image checks, G1 and G2
-     all pass.**
+  4. **The production flag is not enabled until those image checks, G2, and the
+     G1 gate for the target being enabled, all pass** — G1a for Stage 2 on
+     `property-shared`, G1b for Stage 3 on `propertydata`.
 
   **What the repository test does NOT cover.** `tests/snapshot/test_rollout_prerequisites.py`
   is a **repository-config lint**, not enforcement of G3. It reads the checked-in
@@ -1062,9 +1142,10 @@ The two facts Phase 3 could not evidence are now **blocking gates**, not caveats
 **If any gate fails or cannot be measured, stop before enabling the flag.**
 No estimate substitutes for the measurement.
 
-Once both pass: enable for `comps`/`yield`/`report`/`blocks` on `property-shared`
-only; live adapter as automatic fallback on typed snapshot errors. Monitor
-`source` distribution and warning rates.
+Once G1a, G2 and G3 all pass: enable for `comps`/`yield`/`report`/`blocks` on
+`property-shared` only; live adapter as automatic fallback on typed snapshot
+errors. Monitor `source` distribution and warning rates. **Stage 3 additionally
+requires G1b.**
 
 **Stage 3 — default on**, both images. Live retained as fallback and as the sole
 path for exact-ID, address-search and subject-property lookups.
@@ -1130,8 +1211,9 @@ Hot refresh while serving; cross-machine fetch coordination; incremental/delta
 snapshot updates; a separate full-history service (**O6** — deep history is not a
 current product requirement); aligning the 60/120-month limits (**O5**); any bulk
 or address export (§6). Untested and therefore unclaimed: real Tigris latency or
-reliability; behaviour on a real 512 MB Fly machine, especially transient boot
-disk; concurrency beyond 2 simultaneous queries; soak testing; multi-worker RSS
+reliability; behaviour on either real Fly Machine — `property-shared` (2 GB) or
+`propertydata` (512 MB) — especially transient boot disk on ephemeral rootfs;
+concurrency beyond 2 simultaneous queries; soak testing; multi-worker RSS
 totals — all Phase 2/3 figures are a single uvicorn process.
 
 ---
@@ -1156,15 +1238,19 @@ learns more is not available and must not be worked around with
 
 Then, each separately authorised:
 
-5. **Build pipeline** — 11-partition year-only build, manifest with
-   `provisional_from`, daily release check, monthly rebuild.
+5. **Build pipeline** — *merged (PR 5).* 11-partition year-only build, manifest
+   with `provisional_from`, daily release check, monthly rebuild.
    **Local build and validation only. No upload, bucket, Fly secret, cloud
-   resource or production mutation** (§4.8). Artifact distribution is a separate
-   approval.
-6. **Fixed shadow corpus**, agreed before Stage 1 and frozen for its duration.
-7. **Rollout gates** — G1 (measured transient disk on the real 512 MB Fly app for
-   the 11-partition bundle) and G2 (verified worker count, or one worker pinned).
-   **Either failing stops the rollout before the flag is enabled.**
+   resource or production mutation** (§4.8). Artifact distribution remains a
+   separate approval, still outstanding.
+6. **Fixed shadow corpus**, agreed before Stage 1 and frozen for its duration. A
+   local rehearsal of that corpus against an already-verified artifact is a
+   correctness exercise only: it **cannot satisfy** Stage 1's real-traffic p95 or
+   divergence exit criteria.
+7. **Rollout gates** — G1a (`property-shared`, 2 GB), G1b (`propertydata`,
+   512 MB), G2 (verified worker count, or one worker pinned) and G3
+   (dependency-only images landed, deployed and observed with the flag off).
+   **Any of them failing stops the rollout before the flag is enabled.**
 8. **Stage 2 opt-in**, then **Stage 3 default on**.
 
 PR 2 is the only PR in this sequence that changes behaviour, and it does so
