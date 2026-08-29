@@ -1,0 +1,334 @@
+# PPD shadow-comparison corpus — Definition
+
+**Status:** proposed. Governed by
+[`docs/design/ppd-source-routing.md`](ppd-source-routing.md) rev 7 §7.2, which
+this document implements and never overrides.
+
+**Scope: `comps` only.** The explicit-date coverage-refusal path on
+`GET /v1/ppd/transactions` (§2.5) is covered by its own routing tests. Pulling it
+in would turn a focused shadow corpus into a multi-surface programme.
+
+---
+
+## 0. Definition and Instance
+
+This document is the **Definition**: request shapes, frozen parameters, semantic
+assertions, the divergence taxonomy, warning-class predicates and recording
+rules. It contains **no artifact, no execution date and no aggregate counts.**
+
+Those belong to a **corpus Instance**, written when the Stage 1 artifact is
+selected:
+
+| | Definition (this file) | Instance |
+|---|---|---|
+| Contains | shapes, parameters, assertions, taxonomy, predicates, recording rules | selected `snapshot_version` + `bundle_sha256`, qualification date, per-case aggregate baselines, its staleness bound, the Stage 1 run it governs |
+| Changes when | the contract changes — a new decision round | a new artifact is selected |
+| Lifetime | stable across artifacts | one artifact, one Stage 1 run |
+
+**A new artifact creates a new instance and restarts Stage 1.** It never
+silently mutates the corpus. A monthly rebuild legitimately moves counts and
+shifts `provisional_from`; under this split that is an expected instance change
+rather than corpus drift, and evidence for a run already under way cannot be
+rewritten beneath it.
+
+Aggregate figures gathered while selecting the shapes below are **evidence that
+each shape is selectable — not a Stage 1 baseline.** They are deliberately not
+recorded here.
+
+---
+
+## 1. Purpose, and the explicit non-goal
+
+The corpus is a fixed, pre-agreed set of `comps` requests that the Stage 1
+shadow runs through both adapters, **returning the live result** and recording a
+structured diff. It exists so that "the snapshot agrees with live" is a claim
+about cases chosen in advance, rather than a summary over whatever traffic
+happened to arrive. Shadow failures never affect the response.
+
+**Non-goal: live SPARQL is not the numerical gold standard.** A divergence is a
+question to answer, not automatically a snapshot defect — live is subject to its
+own truncation, timeout and ordering behaviour. Exit requires explanation, not a
+similarity score. No case below is written as "the snapshot should return what
+live returns"; each is written as "this case exercises risk X, and a difference
+must be classifiable".
+
+The corpus is agreed before Stage 1 begins and **frozen for its duration**.
+Amending it mid-flight restarts Stage 1.
+
+---
+
+## 2. Frozen parameters
+
+Every case record carries all of the following. **No parameter may be left
+implicit in the record**, because a default that changes silently rewrites the
+corpus.
+
+The record distinguishes what goes **on the wire** from the **effective
+semantics** it selects. At the HTTP surface, omission is the only way to request
+the residential default — there is no value that expresses it — so the record
+must not claim to send one.
+
+| Parameter | Wire | Effective semantics |
+|---|---|---|
+| `postcode` | per case | the geography |
+| `search_level` | per case — `postcode` / `sector` / `district` | selects geography; **not** a prefix string |
+| `months` | per case | the only window control `comps` accepts (§6) |
+| `limit` | `50` | `DEFAULT_LIMIT`; caps returned rows |
+| `property_type` | **intentionally omitted** | `residential_default (F/D/S/T)` — omitted is not "unfiltered"; the sentinel `ALL` is a different, wider request |
+| `transaction_category` | `"A"` | standard residential sales only; excludes category B |
+| `filter_outliers` | `false` | when true, drops rows from stats *and* the list |
+| `auto_escalate` | `true` | compatibility only; no widening — but the warning is source-specific, so it is part of the compared surface |
+| `address` | **intentionally omitted** | `None` — no subject-property lookup |
+| `enrich_epc` | `false` | explicit; avoids a network dependency |
+
+An omitted parameter is recorded as `omitted` on the wire together with the
+effective semantics it selects, never as a literal `null` query value.
+
+`transaction_category="all"` is the REST spelling that disables category
+filtering (`app/api/v1/ppd.py`, which maps `""` and `"all"` to `None`); a core
+caller passes `transaction_category=None`. Core callers additionally inherit
+`thin_market_threshold=5` and `coverage_policy=GUARANTEED`, which the REST
+surface does not expose. **The corpus is specified at the REST surface.**
+
+---
+
+## 3. Universal invariants
+
+`comps` never sends `to_date`. Routing therefore takes the clamp branch
+unconditionally, `fully_contained` is always false, and the completeness basis
+is discarded. On **every** snapshot-side case, whatever the artifact, date or
+row count:
+
+* the **coverage clamp** warning class is **present**;
+* **`sample_complete` is `false`** — including where the returned page is
+  plainly exhausted, far below `limit`. Exhausting a page is not completeness
+  when the requested interval extends past what the snapshot holds;
+* **`completeness_basis` is `null`**.
+
+These are structural, not situational. A case reporting `sample_complete: true`
+is a **defect**, not a divergence.
+
+**`sample_complete` carries no comparative signal** and is asserted as an
+invariant rather than compared between adapters: the live path reaches it
+through transport-exhaustion evidence (§2.7.3), so agreement would be
+coincidence rather than confirmation.
+
+---
+
+## 4. Case shapes
+
+Parameters and intent only. Geographies written as placeholders are selected by
+the Instance against the stated qualification rule; `B5`/`B50` are named here
+because that boundary is a definitional choice rather than an artifact property,
+though an Instance must still qualify them and may substitute with recorded
+justification.
+
+| # | Request shape | Intent | Instance qualifies by verifying |
+|---|---|---|---|
+| S1 | `postcode=B5`, `search_level=district` | contamination boundary | the longer neighbouring outcode holds comparable or greater volume |
+| S2 | `postcode=B50`, `search_level=district` | reverse boundary | non-empty under frozen parameters |
+| S3 | `postcode=B5 4`, `search_level=sector` | sector isolation | a strict subset of S1 |
+| S4 | `postcode=<sector>`, `search_level=sector` | thin market | falls below `thin_market_threshold` under frozen parameters |
+| S5 | `postcode=<sector>`, `search_level=sector` | dense market and truncation | matching rows greatly exceed `limit` |
+| S6 | `postcode=<unit>`, `search_level=postcode` | exact-postcode geography | aggregate-dense, so not individually identifying |
+| S7 | `postcode=<sector>`, `search_level=sector`, `property_type=F` | type filter that barely bites | at least 90% of the base is `F` |
+| S8 | `postcode=<sector>`, `search_level=sector`, `property_type=F` | type filter that genuinely bites | a real spread across `F/D/S/T` |
+| S9 | S3's geography, `transaction_category=all` | category filtering | materially exceeds S3 on identical geography and window |
+| S10 | `postcode=<sector>`, `search_level=sector`, `months=6` | provisional tail, non-empty | window intersects the provisional period; returns rows |
+| S11 | `postcode=<sector>`, `search_level=sector`, `months=6` | **the provisional flag is a property of the window** | window intersects the provisional period; **returns zero rows** |
+| S12 | `postcode=B5`, `search_level=district`, `months=120` | widest window, deepest history | matching rows greatly exceed `limit` |
+| S13 | `postcode=<unit>`, `search_level=postcode`, `property_type=D` | expected empty | geography non-empty under defaults, that type absent |
+| S14 | S3's geography, `property_type=T` | expected empty, sector shape | as S13 |
+
+**S11 is the case a naive implementation gets wrong.** `recent_period_provisional`
+is computed from the resolved *requested window* before any row is examined, so
+an empty result whose window intersects the provisional period must still report
+`true`.
+
+**S12 makes no coverage-floor claim.** `months` is capped at 120 and its lower
+bound moves *forward* over time, away from `coverage_from` — it does not descend
+toward it. S12 probes depth and truncation. **No `comps` case can exercise the
+coverage-floor narrowing path** (§9).
+
+---
+
+## 5. Warning classes — executable predicates
+
+**Compare class presence and semantics. Never compare warning text.** Snapshot
+and live warnings are deliberately worded differently by source, so comparing
+strings would fail the corpus on a wording change and would encode prose as
+contract.
+
+Two classes are **structured fields** and need no string matching at all — the
+field is the contract and the warning is its human rendering:
+
+| Class | Predicate | Sources |
+|---|---|---|
+| provisional | `provenance.recent_period_provisional is True` | both |
+| thin market | `response.thin_market is True` | both |
+
+The remainder match a narrow substring, each quoted from the call site that
+emits it:
+
+| Class | Predicate — warning contains | Sources |
+|---|---|---|
+| coverage clamp | `beyond snapshot coverage` **and** `are not included` | snapshot |
+| coverage-floor narrowing | `narrowed to` **and** `coverage` | snapshot |
+| freshness | `days behind its coverage end` | snapshot |
+| escalation containment | starts with `auto-escalation not applied:` | both |
+| live incompleteness | `the upstream window was not exhausted` | live |
+| geography containment | `removed by geography containment` | live |
+
+**Escalation containment is the one class whose marker is shared and whose tail
+is deliberately source-specific**, which is why it is matched prefix-anchored.
+
+**Geography containment is a first-class signal for S1 and S2.** Its presence on
+the live side means live received out-of-area rows and filtered them — evidence
+about live's behaviour, not a snapshot divergence.
+
+Divergence in **which classes appear** is a finding. Divergence in **how a class
+is worded** is not, and must not be recorded as one.
+`tests/snapshot/test_shadow_corpus_definition.py` pins every substring above
+against its emitting module, so a reworded warning fails loudly here instead of
+silently reclassifying observations.
+
+---
+
+## 6. Recording rules
+
+`comps` accepts only `months`, and derives `from_date` internally as
+`today − months × 30 days`. There is no public way to pass an absolute window,
+and **no clock seam is proposed** — introducing one would be a new surface with
+its own design and authorisation.
+
+Recorded per observation, **computed by the harness**:
+
+| Field | Source |
+|---|---|
+| `observed_at_before` / `observed_at_after` | the calendar date, captured immediately before and after each shadow pair |
+| `derived_from_date` | computed by the harness as `observed_at − months × 30 days` |
+| `resolved_to_date` | `provenance.coverage_to` — comps always clamps |
+| artifact identity | `snapshot_version`, `bundle_sha256`, `coverage_from`, `coverage_to`, `provisional_from` |
+| warning classes | per §5, per source |
+
+**The resolved window is not in provenance.** That block carries `source`,
+`source_release`, `snapshot_imported_at`, `coverage_from`, `coverage_to`,
+`freshness_days`, `recent_period_provisional`, `older_records_exist`,
+`sample_count`, `sample_limit`, `sample_complete`, `completeness_basis`,
+`attribution_ref` and `warnings` — no resolved `from_date` or `to_date`. So
+`derived_from_date` is a **reconstruction**, recorded as such: it mirrors the
+service's arithmetic rather than observing it, and would diverge silently if
+that arithmetic changed. The guard test pins it behaviourally.
+
+**Warning prose must never be parsed as an API contract.** The warnings state
+the clamp in English for humans; treating them as a machine-readable window
+would couple the corpus to wording that is explicitly allowed to differ by
+source.
+
+### Midnight guard
+
+`comps` derives its window internally from `date.today()`, so two sequential
+adapter calls can straddle midnight and compare windows a day apart.
+
+**If `observed_at_before != observed_at_after`, the observation is excluded from
+corpus evidence and re-run.** Exclusions are counted and reported: a run
+discarding many observations is a signal about the harness, not free of
+consequence.
+
+**Comparability holds within an observation** — one process, one instant, one
+clock, so both adapters derive the same window. It does **not** hold across
+observations on different days, and counts are read against each observation's
+own recorded window.
+
+---
+
+## 7. Divergence taxonomy — these four only
+
+1. **Provisional-tail lag** — the window intersects the provisional period and
+   live has received rows the build predates.
+2. **Later A/C/D revision** — rows revised by monthly change records after the
+   build's source release.
+3. **Live truncation or ordering** — live returned fewer or differently ordered
+   rows through its own `fetch_limit`, timeout or ordering behaviour. **This
+   class must be evidenced** (`raw_bindings_returned`, `fetch_limit`), never
+   assumed because the snapshot returned more.
+4. **Unclassified — blocking.** Never downgraded to "acceptable variance".
+
+**Geography contamination is not a class.** A B50 row in a B5 result is a defect
+in whichever source produced it.
+
+---
+
+## 8. Stage 1 exit criteria
+
+Carried forward from rev 7 §7.2 unchanged. All must hold. **No percentage
+threshold.**
+
+* **Zero unexplained false empties** — no case where the snapshot returns empty
+  and live returns rows within coverage without a classified explanation.
+* **Zero geography contamination** — no B50-in-B5 class error, no sector or
+  outcode bleed, in the entire corpus.
+* **100% field equality on shared transaction IDs.**
+* **Every divergence classified** into §7's classes; an unclassified divergence
+  blocks exit.
+* **Zero snapshot errors** in the agreed corpus — no unhandled exception, no
+  typed error where the request was in-coverage and well-formed.
+* **p95 < 1 second** on real traffic.
+
+---
+
+## 9. Local rehearsal protocol
+
+Validates that each case is well-formed, routes as intended and produces the
+expected shape — before any production shadow.
+
+1. Point `PPD_SNAPSHOT_DIR` at the Instance's artifact; materialize into a
+   scratch `PPD_SNAPSHOT_CACHE_DIR`. `LocalDirectorySource`, no network.
+2. Run each case **through the snapshot adapter only**, passing every frozen
+   parameter of §2 explicitly. The live adapter is not constructed, patched or
+   called.
+3. Record everything in §6, plus row count, returned geography membership
+   (sector and outcode only), the date bounds of returned rows, the provenance
+   block, and latency.
+4. Assert §3's invariants on every case, plus each shape's intent: S1 contains
+   no row from the neighbouring outcode; S3 is a subset of S1; S4 trips the
+   thin-market threshold; S5 and S12 return exactly `limit` rows; S9 exceeds S3
+   on identical geography; S10 and S11 both report
+   `recent_period_provisional: true`, S11 while returning zero rows; S13 and S14
+   are empty.
+5. Sockets hard-failed throughout, so an accidental network call fails the run
+   rather than making it non-deterministic.
+
+**A rehearsal produces no real-traffic sample.** It can satisfy neither the p95
+criterion nor any divergence criterion — there is no live arm to diverge from.
+Its output is labelled a rehearsal result and is **never filed as Stage 1
+evidence**.
+
+---
+
+## 10. Instance schema
+
+An Instance records: the selected `snapshot_version` and `bundle_sha256`; its
+qualification date; per case, the aggregate baseline and the qualification rule
+it satisfied; any substituted geography with justification; its staleness bound;
+and the Stage 1 run it governs.
+
+---
+
+## 11. Known limits
+
+* **`older_records_exist` cannot be validated against a coverage-bounded
+  artifact** — it asserts something about rows before `coverage_from`.
+  Confirming it needs the bounded existence probe (§2.4) or a full-history
+  artifact.
+* **Postcode validity is not established by the snapshot.** A zero-row postcode
+  cannot be distinguished from an invalid one without an external source, so
+  S13 and S14 use geographies with confirmed activity and an empty *filter*.
+* **Rows with no geography** — a small share of PPD rows carry no postcode, and
+  so can never be returned by a geography-filtered query while still counting
+  toward snapshot totals. Whether any case should assert this is undecided.
+* **All shape expectations are snapshot-side.** Live counts are unknown by
+  construction; establishing them would require live queries, which are
+  separately authorised.
+* **The coverage-floor narrowing path is unexercised by design** (§4). It
+  belongs to `/transactions` and its routing tests.
