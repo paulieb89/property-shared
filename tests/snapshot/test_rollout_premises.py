@@ -38,6 +38,11 @@ from pathlib import Path
 
 import pytest
 
+from property_core.snapshot.fetch import (
+    DEFAULT_MAX_BUNDLE_BYTES,
+    DISK_HEADROOM_MULTIPLIER,
+)
+
 REPO = Path(__file__).resolve().parents[2]
 SPEC = REPO / "docs" / "design" / "ppd-source-routing.md"
 RUNBOOK = REPO / "docs" / "ops" / "ppd-snapshot-build.md"
@@ -88,45 +93,70 @@ def test_the_recorded_byte_counts_are_the_ones_everything_derives_from():
     assert f"{EXTRACTED_BYTES:,}" in runbook, "the measured extracted byte count is gone"
 
 
+#: Where each corrected figure has to appear. "Somewhere in one of the two
+#: documents" was too weak to back the claim this file makes: a figure could
+#: vanish from the gate that depends on it and still pass because the other
+#: document happened to mention it. Each figure is required in the section that
+#: actually relies on it, and a failure names that section.
+SPEC_WINDOW = "### 1.1 Window — 11 year-partitions"
+SPEC_ROLLOUT = "## 7. TDD and rollout"
+RUNBOOK_G1 = "### What this means for G1a and G1b"
+
+#: (figure, value recomputed from the recorded bytes, required locations).
+#: The preflight threshold derives from the SHIPPED multiplier, so changing
+#: DISK_HEADROOM_MULTIPLIER without republishing the figure fails here.
+DERIVED_FIGURES = [
+    ("bundle size", BUNDLE_BYTES / MiB,
+     [(SPEC, SPEC_WINDOW), (RUNBOOK, RUNBOOK_G1)]),
+    ("extracted size", EXTRACTED_BYTES / MiB,
+     [(SPEC, SPEC_ROLLOUT), (RUNBOOK, RUNBOOK_G1)]),
+    ("transfer time", BUNDLE_BYTES * 8 / NOMINAL_BITS_PER_SECOND,
+     [(SPEC, SPEC_WINDOW), (SPEC, SPEC_ROLLOUT), (RUNBOOK, RUNBOOK_G1)]),
+    ("simultaneous payload", (BUNDLE_BYTES + EXTRACTED_BYTES) / MiB,
+     [(SPEC, SPEC_ROLLOUT), (RUNBOOK, RUNBOOK_G1)]),
+    ("preflight threshold", BUNDLE_BYTES * DISK_HEADROOM_MULTIPLIER / MiB,
+     [(SPEC, SPEC_ROLLOUT), (RUNBOOK, RUNBOOK_G1)]),
+]
+
+_FIGURE_CASES = [(label, value, path, heading)
+                 for label, value, locations in DERIVED_FIGURES
+                 for path, heading in locations]
+
+
 @pytest.mark.parametrize(
-    "label, computed, places",
-    [
-        ("bundle MiB", BUNDLE_BYTES / MiB, 1),
-        ("extracted MiB", EXTRACTED_BYTES / MiB, 1),
-        ("transfer seconds", BUNDLE_BYTES * 8 / NOMINAL_BITS_PER_SECOND, 1),
-        ("simultaneous payload MiB", (BUNDLE_BYTES + EXTRACTED_BYTES) / MiB, 1),
-    ],
+    "label, computed, path, heading",
+    _FIGURE_CASES,
+    ids=[f"{label}:{path.name}:{heading.lstrip('# ').split(chr(8212))[0].strip()}"
+         for label, _v, path, heading in _FIGURE_CASES],
 )
-def test_each_derived_figure_is_published_as_this_calculation_produces_it(
-        label, computed, places):
-    """Recomputed here, not restated. Both documents must print the result."""
-    printed = _rounded(computed, places)
-    spec, runbook = _normalised(SPEC), _normalised(RUNBOOK)
-    assert printed in spec or printed in runbook, (
-        f"{label}: the documents no longer publish {printed}, which is what "
-        f"the recorded bytes produce. Change the measurement, not the label."
+def test_each_derived_figure_is_published_where_its_gate_relies_on_it(
+        label, computed, path, heading):
+    """Recomputed here, not restated, and required in the section that uses it."""
+    printed = _rounded(computed)
+    section = " ".join(_section(path, heading).split())
+    assert printed in section, (
+        f"{label}: {path.name} section {heading!r} no longer publishes "
+        f"{printed}, which is what the recorded bytes produce. Change the "
+        f"measurement, not the label."
     )
 
 
-def test_the_preflight_threshold_uses_the_shipped_headroom_multiplier():
+@pytest.mark.parametrize("path", [SPEC, RUNBOOK], ids=lambda p: p.name)
+def test_the_preflight_figure_is_tied_to_the_shipped_headroom_multiplier(path):
     """The 2.5 is a policy constant, so the threshold is policy x measurement.
 
-    Imported from the code rather than restated, so a change to the multiplier
-    cannot leave the published threshold silently stale.
+    The value is computed from the imported constant above; this pins the
+    EXPRESSION alongside it, so a reader can see where the figure came from and
+    a changed multiplier cannot leave a stale number looking authoritative.
     """
-    from property_core.snapshot.fetch import DISK_HEADROOM_MULTIPLIER
-
-    threshold = _rounded(BUNDLE_BYTES * DISK_HEADROOM_MULTIPLIER / MiB)
-    assert threshold in _normalised(RUNBOOK), (
-        f"the runbook no longer publishes the {threshold} MiB preflight "
-        f"threshold that bundle_bytes x {DISK_HEADROOM_MULTIPLIER} produces"
+    assert "`bundle_bytes * 2.5`" in _normalised(path), (
+        f"{path.name} publishes a preflight threshold without citing the "
+        f"bundle_bytes x {DISK_HEADROOM_MULTIPLIER} rule it derives from"
     )
 
 
 def test_the_bundle_limit_margin_is_stated_against_the_measured_bundle():
     """§4.1's margin was ~4.8x against 214 MiB; against the real bundle it is less."""
-    from property_core.snapshot.fetch import DEFAULT_MAX_BUNDLE_BYTES
-
     margin = _rounded(DEFAULT_MAX_BUNDLE_BYTES / BUNDLE_BYTES)
     section = " ".join(_section(SPEC, "## 4. Runtime design").split())
     assert f"{margin}x" in section, (
