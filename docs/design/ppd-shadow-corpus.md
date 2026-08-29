@@ -103,7 +103,12 @@ row count:
 * **`sample_complete` is `false`** — including where the returned page is
   plainly exhausted, far below `limit`. Exhausting a page is not completeness
   when the requested interval extends past what the snapshot holds;
-* **`completeness_basis` is `null`**.
+* **`completeness_basis` is `null`**;
+* **`recent_period_provisional` is `true`**. The resolved upper bound is always
+  `coverage_to`, and `provisional_from` never exceeds `coverage_to`, so **every**
+  comps window intersects the provisional period. This was originally written as
+  a property of two particular cases; a rehearsal against a real artifact showed
+  it holding on all fourteen, for the same structural reason as the clamp.
 
 These are structural, not situational. A case reporting `sample_complete: true`
 is a **defect**, not a divergence.
@@ -127,18 +132,22 @@ justification.
 |---|---|---|---|
 | S1 | `postcode=B5`, `search_level=district` | contamination boundary | the longer neighbouring outcode holds comparable or greater volume |
 | S2 | `postcode=B50`, `search_level=district` | reverse boundary | non-empty under frozen parameters |
-| S3 | `postcode=B5 4`, `search_level=sector` | sector isolation | a strict subset of S1 |
+| S3 | `postcode=B5 4`, `search_level=sector` | sector isolation | its **full aggregate count** is a strict subset of S1's — see §9 on why a paged result cannot show this |
 | S4 | `postcode=<sector>`, `search_level=sector` | thin market | falls below `thin_market_threshold` under frozen parameters |
 | S5 | `postcode=<sector>`, `search_level=sector` | dense market and truncation | matching rows greatly exceed `limit` |
 | S6 | `postcode=<unit>`, `search_level=postcode` | exact-postcode geography | aggregate-dense, so not individually identifying |
 | S7 | `postcode=<sector>`, `search_level=sector`, `property_type=F` | type filter that barely bites | at least 90% of the base is `F` |
 | S8 | `postcode=<sector>`, `search_level=sector`, `property_type=F` | type filter that genuinely bites | a real spread across `F/D/S/T` |
-| S9 | S3's geography, `transaction_category=all` | category filtering | materially exceeds S3 on identical geography and window |
-| S10 | `postcode=<sector>`, `search_level=sector`, `months=6` | provisional tail, non-empty | window intersects the provisional period; returns rows |
+| S9 | S3's geography, `transaction_category=all` | category filtering | its **full aggregate count** materially exceeds S3's on identical geography and window |
 | S11 | `postcode=<sector>`, `search_level=sector`, `months=6` | **the provisional flag is a property of the window** | window intersects the provisional period; **returns zero rows** |
 | S12 | `postcode=B5`, `search_level=district`, `months=120` | widest window, deepest history | matching rows greatly exceed `limit` |
 | S13 | `postcode=<unit>`, `search_level=postcode`, `property_type=D` | expected empty | geography non-empty under defaults, that type absent |
 | S14 | S3's geography, `property_type=T` | expected empty, sector shape | as S13 |
+
+**S10 was removed.** It asserted "provisional tail, non-empty", which
+discriminates nothing now that §3 records every comps case as provisional — it
+was redundant with all thirteen others. **S11 is retained:** an empty result
+that must still be flagged provisional is the control with teeth.
 
 **S11 is the case a naive implementation gets wrong.** `recent_period_provisional`
 is computed from the resolved *requested window* before any row is examined, so
@@ -288,16 +297,60 @@ expected shape — before any production shadow.
    parameter of §2 explicitly. The live adapter is not constructed, patched or
    called.
 3. Record everything in §6, plus row count, returned geography membership
-   (sector and outcode only), the date bounds of returned rows, the provenance
-   block, and latency.
+   (sector and outcode only), the **date bounds of returned rows**, the
+   provenance block, warning classes, and **per-case latency**. Record any
+   **midnight exclusion and retry**; an observation that cannot be obtained
+   within a single calendar date **fails the run** rather than being recorded
+   against a window that does not describe it. **The failure is written to
+   the report before the run exits** — an aggregate-only report carrying
+   `midnight.unrecoverable`, the retry count and the reason. A traceback
+   with no report is not "clearly", and leaves nothing to review.
 4. Assert §3's invariants on every case, plus each shape's intent: S1 contains
-   no row from the neighbouring outcode; S3 is a subset of S1; S4 trips the
-   thin-market threshold; S5 and S12 return exactly `limit` rows; S9 exceeds S3
-   on identical geography; S10 and S11 both report
-   `recent_period_provisional: true`, S11 while returning zero rows; S13 and S14
+   no row from the neighbouring outcode; S4 trips the thin-market threshold;
+   S5 and S12 return exactly `limit` rows; **S11 reports
+   `recent_period_provisional: true` while returning zero rows**; S13 and S14
    are empty.
-5. Sockets hard-failed throughout, so an accidental network call fails the run
-   rather than making it non-deterministic.
+
+   **Containment between cases is asserted on counts, not on pages.** A paged
+   result ordered most-recent-first is not a subset of a wider page: S1's fifty
+   most recent rows across a district need not contain S3's fifty most recent
+   within one of its sectors, and S9's page with category B included pushes
+   category-A rows off the equivalent S3 page. Set containment over
+   transaction ids is therefore **only meaningful when neither side is
+   saturated**. Accordingly:
+
+   * **Instance qualification uses full aggregate counts** — that is where
+     "S3 is a strict subset of S1" and "S9 exceeds S3" are established, against
+     the whole artifact rather than a page.
+   * **The rehearsal reports `not_evaluable`, with its reason, whenever either
+     paged result is saturated at `limit`.** A saturated comparison is an
+     unanswerable question, and reporting it as a failure would blame the
+     artifact for the corpus asking it.
+   * **Geography containment is always checked**, because it remains meaningful
+     on a page: every row S3 returns must lie inside S1's outcode however the
+     page was truncated.
+
+   **`not_evaluable` is never counted as a passing assertion.** It is recorded
+   explicitly with its reason, counted separately from passes and failures, and
+   a run may still exit 0 with `not_evaluable` assertions present — but it may
+   never exit 0 with a failed one.
+
+   **The declared baselines are carried in the rehearsal instance**, as
+   `aggregate_baselines` (`S1_full`, `S3_full`, `S9_full`), validated before
+   anything is materialized: they must be counts, `S3_full` may not exceed
+   `S1_full`, and `S9_full` must exceed `S3_full`. A baseline set contradicting
+   the relation it exists to establish is refused — it would look like evidence
+   while qualifying nothing. The report records them as **declared, not
+   measured**: a paged rehearsal cannot re-derive a full aggregate count and
+   must not imply it did.
+5. Sockets hard-failed throughout, with a self-check proving the block is
+   armed, so an accidental network call fails the run rather than making it
+   non-deterministic.
+6. **Pre-existing `PPD_SNAPSHOT_*` environment values and installed snapshot
+   state are captured and restored**, not deleted. A rehearsal is a guest in
+   whatever process runs it: unsetting a variable the caller had set, or
+   dropping an adapter the caller had installed, would leave that process
+   quietly different afterwards.
 
 **A rehearsal produces no real-traffic sample.** It can satisfy neither the p95
 criterion nor any divergence criterion — there is no live arm to diverge from.
@@ -310,7 +363,8 @@ evidence**.
 
 An Instance records: the selected `snapshot_version` and `bundle_sha256`; its
 qualification date; per case, the aggregate baseline and the qualification rule
-it satisfied; any substituted geography with justification; its staleness bound;
+it satisfied — including the **full aggregate counts** establishing S3's
+containment in S1 and S9's excess over S3, which a paged rehearsal cannot show; any substituted geography with justification; its staleness bound;
 and the Stage 1 run it governs.
 
 ---
