@@ -1,4 +1,4 @@
-"""Rev 7 — the corrected rollout premises, pinned so they cannot drift back.
+"""Rev 7-8 — the rollout premises and status, pinned so they cannot drift back.
 
 Specification rev 7 corrected a sizing baseline that had been wrong since rev 1:
 §1.1 sized eleven partitions at 214 MiB, which was a **year+area** measurement
@@ -26,9 +26,20 @@ is not one of them fails. A loose textual window around each hit would be
 brittle across table reflows and would quietly accept a new live claim that
 happened to sit near an explanatory word.
 
+**Rev 8** added a third group. It is a *status* round, not an architecture one:
+it accepts the shadow corpus, records the owner's scoped artifact-distribution
+determination, and corrects status text that had gone stale as PRs merged
+beneath it -- a Basis paragraph denying the adapter the same document describes,
+a changelog requiring an ordering PR 4 made impossible, a runbook citing two
+different revisions of its own governing spec. Status text is exactly where a
+requirement gets softened by accident, because none of it looks like a
+requirement, so `test_revision_8_relaxed_no_requirement` guards the same
+invariants for rev 8 that this file already guards for rev 7.
+
 Nothing here relaxes a requirement. The 30 s readiness target, the
 `bundle_bytes * 2.5` headroom rule and every Stage 1 exit criterion are
-unchanged by rev 7, and several assertions below exist to keep them that way.
+unchanged by rev 7 and by rev 8, and several assertions below exist to keep
+them that way.
 """
 
 from __future__ import annotations
@@ -47,6 +58,7 @@ REPO = Path(__file__).resolve().parents[2]
 SPEC = REPO / "docs" / "design" / "ppd-source-routing.md"
 RUNBOOK = REPO / "docs" / "ops" / "ppd-snapshot-build.md"
 CHANGELOG = REPO / "CHANGELOG.md"
+DECISION = REPO / "docs" / "design" / "ppd-artifact-distribution-decision.md"
 
 MiB = 1024 ** 2
 
@@ -76,6 +88,20 @@ def _section(path: Path, heading: str) -> str:
     rest = body[start + len(heading):]
     nxt = re.search(rf"^#{{1,{level}}} ", rest, re.MULTILINE)
     return rest[: nxt.start()] if nxt else rest
+
+
+def _paragraph(path: Path, opener: str) -> str:
+    """One paragraph, from `opener` to the next blank line.
+
+    `_section` above only understands `#` headings. A status list that opens
+    with bold text needs its own scope, and it has to be a tight one: widening
+    it to the rest of the document would let any later mention of the corpus
+    satisfy an assertion about what this paragraph claims is outstanding.
+    """
+    body = path.read_text()
+    start = body.index(opener)
+    end = body.find("\n\n", start)
+    return " ".join(body[start: end if end != -1 else len(body)].split())
 
 
 def _rounded(value: float, places: int = 1) -> str:
@@ -378,14 +404,202 @@ def test_the_lock_wait_bound_names_a_constant_that_exists():
 # Scope -- this correction changes documents and tests, nothing operational
 # ---------------------------------------------------------------------------
 
-def test_the_changelog_records_the_correction_rather_than_the_freeze():
+def test_the_changelog_describes_pr_groups_rather_than_a_total():
+    """A bare total is a counter that has to be right forever.
+
+    It was wrong twice already -- "four", then "Five" against eight merged PRs.
+    The groups are what a reader actually needs: five PRs that built the thing
+    (#24-#28) and three that prepared its rollout without touching production
+    (#29-#31). A ninth PR extends a range, which is a one-line edit; it does
+    not force a recount, and a recount is what kept going stale.
+    """
     normalised = _normalised(CHANGELOG)
-    assert "Five** PRs" in normalised or "**Five** PRs" in normalised, (
-        "the changelog still counts four merged PRs"
+    assert "Five** PRs" not in normalised, (
+        "the changelog still states a bare PR total; totals go stale silently"
     )
-    assert "specification rev 7" in normalised, (
-        "the changelog still says the sizing correction is deferred"
+    for phrase in ("implementation PRs", "rollout-preparation PRs",
+                   "#24-#28", "#29-#31"):
+        assert phrase in normalised, (
+            f"the changelog no longer describes its PR groups: {phrase!r} is gone"
+        )
+
+
+def test_the_changelog_still_records_the_sizing_correction():
+    """Rev 8 must not erase rev 7's provenance.
+
+    The surviving half of the assertion this replaced: the sizing correction was
+    made by rev 7, and saying so stays true no matter how many revisions follow.
+    """
+    assert "specification rev 7" in _normalised(CHANGELOG), (
+        "the changelog no longer records which revision corrected the sizing"
     )
+
+
+# ---------------------------------------------------------------------------
+# Rev 8 -- the corpus-acceptance and artifact-distribution decision round
+# ---------------------------------------------------------------------------
+
+def test_the_specification_declares_revision_8_and_a_revision_note():
+    """History is appended, never overwritten.
+
+    A revision that replaced its predecessor's note would make the document's
+    own account of itself unfalsifiable: nobody could tell which decision round
+    settled what.
+    """
+    body = _text(SPEC)
+    head = body.splitlines()[0]
+    assert "rev 8" in head and "FROZEN" in head, head
+    normalised = _normalised(SPEC)
+    assert "**Revision 8**" in normalised, "rev 8 landed without a revision note"
+    for earlier in ("**Revision 7**", "**Revision 6**"):
+        assert earlier in normalised, (
+            f"{earlier} was overwritten; revision notes accumulate, they do not "
+            f"replace each other"
+        )
+
+
+def test_revision_8_relaxed_no_requirement():
+    """Sibling of the rev 7 assertion below, for the same reason.
+
+    A status-reconciliation round is exactly where a requirement gets softened
+    by accident, because nothing in it looks like a requirement change.
+    """
+    normalised = _normalised(SPEC)
+    for requirement in (
+        "30 s readiness target",
+        "bundle_bytes * 2.5",
+        "Zero unexplained false empties",
+        "Zero geography contamination",
+        "100% field equality on shared transaction IDs",
+        "Every divergence classified",
+        "Zero snapshot errors",
+        "p95 < 1 second",
+        "Passing G1a authorises neither `propertydata` nor Stage 3",
+        "blocking G2 if the deployed count exceeds one",
+    ):
+        assert requirement in normalised, (
+            f"rev 8 relaxed a requirement it had no authority to touch: "
+            f"{requirement!r}"
+        )
+
+
+def test_the_specification_records_the_corpus_and_rehearsal_as_merged():
+    """PRs #30 and #31 merged; the status list said they had not."""
+    unimplemented = _paragraph(SPEC, "**Still unimplemented or unperformed:**")
+    for merged in ("shadow corpus", "rehearsal"):
+        assert merged not in unimplemented, (
+            f"the status list still calls {merged!r} unimplemented, but it "
+            f"merged and its guard tests run in this suite"
+        )
+    normalised = _normalised(SPEC)
+    assert "ppd-shadow-corpus.md" in normalised, (
+        "the specification never names the corpus document it governs"
+    )
+
+
+def test_the_specification_no_longer_denies_the_adapter_it_documents():
+    """The sharpest self-contradiction in the repository, until rev 8.
+
+    The Basis paragraph said no production adapter or boot lifecycle existed
+    while the implementation-status paragraph, thirty lines above, described
+    both -- and `test_the_lifespan_rule_is_wired_in_both_deployments` asserts
+    they boot.
+    """
+    normalised = _normalised(SPEC)
+    assert "no production adapter or boot lifecycle exists" not in normalised, (
+        "the specification still denies the adapter and lifespan that PR 3 and "
+        "PR 4 shipped and that this suite asserts are wired"
+    )
+
+
+def test_the_changelog_no_longer_carries_the_impossible_ordering():
+    """Replaced in the spec by rev 7; the changelog kept the dead phrase.
+
+    The spec's *quotation* of it must survive: recording what was replaced, and
+    why it can no longer be satisfied, is how the correction stays legible.
+    """
+    assert "*before* routing is introduced" not in _normalised(CHANGELOG), (
+        "the changelog still requires an ordering that routing made impossible "
+        "when PR 4 merged"
+    )
+    assert "before routing is introduced" in _normalised(SPEC), (
+        "the specification stopped recording which ordering rev 7 replaced"
+    )
+
+
+def test_the_runbook_cites_the_current_specification_revision():
+    """It cited rev 6 in its header and rev 7 in its body -- both, at once."""
+    normalised = _normalised(RUNBOOK)
+    assert "rev 6" not in normalised, (
+        "the runbook still says it is governed by a superseded revision"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The artifact-distribution decision record
+# ---------------------------------------------------------------------------
+
+def test_the_distribution_decision_record_exists_and_states_its_limits():
+    """Three merged documents said distribution was undecided.
+
+    Without a record, the next session reads them and re-litigates a settled
+    decision -- which is the failure this whole reconciliation exists to stop.
+    A record that states the permission without stating its edges is worse than
+    none: it reads as blanket approval.
+    """
+    assert DECISION.exists(), (
+        "the scoped distribution determination is not written down anywhere"
+    )
+    normalised = _normalised(DECISION)
+    assert "Paul Boucherat" in normalised, "the record names no owner"
+    assert "2026-08-29" in normalised, "the record carries no date"
+    for exclusion in (
+        "No public bundle download",
+        "bulk rows",
+        "address validation",
+        "attribution",
+    ):
+        assert exclusion in normalised, (
+            f"the record states the permission without its {exclusion!r} limit"
+        )
+    for trigger in ("re-review", "public hosting", "new consumer"):
+        assert trigger in normalised.lower(), (
+            f"the record states no re-review trigger for {trigger!r}; a "
+            f"determination with no reopening condition is a permanent one"
+        )
+    assert "no mutation authority" in normalised.lower(), (
+        "the record does not say that permission to distribute is not "
+        "permission to create a bucket, upload anything, or configure Fly"
+    )
+
+
+def test_the_distribution_record_is_a_determination_not_legal_advice():
+    """It records what the owner decided, not what a lawyer concluded.
+
+    It also settles exactly one of section 6's four Royal Mail triggers. Reading
+    it as clearing the other three is the mistake it must make impossible.
+    """
+    normalised = _normalised(DECISION)
+    assert "not legal advice" in normalised.lower(), (
+        "the record does not disclaim independent legal advice"
+    )
+    assert "determination" in normalised.lower(), (
+        "the record does not present itself as the owner's determination"
+    )
+    for still_gated in ("autocomplete", "geocoding", "PAF-like"):
+        assert still_gated in normalised, (
+            f"the record does not restate that {still_gated!r} remains gated by "
+            f"section 6"
+        )
+
+
+def test_the_specification_points_at_the_decision_record():
+    """The places that said "separately approved" must now resolve somewhere."""
+    for document, name in ((SPEC, "specification"), (RUNBOOK, "runbook")):
+        assert "ppd-artifact-distribution-decision" in _normalised(document), (
+            f"the {name} still describes distribution as an open decision "
+            f"without pointing at the record that settled its scope"
+        )
 
 
 def test_the_lock_wait_versus_grace_period_question_is_recorded_not_resolved():

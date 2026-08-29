@@ -2,7 +2,7 @@
 
 How the Price Paid Data snapshot is built and validated on a workstation.
 Governed by [`docs/design/ppd-source-routing.md`](../design/ppd-source-routing.md)
-rev 6 (§1.1–1.3, §4.8, §4.9). The pipeline lives in
+rev 8 (§1.1–1.3, §4.8, §4.9). The pipeline lives in
 [`tools/ppd_snapshot/`](../../tools/ppd_snapshot/) and is deliberately
 outside the published wheel.
 
@@ -15,9 +15,13 @@ change, release or version bump happens here or is enabled by anything here.
 manifest only so the whole boot path can be exercised offline through
 `LocalDirectorySource`.
 
-**Artifact distribution — where a bundle is hosted and how a deployed app
-reaches it — is a separately approved decision** and is not settled by this
-runbook.
+**Artifact distribution.** Its *scope* is settled — the owner's determination in
+[`docs/design/ppd-artifact-distribution-decision.md`](../design/ppd-artifact-distribution-decision.md)
+permits private delivery of the bundle to project-controlled Fly Machines for
+internal, read-only price-information use. **Nothing about that changes this
+runbook**: where a bundle is hosted, how a deployed app authenticates to it, how
+long it is retained and how access is audited remain a separate design and a
+separate mutation authorisation. This pipeline still builds locally and stops.
 
 ## Inputs
 

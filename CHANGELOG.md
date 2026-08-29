@@ -2,8 +2,11 @@
 
 ## Unreleased — v1.15.0 (pending): PPD snapshot source routing + live-path correctness containment
 
-Not released. No version bump. **Five** PRs against the design in
-`docs/design/ppd-source-routing.md`, now at rev 7.
+Not released. No version bump. **Five implementation PRs** (#24-#28) and
+**three rollout-preparation PRs** (#29-#31), against the design in
+`docs/design/ppd-source-routing.md`, now at rev 8. The rollout-preparation PRs
+change documents and tests only: they touch no Dockerfile, fly config, image,
+secret, dependency, flag or deployment.
 
 **`PPD_SNAPSHOT_ENABLED` is off by default, and nothing about the deployed
 behaviour changes while it stays off.** With no snapshot materialized every PPD
@@ -120,11 +123,14 @@ coverage take effect only once a snapshot is enabled and materialized.
   which live only in the optional `snapshot` extra. Neither production image
   installs it (`--extra api` / `--extra apps`), which is correct while the flag
   is off because the runtime is never booted. G3 requires all four of: both
-  Dockerfiles installing `--extra snapshot` unconditionally *before* routing is
-  introduced; built-image smoke tests importing both packages in the actual
-  image; flag-on with either dependency unavailable failing closed with snapshot
-  readiness false; and the production flag staying off until those checks plus
-  G1 and G2 pass. Requirements 2 and 3 belong to PR 4 / the rollout.
+  Dockerfiles installing `--extra snapshot` unconditionally, with that
+  dependency-only change landing, deploying and being observed while
+  `PPD_SNAPSHOT_ENABLED` is off, before any snapshot enablement; built-image
+  smoke tests importing both packages in the actual image; flag-on with either
+  dependency unavailable failing closed with snapshot readiness false; and the
+  production flag staying off until those checks, G2, and the G1 gate for the
+  target being enabled — G1a for `property-shared`, G1b for `propertydata` —
+  all pass. Requirements 2 and 3 belong to PR 4 / the rollout.
   A repository-config lint ships here as a **secondary guard only** — it reads
   checked-in Dockerfiles and fly configs, so it cannot see the flag being enabled
   by a Fly secret or injected environment. Both packages stay optional and stay
@@ -275,6 +281,38 @@ coverage take effect only once a snapshot is enabled and materialized.
   against.
 - Optional `snapshot` extra (`duckdb==1.5.5`) and `PPD_SNAPSHOT_ENABLED`
   (default **off**). The published library gains no required dependency.
+- **The Stage 1 shadow corpus, frozen** (`docs/design/ppd-shadow-corpus.md`) —
+  the fixed set of `comps` request shapes the Stage 1 shadow will run through
+  both adapters, with frozen parameters, universal invariants, executable
+  warning-class predicates, recording rules and a four-class divergence taxonomy.
+  Split into a **Definition** and an artifact-bound **Instance**: the Definition
+  carries no artifact, date or count, so a monthly rebuild produces a new
+  Instance rather than rewriting the evidence for a run already under way.
+  Warning *classes* are compared, never warning *text*, because snapshot and
+  live warnings are deliberately worded differently by source — and each
+  substring is pinned against the call site that emits it, so a reworded warning
+  fails loudly instead of leaving the corpus silently matching nothing.
+- **A local rehearsal of that corpus** (`tools.ppd_snapshot rehearse`), outside
+  the published wheel. Adapter-only, sockets hard-failed with a self-check, the
+  instance refused before anything is materialized. Running it against a real
+  artifact corrected four things the Definition had wrong, none visible from
+  reading it — the provisional flag is universal rather than per-case; page-set
+  containment is unanswerable at `limit=50` and moved to declared aggregate
+  counts; `not_evaluable` is never a pass; and the recorded midnight-failure
+  state could not occur. All four were applied before the freeze.
+  **A rehearsal is not Stage 1 and can never become it:** with no live arm it
+  satisfies no p95 and no divergence criterion, and its reports are marked
+  `not_stage_1_evidence`. Summary of the real run:
+  `docs/ops/ppd-shadow-rehearsal-summary.md`.
+- **The artifact-distribution scope determination**
+  (`docs/design/ppd-artifact-distribution-decision.md`) — the owner's decision
+  permitting private delivery of the bundle to project-controlled Fly Machines
+  for internal, read-only price-information use. No public download, no surface
+  serving the bundle or bulk rows, no address use outside price information,
+  attribution unchanged. **It grants no mutation authority:** hosting,
+  credentials, transport, retention and audit remain a separate design and a
+  separate authorisation, and it settles exactly one of the four Royal Mail
+  review triggers in specification §6.
 - `docs/design/ppd-source-routing.md` — the frozen specification governing this
   work.
 
@@ -305,11 +343,19 @@ coverage take effect only once a snapshot is enabled and materialized.
   changing which area a caller's request covers is a behaviour change of its
   own. Both paths return the requested area with a warning saying why, and the
   reason differs by source because the reasons genuinely differ.
-- Artifact distribution, the shadow corpus, and rollout gates G1–G3. No
-  Dockerfile, Fly config, image, secret or deployment is touched here, and
-  neither production image installs the `snapshot` extra yet — which G3 requires
-  **before** the flag may be enabled. The build pipeline produces a bundle on a
-  workstation and stops there; where one would be hosted is separately approved.
+- **Rollout gates G1a, G1b, G2 and G3**, and every deployment step behind them.
+  No Dockerfile, Fly config, image, secret or deployment is touched here, and
+  neither production image installs the `snapshot` extra yet — which G3 requires,
+  landed and observed with the flag off, before the flag may be enabled.
+- **Artifact distribution, as built.** Its *scope* is now determined (above); its
+  hosting, credentials, transport, retention and audit are not designed, and
+  nothing is hosted. The build pipeline produces a bundle on a workstation and
+  stops there.
+- **The Stage 1 production shadow.** No dual-read, sampling or diff-recording
+  code path exists in `property_core`, the API or either MCP server. The corpus
+  is defined and rehearsed locally; Stage 1 additionally needs that production
+  instrumentation, a corpus Instance bound to a selected artifact, and an
+  artifact materialized on a deployed Machine.
 - **A measurement the rollout needs:** the real eleven-partition **year-only**
   bundle is **266.2 MiB**, not the 214 MiB §1.1 previously estimated — that figure is a
   year+area measurement, while §1.2 mandates year-only, which the same Phase 3

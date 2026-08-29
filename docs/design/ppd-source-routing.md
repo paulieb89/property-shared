@@ -1,7 +1,19 @@
-# PPD source-routing and implementation specification (rev 7 — FROZEN)
+# PPD source-routing and implementation specification (rev 8 — FROZEN)
 
-**Status:** **FROZEN at rev 7.** Accepted. No further architecture work. Changes
+**Status:** **FROZEN at rev 8.** Accepted. No further architecture work. Changes
 to this document require a new decision round, not an edit in passing.
+
+**Revision 8** was authorised by the corpus-acceptance and artifact-distribution
+decision round, after PRs #30 and #31 merged. It is a **status** revision, not an
+architecture one. It records the fixed shadow corpus and its local rehearsal as
+merged, corrects a Basis paragraph that denied the adapter and boot lifecycle
+this same document describes, and narrows the artifact-distribution language to
+what the owner's scoped determination settled — pointing at
+[`ppd-artifact-distribution-decision.md`](ppd-artifact-distribution-decision.md)
+rather than continuing to call the question open. **No requirement is relaxed:**
+the 30 s readiness target, the `bundle_bytes * 2.5` headroom rule, every Stage 1
+exit criterion, and G1a, G1b, G2 and G3 are unchanged; nothing is enabled, no
+image or flag is touched, and no artifact is hosted.
 
 **Revision 7** was authorised by the rollout-premise decision round, after
 PR 5 produced and measured a real artifact. It corrects the §1.1 sizing baseline
@@ -35,10 +47,21 @@ By **PR 5**: the local build and validation pipeline of section 4.8 — build,
 gates, packaging, source receipt, boot check and atomic promotion — local only,
 with no upload, image, deployment or flag surface touched.
 
-**Still unimplemented or unperformed:** artifact distribution and the Royal Mail
-review that gates it (§6); the dependency-only image rollout; real completion of
-G1a, G1b, G2 and G3; the fixed shadow corpus and its local rehearsal; the Stage 1
-production shadow; snapshot enablement at any stage; and the v1.15 release.
+By **PR 6** (rollout step 6, first half): the fixed shadow corpus of section 7.2,
+as [`docs/design/ppd-shadow-corpus.md`](ppd-shadow-corpus.md) — the Definition,
+split from the artifact-bound Instance that is written when the Stage 1 artifact
+is selected. By **PR 7** (rollout step 6, second half): the local rehearsal of
+that corpus in `tools/ppd_snapshot/rehearse.py`, adapter-only and socket-blocked,
+which ran against one real artifact and corrected four defects in the Definition
+before it was frozen. **Neither is Stage 1**, and the rehearsal produces no
+Stage 1 evidence — see section 7.2.
+
+**Still unimplemented or unperformed:** the **hosting, credentials, transport,
+retention and audit design** for artifact distribution, and its implementation
+(§6, and the decision record it now points at); the dependency-only image
+rollout; real completion of G1a, G1b, G2 and G3; the **Stage 1 corpus Instance**
+and the Stage 1 production shadow itself, for which no production dual-read
+implementation exists; snapshot enablement at any stage; and the v1.15 release.
 `PPD_SNAPSHOT_ENABLED` remains off in all checked-in configuration, neither
 production image installs the `snapshot` extra, and no request is served from a
 snapshot in production.
@@ -53,9 +76,15 @@ a source-specific warning.
 **Governing rule:** this specification governs PRs 1–4; **no implementation PR
 may land before the specification that governs it.**
 
-**Basis:** Phase 2 (contract prototype) and Phase 3 (full-history validation),
-both local-only. `PricePaidDataClient.sparql_search` remains patched in a lab
-harness; no production adapter or boot lifecycle exists.
+**Basis:** the sizing, layout and latency figures throughout come from Phase 2
+(contract prototype) and Phase 3 (full-history validation), both local-only, in
+which `PricePaidDataClient.sparql_search` was patched in a lab harness. **That is
+their provenance, not a statement about what exists today:** PR 3 shipped the
+boot runtime and PR 4 the snapshot adapter and its lifespan wiring, both in
+`property_core.snapshot` and both asserted to be wired in
+`tests/snapshot/test_rollout_prerequisites.py`. What no figure here rests on is a
+*deployed* measurement — none has been taken on either Machine, which is what
+G1a and G1b exist to produce.
 
 **Revision 5** derives `source_exhausted` as a tri-state property, models
 completeness evidence explicitly as `completeness_basis`, and re-scopes the PR 1
@@ -745,9 +774,17 @@ runtime.
 
 The build pipeline stage may **build and validate an artifact locally only**.
 **No upload, bucket creation, Fly secret, cloud resource or production mutation
-is authorised.** Artifact distribution — where a bundle is hosted and how a
-deployed app reaches it — remains a **separately approved decision** and is not
-settled by this specification.
+is authorised.**
+
+The **scope** of artifact distribution is settled: the owner's determination in
+[`ppd-artifact-distribution-decision.md`](ppd-artifact-distribution-decision.md)
+permits private delivery of the bundle to project-controlled Fly Machines for
+internal, read-only price-information use. **That is a scope decision and
+nothing more.** Where a bundle is hosted, how a deployed app authenticates to
+it, how long it is retained and how access is audited remain a **separate design
+and a separate mutation authorisation**, neither of which this specification
+settles. Permission to distribute is not permission to create a bucket, upload
+an artifact, or configure Fly.
 
 ### 4.9 Release cadence and freshness — decision O3
 
@@ -850,7 +887,15 @@ address-derived product.
 * any non-price use — address validation, autocomplete, geocoding, PAF-like lookup;
 * redistribution of the snapshot bundle.
 
-None are proposed. Any of them stops for review.
+The first three are not proposed and stop for review. **The fourth is
+determined, for one scope only:**
+[`ppd-artifact-distribution-decision.md`](ppd-artifact-distribution-decision.md)
+records the owner's determination permitting private delivery of the bundle to
+project-controlled Fly Machines, for internal read-only price-information use,
+with no public download and no surface serving the bundle or bulk rows. **It
+settles that trigger and no other**, and it grants no implementation or mutation
+authority. Everything above about placement, address-field use and attribution
+is unchanged by it.
 
 ---
 

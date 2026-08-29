@@ -222,6 +222,28 @@ def test_the_valid_instance_is_accepted(tmp_path, dist):
 FORBIDDEN_IN_REPORT = ["T-B57-A", "T-B50-A", "T-M37-A",
                        "210000", "400000", "250000", "HIGH STREET"]
 
+#: The reconstructed summary of the real run. Not the tool's output: the
+#: original `--report` JSON was not retained, and a search on 2026-08-29 across
+#: the repository, the home directory and `.ppd-lab/` found none.
+SUMMARY = Path(__file__).resolve().parents[2] / "docs" / "ops" / "ppd-shadow-rehearsal-summary.md"
+
+#: JSON field names that only appear if row data was pasted in. Quoted, so
+#: ordinary prose about a district or a street cannot trip them -- a real leak
+#: is JSON-shaped or is one of the fixture values above.
+FORBIDDEN_KEYS_IN_SUMMARY = ['"transaction_id"', '"paon"', '"saon"', '"street"',
+                             '"locality"', '"county"', '"price"']
+
+#: Exactly what commit 6f969eb and PR #31 record about the real run. The summary
+#: may state these and nothing else numeric about the outcome.
+RECORDED_RESULTS = {
+    "version": "v20260828T194003Z",
+    "digest": "50f802b2",
+    "cases": "13",
+    "passed": "85",
+    "failed": "0",
+    "not_evaluable": "2",
+}
+
 
 @pytest.fixture
 def rehearsed(tmp_path, dist):
@@ -617,3 +639,74 @@ def test_an_unrecoverable_midnight_crossing_writes_a_failed_report(
     assert body["failure"], "the report does not say what went wrong"
     assert "midnight" in body["failure"].lower()
     assert body["kind"] == "rehearsal" and body["not_stage_1_evidence"] is True
+
+
+# ---------------------------------------------------------------------------
+# The reconstructed summary of the real run
+# ---------------------------------------------------------------------------
+
+def test_the_rehearsal_summary_is_labelled_reconstructed():
+    """It must not read as the tool's own output.
+
+    A document that looks like a report, but was assembled from a commit
+    message, is evidence of the wrong kind: it would be cited later as though a
+    file had been verified, when what was verified was prose about a file.
+    """
+    assert SUMMARY.exists(), "the real rehearsal result is recorded only in git"
+    body = " ".join(SUMMARY.read_text().split())
+    assert "econstructed" in body, "the summary does not say it is reconstructed"
+    for source in ("6f969eb", "#31"):
+        assert source in body, f"the summary does not cite {source}"
+    assert "not retained" in body, (
+        "the summary does not record that the original report JSON is gone -- a "
+        "later reader would assume it was consulted"
+    )
+    assert "never" in body and "Stage 1 evidence" in body, (
+        "the summary is not labelled as something that can never be Stage 1 "
+        "evidence, which its own subject matter requires"
+    )
+
+
+def test_the_rehearsal_summary_carries_no_row_data():
+    """Same rule as the report it describes: aggregates only.
+
+    Checked against the fixture values this suite already forbids in a report,
+    plus JSON field names that only appear if rows were pasted in. Not a
+    pattern for what an id or a price looks like -- a pattern that broad
+    matches coverage dates and byte counts, and would have to be loosened until
+    it stopped meaning anything.
+    """
+    body = SUMMARY.read_text()
+    for forbidden in FORBIDDEN_IN_REPORT:
+        assert forbidden not in body, (
+            f"the summary leaked the fixture value {forbidden!r}"
+        )
+    for key in FORBIDDEN_KEYS_IN_SUMMARY:
+        assert key not in body, (
+            f"the summary carries the row field {key}; it records counts, "
+            f"outcomes and artifact identity only"
+        )
+
+
+def test_the_rehearsal_summary_matches_the_recorded_counts():
+    """It may state what the two sources record, and must not exceed it.
+
+    The failure this guards is a summary that grows detail nobody can check --
+    a per-case table, a latency figure, a divergence claim -- none of which
+    survives in any artifact.
+    """
+    body = " ".join(SUMMARY.read_text().split())
+    for name, value in RECORDED_RESULTS.items():
+        assert value in body, f"the summary no longer records {name}: {value!r}"
+    assert "no p95 criterion" in body, (
+        "the summary does not state that it satisfies no p95 criterion, which "
+        "is the whole reason it is not Stage 1 evidence"
+    )
+    # Saying it HAS no p95 is required; reporting one is forbidden. Banning the
+    # bare token would ban the disclaimer along with the claim.
+    for claimed in ("p95 of", "p95:", "p95 =", "divergence rate",
+                    "field equality"):
+        assert claimed not in body, (
+            f"the summary reports {claimed!r}; a rehearsal has no live arm and "
+            f"neither source records it"
+        )

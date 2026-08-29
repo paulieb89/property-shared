@@ -241,3 +241,45 @@ def test_stage_1_exit_criteria_are_carried_forward_unchanged():
 def test_the_rehearsal_cannot_be_filed_as_stage_1():
     body = _normalised(DEFINITION)
     assert "never filed as Stage 1 evidence" in body
+
+
+# ---------------------------------------------------------------------------
+# 4. The freeze
+# ---------------------------------------------------------------------------
+
+def test_the_corpus_is_frozen_not_proposed():
+    """Its own section 1 says it is frozen for Stage 1's duration.
+
+    Carrying "Status: proposed" contradicted that, and left the next reader
+    entitled to reopen shapes that a real rehearsal had already corrected.
+    """
+    body = _normalised(DEFINITION)
+    assert "**Status:** proposed" not in body, (
+        "the corpus still calls itself proposed while its own section 1 says it "
+        "is agreed before Stage 1 and frozen for its duration"
+    )
+    assert "frozen" in body.lower(), "the corpus does not state that it is frozen"
+    assert "2026-08-29" in body, "the freeze carries no date"
+    assert "rev 8" in body, (
+        "the corpus still cites a superseded revision of its governing spec"
+    )
+
+
+def test_the_freeze_does_not_claim_an_instance():
+    """An absent Instance is the design, not an outstanding task.
+
+    Section 0 says an Instance is written when the Stage 1 artifact is selected.
+    Describing its absence as incompleteness would invite someone to write one
+    against no artifact, which is exactly the coupling the split exists to
+    prevent -- and it would make this document's status permanently unachievable.
+    """
+    body = _normalised(DEFINITION)
+    assert "written when the Stage 1 artifact is selected" in body, (
+        "the Definition no longer states when an Instance comes into being"
+    )
+    for overreach in ("Instance is outstanding", "Instance is missing",
+                      "pending Instance", "awaiting an Instance"):
+        assert overreach not in body, (
+            f"the freeze describes the absent Instance as incomplete work "
+            f"({overreach!r}); it is deferred by design, not missing"
+        )
