@@ -1,19 +1,21 @@
 # Changelog
 
-## Unreleased — v1.15.0 (pending): PPD snapshot source routing + live-path correctness containment
+## v1.15.0 (2026-08-30) — PPD snapshot source routing + live-path correctness containment
 
-Not released. No version bump. **Five implementation PRs** (#24-#28) and
-**three rollout-preparation PRs** (#29-#31), against the design in
-`docs/design/ppd-source-routing.md`, now at rev 8. The rollout-preparation PRs
-change documents and tests only: they touch no Dockerfile, fly config, image,
-secret, dependency, flag or deployment.
+**Five implementation PRs** (#24-#28) and **four rollout-preparation PRs**
+(#29-#32), against the design in `docs/design/ppd-source-routing.md`, now at
+rev 8. The rollout-preparation PRs change documents, tests and local operator
+tooling only: they touch no Dockerfile, fly config, image, secret, dependency,
+flag or deployment.
 
-**`PPD_SNAPSHOT_ENABLED` is off by default, and nothing about the deployed
-behaviour changes while it stays off.** With no snapshot materialized every PPD
-surface answers from live SPARQL exactly as before, with one addition: an
-additive `provenance` block declaring `source: "sparql"` and null coverage
-fields. The behavioural changes listed under *Changed* below that mention
-coverage take effect only once a snapshot is enabled and materialized.
+**Released with `PPD_SNAPSHOT_ENABLED` off, and with neither production image
+installing the `snapshot` extra** — so nothing is routed to a snapshot, none is
+materialized, and every PPD surface answers from live SPARQL. **The live path
+itself does change, and that is the point of this release:** read *Changed*
+below before upgrading. Every PPD-bearing response also gains an additive
+`provenance` block, here declaring `source: "sparql"` and null coverage fields.
+The further changes marked *only when a snapshot is enabled and materialized*
+ship dormant behind the flag and take effect nowhere in this release.
 
 ### Changed — behavioural, read before upgrading
 

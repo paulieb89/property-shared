@@ -409,8 +409,8 @@ def test_the_changelog_describes_pr_groups_rather_than_a_total():
 
     It was wrong twice already -- "four", then "Five" against eight merged PRs.
     The groups are what a reader actually needs: five PRs that built the thing
-    (#24-#28) and three that prepared its rollout without touching production
-    (#29-#31). A ninth PR extends a range, which is a one-line edit; it does
+    (#24-#28) and four that prepared its rollout without touching production
+    (#29-#32). A further PR extends a range, which is a one-line edit; it does
     not force a recount, and a recount is what kept going stale.
     """
     normalised = _normalised(CHANGELOG)
@@ -418,7 +418,7 @@ def test_the_changelog_describes_pr_groups_rather_than_a_total():
         "the changelog still states a bare PR total; totals go stale silently"
     )
     for phrase in ("implementation PRs", "rollout-preparation PRs",
-                   "#24-#28", "#29-#31"):
+                   "#24-#28", "#29-#32"):
         assert phrase in normalised, (
             f"the changelog no longer describes its PR groups: {phrase!r} is gone"
         )
