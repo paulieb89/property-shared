@@ -1,8 +1,22 @@
 # PPD shadow-comparison corpus — Definition
 
-**Status:** proposed. Governed by
-[`docs/design/ppd-source-routing.md`](ppd-source-routing.md) rev 7 §7.2, which
+**Status: ACCEPTED AND FROZEN, 2026-08-29.** Governed by
+[`docs/design/ppd-source-routing.md`](ppd-source-routing.md) rev 8 §7.2, which
 this document implements and never overrides.
+
+Frozen for the duration of Stage 1, per §1 and §7.2 of the governing spec.
+Amending it mid-flight restarts Stage 1. The text frozen here is **post-
+rehearsal**: PR #30 wrote the Definition, and PR #31 ran it against a real
+artifact and corrected four things it had wrong — the universal provisional
+invariant in §3, the removal of S10, the `not_evaluable` rules in §9, and the
+containment qualification moved to the Instance. Freezing the pre-rehearsal
+text would have frozen those defects.
+
+**No Instance exists yet, and that is the design, not an omission.** §0 and §10
+place the artifact, its qualification and its baselines in an Instance written
+**when the Stage 1 artifact is selected** — which has not happened. A rehearsal
+instance is a different kind (`instance_kind: "rehearsal"`) and cannot stand in
+for one.
 
 **Scope: `comps` only.** The explicit-date coverage-refusal path on
 `GET /v1/ppd/transactions` (§2.5) is covered by its own routing tests. Pulling it
@@ -270,8 +284,8 @@ in whichever source produced it.
 
 ## 8. Stage 1 exit criteria
 
-Carried forward from rev 7 §7.2 unchanged. All must hold. **No percentage
-threshold.**
+Carried forward from rev 7 §7.2 unchanged, and unchanged again by rev 8. All
+must hold. **No percentage threshold.**
 
 * **Zero unexplained false empties** — no case where the snapshot returns empty
   and live returns rows within coverage without a classified explanation.

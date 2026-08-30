@@ -26,8 +26,13 @@ def test_governing_specification_ships_with_the_code():
 
 
 def test_specification_is_version_stamped():
+    """Rev 8 -- the corpus-acceptance and artifact-distribution decision round.
+
+    The stamp moves only on a decision round, never on an edit in passing, so
+    this assertion is what makes "frozen" mean something.
+    """
     head = SPEC.read_text().splitlines()[0]
-    assert "rev 7" in head and "FROZEN" in head, head
+    assert "rev 8" in head and "FROZEN" in head, head
 
 
 def _normalised(text: str) -> str:

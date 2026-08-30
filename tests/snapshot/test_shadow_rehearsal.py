@@ -216,11 +216,10 @@ def test_the_valid_instance_is_accepted(tmp_path, dist):
 # 2. A fixture artifact runs adapter-only, isolated, and reports as a rehearsal
 # ---------------------------------------------------------------------------
 
-#: Values from the fixture rows that must NEVER appear in a report. Ids, prices
-#: and addresses are the three categories the authorisation forbids, and a
-#: report is a file someone will paste into a review.
-FORBIDDEN_IN_REPORT = ["T-B57-A", "T-B50-A", "T-M37-A",
-                       "210000", "400000", "250000", "HIGH STREET"]
+#: Shared with the dependency-free summary guards in
+#: `test_shadow_rehearsal_summary.py`, which must not inherit this module's
+#: `importorskip`.
+from tests.snapshot.rehearsal_fixtures import FORBIDDEN_IN_REPORT  # noqa: E402
 
 
 @pytest.fixture
@@ -617,3 +616,4 @@ def test_an_unrecoverable_midnight_crossing_writes_a_failed_report(
     assert body["failure"], "the report does not say what went wrong"
     assert "midnight" in body["failure"].lower()
     assert body["kind"] == "rehearsal" and body["not_stage_1_evidence"] is True
+

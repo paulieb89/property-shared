@@ -120,8 +120,10 @@ property_app/               # FastMCP MCP app server (4th consumer of property_c
 └── dashboards/             # Prefab UI dashboard views
 
 tools/                      # Local operator tooling. NOT in the published wheel.
-└── ppd_snapshot/           # PPD snapshot build + validation pipeline. Local
-                            # build only, no distribution — see
+└── ppd_snapshot/           # PPD snapshot build + validation pipeline, and the
+                            # local shadow-corpus rehearsal. Local build only;
+                            # distribution scope is determined but its hosting
+                            # and transport are not designed or built — see
                             # docs/ops/ppd-snapshot-build.md
 ```
 
