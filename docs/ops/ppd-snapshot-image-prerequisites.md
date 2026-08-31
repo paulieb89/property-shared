@@ -39,3 +39,15 @@ fallback checks, not a full-size resource test or G1 pass.
 No deployed observation is claimed. G3 remains incomplete until these images
 are deployed and observed with the serving flag off. G1a, G1b and Stage 1 remain
 separate requirements.
+
+Reproduce after building both Dockerfiles (replace the example image tag):
+
+```sh
+docker run --rm --network none --memory 512m --cpus 1 \
+  --mount type=bind,src="$PWD/tests/snapshot/image_smoke.py",dst=/check.py,readonly \
+  <api-image-tag> python /check.py api
+```
+
+Use `app` instead of `api` for Dockerfile.app. The optional `include-private`
+argument also checks absent signing support once the separate private-source
+implementation is present. No credentials or live PPD calls are needed.
