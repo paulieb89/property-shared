@@ -5,9 +5,14 @@ on:
     types: [published]
 
 jobs:
+  validate:
+    name: Validate release revision
+    uses: ./.github/workflows/_validate.yml
+
   publish:
     name: Publish to PyPI
     runs-on: ubuntu-latest
+    needs: validate
     environment: pypi
     permissions:
       id-token: write

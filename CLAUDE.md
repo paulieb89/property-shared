@@ -50,6 +50,17 @@ RUN_LIVE_TESTS=1 uv run --extra dev --extra api --extra apps --extra cli --extra
 uv run --extra dev --extra api --extra apps --extra cli pytest tests/test_ppd_service_live.py -v
 ```
 
+## Git safety
+
+Before any git mutation (checkout/switch/reset/rebase/clean/commit --amend):
+confirm `git status` and `git branch --show-current` name the intended
+worktree and branch. Use `-C <path>` or a `cd` you've checked the exit code
+of — never assume the shell's cwd. If a prerequisite command fails, stop;
+don't run the next step against whatever directory you happen to be in.
+Re-check branch/status after the final edit or rebase, not only before.
+`reset --hard`, `clean -f`, or discarding uncommitted work needs explicit
+user approval every time — never an automatic recovery step.
+
 ## Fly.io Deployment — Two Apps, One Repo
 
 This repo deploys to **two separate Fly.io apps** with different Dockerfiles and configs:
