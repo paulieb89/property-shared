@@ -7,7 +7,7 @@ Tests four candidate response shapes against a real postcode:
   4. slim_list_capped  — slim_list capped at N certs
 
 Run:
-    uv run --env-file .env --extra dev python scripts/measure_epc_tokens.py
+    uv run --env-file .env python scripts/measure_epc_tokens.py
 """
 
 from __future__ import annotations

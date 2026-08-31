@@ -199,13 +199,14 @@ Land Registry PPD and Rightmove work without credentials.
 uv sync
 
 # Run API with reload
-uv run uvicorn app.main:app --reload
+uv run --extra api uvicorn app.main:app --reload
 
-# Run tests (mocked, no network)
-uv run pytest -v
+# Full validation (lockfile check, pre-commit, all extras, full suite) —
+# same entrypoint CI and the release gate use
+./scripts/validate.sh
 
-# Run live integration tests (real network calls)
-RUN_LIVE_TESTS=1 uv run pytest -v
+# + live integration tests (real network calls)
+RUN_LIVE_TESTS=1 ./scripts/validate.sh
 ```
 
 Deployed at `https://property-shared.fly.dev` with API docs at `/docs` and MCP endpoint at `/mcp`.
