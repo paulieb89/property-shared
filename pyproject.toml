@@ -1,6 +1,6 @@
 [project]
 name = "property-shared"
-version = "1.15.3"
+version = "1.16.0"
 description = "UK property data MCP server and API — Land Registry comparable sales, Rightmove listings, EPC certificates (England & Wales, GOV.UK Bearer API), rental analysis, and stamp duty."
 readme = "README.md"
 license = "MIT"
@@ -60,12 +60,6 @@ planning = [
   "playwright>=1.57.0",
   "openai>=1.83.0,<2",
 ]
-dev = [
-  "pytest>=9.0.2",
-  "python-dotenv>=1.0.1",
-  "openapi-python-client>=0.28.1",
-  "pre-commit==4.6.2",
-]
 api = [
   "fastapi>=0.128.0",
   "uvicorn>=0.40.0",
@@ -105,6 +99,13 @@ addopts = "-ra"
 testpaths = ["tests"]
 
 [dependency-groups]
+# Repo-internal tooling only — never published, installed by default with
+# plain `uv run`/`uv sync`. Consumers of the published package (extras above)
+# never need any of this. tiktoken backs scripts/measure_mcp_quality.py.
 dev = [
+    "pytest>=9.0.2",
+    "python-dotenv>=1.0.1",
+    "openapi-python-client>=0.28.1",
+    "pre-commit==4.6.2",
     "tiktoken>=0.12.0",
 ]

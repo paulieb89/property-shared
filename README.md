@@ -52,7 +52,7 @@ pip install property-shared
 uv add property-shared
 ```
 
-Extras: `[cli]` for CLI, `[api]` for HTTP server, `[dev]` for tests.
+Extras: `[cli]` for CLI, `[api]` for HTTP server.
 
 ```bash
 pip install property-shared[cli]
@@ -195,17 +195,17 @@ Land Registry PPD and Rightmove work without credentials.
 ## Development
 
 ```bash
-# Install with dev extras
-uv sync --extra dev
+# Install dependencies (dev tooling installs by default via [dependency-groups])
+uv sync
 
 # Run API with reload
 uv run uvicorn app.main:app --reload
 
 # Run tests (mocked, no network)
-uv run --extra dev pytest -v
+uv run pytest -v
 
 # Run live integration tests (real network calls)
-RUN_LIVE_TESTS=1 uv run --extra dev pytest -v
+RUN_LIVE_TESTS=1 uv run pytest -v
 ```
 
 Deployed at `https://property-shared.fly.dev` with API docs at `/docs` and MCP endpoint at `/mcp`.

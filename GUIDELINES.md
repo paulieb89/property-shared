@@ -82,15 +82,16 @@ Three-layer pattern:
 
 **Unit tests** (mocked, default):
 ```bash
-uv run --extra dev --extra api --extra apps --extra cli pytest -v
+uv run --extra api --extra apps --extra cli pytest -v
 ```
 
 **Live integration tests** (real network calls):
 ```bash
-RUN_LIVE_TESTS=1 uv run --extra dev --extra api --extra apps --extra cli pytest -v
+RUN_LIVE_TESTS=1 uv run --extra api --extra apps --extra cli pytest -v
 ```
 
-All four extras are required: `api` provides fastapi (needed by `test_http_metrics.py`
+pytest installs by default via `[dependency-groups]`. All three extras above
+are still required: `api` provides fastapi (needed by `test_http_metrics.py`
 and `test_mcp_server.py`), `apps` provides fastmcp[apps], `cli` provides typer.
 
 Tests skip gracefully on 503/network errors.

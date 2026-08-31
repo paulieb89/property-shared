@@ -1,10 +1,10 @@
 """Dump the raw address dict from a Rightmove PAGE_MODEL to check for UPRN.
 
 Usage:
-    uv run --extra dev python scripts/rightmove_address_dump.py <property_url_or_id>
+    uv run python scripts/rightmove_address_dump.py <property_url_or_id>
 
 Example:
-    uv run --extra dev python scripts/rightmove_address_dump.py 123456789
+    uv run python scripts/rightmove_address_dump.py 123456789
 """
 
 from __future__ import annotations

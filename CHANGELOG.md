@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.16.0 (2026-08-31) — removed the published `dev` extra
+
+**Breaking for anyone running `pip install property-shared[dev]`.** This repo
+had two differently-named "dev" dependency mechanisms: a published PyPI extra
+(`pip install property-shared[dev]`) holding repo-internal tooling (pytest,
+pre-commit, etc.) that no consumer of the library needs, and a separate,
+unpublished `[dependency-groups] dev` (installed by default with plain
+`uv run`/`uv sync`) holding one more repo-internal dependency (`tiktoken`).
+Consolidated into the single unpublished group; the published `dev` extra no
+longer exists. No fleet consumer (`uk-property-mcp`,
+`property-descriptions-mcp`) referenced it. If you relied on
+`pip install property-shared[dev]` to get a local test/lint environment,
+clone the repo and run `uv sync` instead — dev tooling now installs
+automatically.
+
+Documented commands updated accordingly: drop `--extra dev` from any
+`uv run`/`uv sync` invocation; the `api`/`apps`/`cli`/`snapshot` extras are
+unchanged and still explicit.
+
 ## v1.15.3 (2026-08-31) — private Tigris snapshot delivery, serving off
 
 **Released with `PPD_SNAPSHOT_ENABLED` off on both apps.** Adds a read-only,

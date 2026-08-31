@@ -4,7 +4,7 @@
 1) Create a `.env` file in the repo root (gitignored) and set `EPC_API_TOKEN` if you
    want EPC enabled. Omit optional variables entirely rather than assigning them
    empty — `KEY=` is an empty string, not unset, and defeats code defaults.
-2) Install dependencies: `uv sync --extra dev`.
+2) Install dependencies: `uv sync` (dev tooling installs by default via `[dependency-groups]`).
 3) Run the API: `uv run property-api` (or `uv run uvicorn app.main:app --reload`).
 4) Open the demo UI: http://localhost:8000/demo.
 
@@ -317,7 +317,7 @@ Listing detail results include `raw` with the full `PAGE_MODEL.propertyData` dic
 
 Live tests make real network calls and are gated:
 ```bash
-RUN_LIVE_TESTS=1 uv run --extra dev pytest -q tests
+RUN_LIVE_TESTS=1 uv run pytest -q tests
 ```
 The suite skips if credentials are missing or upstream services return 503.
 
