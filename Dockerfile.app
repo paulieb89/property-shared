@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir uv
 COPY pyproject.toml uv.lock README.md ./
 COPY property_core ./property_core
 COPY property_app ./property_app
-RUN uv sync --frozen --no-dev --extra apps
+RUN uv sync --frozen --no-dev --extra apps --extra snapshot
 
 EXPOSE 8080
 

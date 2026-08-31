@@ -45,7 +45,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Needed only to read a local PPD snapshot. Deliberately NOT required
+# Needed only for the optional PPD snapshot source. Deliberately NOT required
 # dependencies: library and CLI consumers on the live SPARQL path must not pay
 # for a ~59 MB native wheel they never load.
 #
@@ -53,7 +53,9 @@ dependencies = [
 # arrives in 3.14) and neither production image installs the zstd binary, so
 # without this the runtime cannot open a real bundle at all. The extractor falls
 # back to a `zstd` binary if one is present, but does not rely on it.
-snapshot = ["duckdb==1.5.5", "zstandard==0.25.0"]
+# botocore supplies official SigV4 signing for private delivery. It is imported
+# lazily; no SDK credential discovery, retries or write client runs in the app.
+snapshot = ["duckdb==1.5.5", "zstandard==0.25.0", "botocore==1.43.83"]
 planning = [
   "playwright>=1.57.0",
   "openai>=1.83.0,<2",

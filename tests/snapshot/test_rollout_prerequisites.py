@@ -20,10 +20,10 @@ What this file is good for: catching the ordinary mistake of enabling the flag
 in a Dockerfile or fly.toml without adding the extra alongside it. Cheap,
 immediate, and covers the path a change to this repository would take.
 
-`property_core.snapshot` needs `duckdb` and `zstandard`, both optional and both
-in the `snapshot` extra. Neither production image installs that extra today,
-which is correct while the flag is off — the runtime is never booted, so the
-packages are never imported.
+`property_core.snapshot` needs `duckdb` and `zstandard`, with `botocore` for
+private delivery, all optional in the `snapshot` extra. Both image recipes now
+install it with the flag still off. Actual built/deployed images need separate
+verification; this file cannot establish deployment state.
 
 The invariants below are CONDITIONAL: inert today, and firing on the commit that
 turns the feature on in checked-in config. They are deliberately not "assert the
@@ -152,6 +152,15 @@ def test_the_runtime_dependencies_live_only_in_the_snapshot_extra():
         )
 
 
+def test_official_signer_is_an_optional_snapshot_dependency_only():
+    config = tomllib.loads((REPO / "pyproject.toml").read_text())
+    extras = config["project"]["optional-dependencies"]
+    assert "botocore==1.43.83" in extras["snapshot"]
+    assert not any(dep.startswith("botocore") for dep in config["project"]["dependencies"])
+    assert not any(dep.startswith("botocore") for name, deps in extras.items()
+                   if name != "snapshot" for dep in deps)
+
+
 def test_the_definitive_gate_is_recorded_in_the_governing_specification():
     """The real gate lives in the spec; this lint is only its cheap shadow.
 
@@ -250,21 +259,18 @@ def test_the_gate_passes_when_the_flag_is_on_with_the_extra(tmp_path):
     assert _installs_snapshot_extra("Dockerfile.fake", root=tmp_path) is True
 
 
-def test_neither_image_installs_the_extra_today_and_that_is_correct():
-    """Records the current state explicitly, with the reason it is fine.
+def test_dependency_only_images_install_the_extra_with_the_flag_still_off():
+    """Install first, deploy and observe independently; never enable here.
 
-    Informational: the runtime is never booted while the flag is off, so the
-    packages are never imported. PR 4 / the rollout changes both sides together.
+    This only checks the recipe. Built-image imports and deployed observation
+    remain separate evidence requirements under G3.
     """
     installed = {name: _installs_snapshot_extra(dockerfile)
                  for name, dockerfile, _fly in IMAGES}
     enabled = {name: _flag_enabled(dockerfile, fly)
                for name, dockerfile, fly in IMAGES}
     assert enabled == {"property-shared": False, "propertydata": False}
-    assert installed == {"property-shared": False, "propertydata": False}, (
-        f"{installed} — if an image now installs the extra, the rollout has "
-        f"started and this record needs updating alongside it"
-    )
+    assert installed == {"property-shared": True, "propertydata": True}
 
 
 # --------------------------------------------------------------------------

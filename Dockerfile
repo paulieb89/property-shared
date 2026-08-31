@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir uv
 
 # Copy dependency manifests first for better layer caching
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --extra api
+RUN uv sync --frozen --no-dev --extra api --extra snapshot
 
 # Planning disabled: scraping requires UK residential IP
 # RUN uv sync ... --extra planning && playwright install chromium
