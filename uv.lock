@@ -1301,7 +1301,7 @@ wheels = [
 
 [[package]]
 name = "property-shared"
-version = "1.15.3"
+version = "1.16.0"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -1331,12 +1331,6 @@ cli = [
 demo = [
     { name = "python-multipart" },
 ]
-dev = [
-    { name = "openapi-python-client" },
-    { name = "pre-commit" },
-    { name = "pytest" },
-    { name = "python-dotenv" },
-]
 planning = [
     { name = "openai" },
     { name = "playwright" },
@@ -1349,6 +1343,10 @@ snapshot = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "openapi-python-client" },
+    { name = "pre-commit" },
+    { name = "pytest" },
+    { name = "python-dotenv" },
     { name = "tiktoken" },
 ]
 
@@ -1363,15 +1361,11 @@ requires-dist = [
     { name = "httpx", specifier = "==0.28.1" },
     { name = "jinja2", specifier = "==3.1.6" },
     { name = "openai", marker = "extra == 'planning'", specifier = ">=1.83.0,<2" },
-    { name = "openapi-python-client", marker = "extra == 'dev'", specifier = ">=0.28.1" },
     { name = "playwright", marker = "extra == 'planning'", specifier = ">=1.57.0" },
-    { name = "pre-commit", marker = "extra == 'dev'", specifier = "==4.6.2" },
     { name = "prefab-ui", marker = "extra == 'apps'", specifier = "==0.19.0" },
     { name = "prometheus-client", marker = "extra == 'api'", specifier = "==0.24.1" },
     { name = "pydantic", specifier = "==2.12.5" },
     { name = "pydantic-settings", specifier = "==2.12.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.2" },
-    { name = "python-dotenv", marker = "extra == 'dev'", specifier = ">=1.0.1" },
     { name = "python-multipart", marker = "extra == 'demo'", specifier = ">=0.0.9" },
     { name = "requests", specifier = "==2.32.5" },
     { name = "rich", marker = "extra == 'cli'", specifier = ">=13.9.0" },
@@ -1380,10 +1374,16 @@ requires-dist = [
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.40.0" },
     { name = "zstandard", marker = "extra == 'snapshot'", specifier = "==0.25.0" },
 ]
-provides-extras = ["snapshot", "planning", "dev", "api", "cli", "demo", "apps"]
+provides-extras = ["snapshot", "planning", "api", "cli", "demo", "apps"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "tiktoken", specifier = ">=0.12.0" }]
+dev = [
+    { name = "openapi-python-client", specifier = ">=0.28.1" },
+    { name = "pre-commit", specifier = "==4.6.2" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "python-dotenv", specifier = ">=1.0.1" },
+    { name = "tiktoken", specifier = ">=0.12.0" },
+]
 
 [[package]]
 name = "py-key-value-aio"

@@ -5,9 +5,9 @@ proposed defaults (residential standard sales only, outlier-filtered). Run this
 before and after the data-parity fix to see the delta.
 
 Usage:
-    uv run --extra dev python scripts/diagnose_comps_filters.py
-    uv run --extra dev python scripts/diagnose_comps_filters.py NG1 2NS
-    uv run --extra dev python scripts/diagnose_comps_filters.py SW1A 1AA --level district
+    uv run python scripts/diagnose_comps_filters.py
+    uv run python scripts/diagnose_comps_filters.py NG1 2NS
+    uv run python scripts/diagnose_comps_filters.py SW1A 1AA --level district
 """
 from __future__ import annotations
 

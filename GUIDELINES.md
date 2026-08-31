@@ -80,18 +80,17 @@ Three-layer pattern:
 
 ## Testing
 
-**Unit tests** (mocked, default):
+**Full validation** (lockfile check, pre-commit, all extras, full suite) —
+run this rather than hand-assembling extras; it's the same entrypoint CI and
+the release gate use:
 ```bash
-uv run --extra dev --extra api --extra apps --extra cli pytest -v
+./scripts/validate.sh                    # unit tests (mocked)
+RUN_LIVE_TESTS=1 ./scripts/validate.sh    # + live network tests
 ```
 
-**Live integration tests** (real network calls):
-```bash
-RUN_LIVE_TESTS=1 uv run --extra dev --extra api --extra apps --extra cli pytest -v
-```
-
-All four extras are required: `api` provides fastapi (needed by `test_http_metrics.py`
-and `test_mcp_server.py`), `apps` provides fastmcp[apps], `cli` provides typer.
+`scripts/validate.sh` installs `api` (fastapi, needed by `test_http_metrics.py`
+and `test_mcp_server.py`), `apps` (fastmcp[apps]), `cli` (typer), and
+`snapshot`. pytest itself installs by default via `[dependency-groups]`.
 
 Tests skip gracefully on 503/network errors.
 

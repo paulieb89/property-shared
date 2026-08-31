@@ -1,5 +1,32 @@
 # Changelog
 
+Versioning here is not strict SemVer: breaking changes are documented in a
+`### Breaking Changes` section within a minor bump (see v1.13.0, v1.12.0,
+v1.11.0, v1.10.0, v1.4.0) rather than forcing a major bump. This entry follows
+that established practice.
+
+## v1.16.0 (2026-08-31) — removed the published `dev` extra
+
+This repo had two differently-named "dev" dependency mechanisms: a published
+PyPI extra (`pip install property-shared[dev]`) holding repo-internal tooling
+(pytest, pre-commit, etc.) that no consumer of the library needs, and a
+separate, unpublished `[dependency-groups] dev` (installed by default with
+plain `uv run`/`uv sync`) holding one more repo-internal dependency
+(`tiktoken`). Consolidated into the single unpublished group.
+
+Documented commands updated accordingly: full validation now runs via
+`./scripts/validate.sh`; drop `--extra dev` from any remaining `uv
+run`/`uv sync` invocation; the `api`/`apps`/`cli`/`snapshot` extras are
+unchanged and still explicit.
+
+### Breaking Changes
+- **Packaging** — the published `dev` extra (`pip install
+  property-shared[dev]`) no longer exists. No fleet consumer
+  (`uk-property-mcp`, `property-descriptions-mcp`) referenced it. If you
+  relied on `pip install property-shared[dev]` to get a local test/lint
+  environment, clone the repo and run `uv sync` instead — dev tooling now
+  installs automatically via `[dependency-groups]`.
+
 ## v1.15.3 (2026-08-31) — private Tigris snapshot delivery, serving off
 
 **Released with `PPD_SNAPSHOT_ENABLED` off on both apps.** Adds a read-only,

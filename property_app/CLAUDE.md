@@ -13,7 +13,7 @@ MCP_TRANSPORT=http uv run --extra apps property-app               # HTTP
 uv run --extra apps fastmcp dev apps property_app/server.py:mcp   # dev preview in browser
 
 # Tests
-uv run --extra dev pytest tests/test_app_*.py -v
+uv run --extra apps pytest tests/test_app_*.py -v
 
 # Deploy
 fly deploy --config fly.app.toml

@@ -9,6 +9,6 @@ cd "$SCRIPT_DIR/.." || { echo "cannot resolve repo root from script location" >&
 [ "$(git rev-parse --show-toplevel 2>/dev/null)" = "$PWD" ] || { echo "not at a git repo root" >&2; exit 1; }
 
 uv lock --check
-uv run --locked --extra dev pre-commit run --all-files
-uv sync --locked --extra dev --extra api --extra apps --extra cli --extra snapshot
+uv run --locked pre-commit run --all-files
+uv sync --locked --extra api --extra apps --extra cli --extra snapshot
 uv run --locked pytest

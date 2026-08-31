@@ -10,9 +10,9 @@ Output: prints a structured report and writes JSON to /tmp/mcp_quality_<timestam
 so before/after comparisons are easy.
 
 Usage:
-    uv run --env-file .env --extra dev --extra apps python scripts/measure_mcp_quality.py
-    uv run --env-file .env --extra dev --extra apps python scripts/measure_mcp_quality.py --label before
-    uv run --env-file .env --extra dev --extra apps python scripts/measure_mcp_quality.py --label after
+    uv run --env-file .env --extra apps python scripts/measure_mcp_quality.py
+    uv run --env-file .env --extra apps python scripts/measure_mcp_quality.py --label before
+    uv run --env-file .env --extra apps python scripts/measure_mcp_quality.py --label after
 
 The --label tags the output file (e.g. /tmp/mcp_quality_before.json).
 """

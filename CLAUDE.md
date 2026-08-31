@@ -18,12 +18,12 @@ Property Shared is a FastAPI service + pure-Python core library for UK property 
 ## Commands
 
 ```bash
-# Install dependencies (with dev extras)
-uv sync --extra dev
+# Install dependencies (dev tooling installs by default via [dependency-groups])
+uv sync
 
 # Run API server
-uv run --env-file .env property-api              # production mode
-uv run --env-file .env uvicorn app.main:app --reload  # dev mode with reload
+uv run --extra api --env-file .env property-api              # production mode
+uv run --extra api --env-file .env uvicorn app.main:app --reload  # dev mode with reload
 
 # Run CLI (core mode - no server needed)
 uv run --extra cli property-cli meta
@@ -38,16 +38,14 @@ uv run --extra cli property-cli analysis rental "NG1 1AA"
 # CLI targeting running API (add --api-url)
 uv run --extra cli property-cli ppd comps "SW1A 1AA" --api-url http://localhost:8000
 
-# Tests — all four extras are required: `api` provides fastapi (test_http_metrics,
-# test_mcp_server), `apps` provides fastmcp[apps], `cli` provides typer.
-# Add `--extra snapshot` as well, or the ~200 tests under tests/snapshot/ that
-# need DuckDB SKIP rather than fail (they use importorskip), and a green run
-# says nothing about them.
-uv run --extra dev --extra api --extra apps --extra cli --extra snapshot pytest  # unit tests (mocked)
-RUN_LIVE_TESTS=1 uv run --extra dev --extra api --extra apps --extra cli --extra snapshot pytest
+# Full validation (lockfile check, pre-commit, all extras, full suite) —
+# run this, don't hand-assemble the extras yourself; it's the same
+# entrypoint CI and the release gate use.
+./scripts/validate.sh                        # unit tests (mocked)
+RUN_LIVE_TESTS=1 ./scripts/validate.sh        # + live network tests
 
 # Single test
-uv run --extra dev --extra api --extra apps --extra cli pytest tests/test_ppd_service_live.py -v
+uv run --extra api --extra apps --extra cli pytest tests/test_ppd_service_live.py -v
 ```
 
 ## Git safety
