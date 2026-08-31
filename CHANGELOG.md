@@ -1,5 +1,51 @@
 # Changelog
 
+## v1.15.3 (2026-08-31) — private Tigris snapshot delivery, serving off
+
+**Released with `PPD_SNAPSHOT_ENABLED` off on both apps.** Adds a read-only,
+signed `TigrisObjectSource` — the transport the PPD snapshot runtime will use
+to fetch a private, credentialed bundle instead of a public URL or local
+directory — but nothing routes to it yet: the flag stays unset, and every PPD
+surface keeps answering from the live source exactly as before this release.
+This is dependency-only and delivery-code-only, per the gated rollout in
+`docs/design/ppd-source-routing.md` §7 and
+`docs/design/ppd-private-delivery.md`; see those for the remaining gates
+(G1a, G1b, G2, Stage 1 exit) still required before any enablement.
+
+### Added
+
+- **`property_core.snapshot.s3_source.TigrisObjectSource`.** Official
+  `botocore` SigV4 signing (lazy-loaded from the optional `snapshot` extra);
+  explicit bucket-scoped credentials, no discovery or metadata-service lookup;
+  fixed HTTPS endpoint; no writes or retries; redirects rejected without
+  forwarding credentials; bare object names validated before every request.
+  Reuses the existing streamed HTTP transport, `read1` chunking, checksum,
+  length and timeout controls unchanged.
+- **Non-2xx responses from the source are now typed.** A 4xx/5xx from Tigris
+  raises `SnapshotSourceError` (previous cause preserved via `from exc`)
+  instead of leaking a raw `urllib.error.HTTPError` — timeouts are unaffected
+  and still translate to `DownloadDeadlineExceeded`.
+- New configuration, consulted only once a bucket is set:
+  `PPD_SNAPSHOT_S3_BUCKET`, `PPD_SNAPSHOT_S3_PREFIX` (default `ppd`, and now
+  falls back to that default when explicitly set empty, not just when unset),
+  `PPD_SNAPSHOT_S3_ACCESS_KEY_ID`, `PPD_SNAPSHOT_S3_SECRET_ACCESS_KEY`.
+  Configuring a bucket alongside `PPD_SNAPSHOT_DIR`/`PPD_SNAPSHOT_URL` is
+  rejected as ambiguous; `PPD_SNAPSHOT_DIR` and `PPD_SNAPSHOT_URL` together
+  keep the pre-existing precedence (`DIR` wins) unchanged.
+
+## v1.15.2 (2026-08-31) — dependency-only snapshot images, serving off
+
+**No API, response, error or data change.** Both production Dockerfiles
+(`property-shared` and `propertydata`) install the optional `snapshot`
+extra — `duckdb`, `zstandard`, `botocore` — so the deployed images are ready
+for private PPD snapshot delivery. `PPD_SNAPSHOT_ENABLED` remains unset on
+both apps: the snapshot runtime never boots, and the live source continues
+to serve every request exactly as before this release. No Fly config,
+worker, volume, secret or scale change. This is the dependency-only rollout
+gate (G3 requirement 1, `docs/design/ppd-source-routing.md`): the dependency
+change lands, deploys and is observed with the flag off before any snapshot
+code or enablement follows.
+
 ## v1.15.1 (2026-08-31) — hotfix: PPD comps no longer blocks the event loop
 
 **Upgrade if you run v1.15.0.** No API, response, error or data change; no

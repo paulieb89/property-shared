@@ -36,6 +36,7 @@ log = logging.getLogger("property_core.snapshot.boot")
 #: path can be exercised without any network or cloud resource.
 SNAPSHOT_URL_ENV = "PPD_SNAPSHOT_URL"
 SNAPSHOT_DIR_ENV = "PPD_SNAPSHOT_DIR"
+SNAPSHOT_BUCKET_ENV = "PPD_SNAPSHOT_S3_BUCKET"
 #: Where it is materialized. Ephemeral: Fly's default rootfs, wiped on restart.
 SNAPSHOT_CACHE_ENV = "PPD_SNAPSHOT_CACHE_DIR"
 DEFAULT_CACHE_DIR = "/tmp/ppd-snapshot"
@@ -50,12 +51,27 @@ def _build_source() -> Any:
     from property_core.snapshot.source import HttpObjectSource, LocalDirectorySource
 
     directory = os.getenv(SNAPSHOT_DIR_ENV)
+    url = os.getenv(SNAPSHOT_URL_ENV)
+    bucket = os.getenv(SNAPSHOT_BUCKET_ENV)
+    if bucket and (directory or url):
+        raise RuntimeError(
+            f"{SNAPSHOT_BUCKET_ENV} cannot be combined with {SNAPSHOT_DIR_ENV} or "
+            f"{SNAPSHOT_URL_ENV}; configure exactly one PPD snapshot source"
+        )
+    if bucket:
+        from property_core.snapshot.s3_source import TigrisObjectSource
+
+        return TigrisObjectSource(
+            bucket,
+            prefix=os.getenv("PPD_SNAPSHOT_S3_PREFIX") or "ppd",
+            access_key=os.getenv("PPD_SNAPSHOT_S3_ACCESS_KEY_ID", ""),
+            secret_key=os.getenv("PPD_SNAPSHOT_S3_SECRET_ACCESS_KEY", ""),
+        )
     if directory:
         return LocalDirectorySource(Path(directory))
-    url = os.getenv(SNAPSHOT_URL_ENV)
     if not url:
         raise RuntimeError(
-            f"{SNAPSHOT_URL_ENV} or {SNAPSHOT_DIR_ENV} must be set when "
+            f"{SNAPSHOT_URL_ENV}, {SNAPSHOT_DIR_ENV} or {SNAPSHOT_BUCKET_ENV} must be set when "
             f"PPD_SNAPSHOT_ENABLED is on"
         )
     return HttpObjectSource(url)
