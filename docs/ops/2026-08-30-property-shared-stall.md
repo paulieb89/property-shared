@@ -120,3 +120,174 @@ What remains open, and is *not* claimed as a defect here: whether
 `rightmove_search` should reject a non-full-postcode input with a typed caller
 error instead of raising and rendering a large traceback per call. That needs
 its own valid-input controls before anything is asserted about it.
+
+
+## Recovery, 2026-08-31
+
+### The release workflow deployed only one of the two apps
+
+`v1.15.1` was tagged on `54ac5c7` and the GitHub Release published, triggering
+`release.yml` (run `33345291490`). Results:
+
+| Job | Outcome |
+|---|---|
+| Publish to PyPI | success — 1.15.1 live |
+| Deploy propertydata to Fly | success — reported 1.15.1 |
+| Deploy property-shared to Fly | **failure**, twice |
+
+Both attempts (00:41Z, and a re-run at 00:52Z) failed identically, before any
+build began:
+
+```
+Waiting for depot builder...
+error releasing builder: deadline_exceeded: context deadline exceeded   (x2, 5 min each)
+Error: failed to fetch an image or build from source: error building:
+  timed out connecting to machine: failed to list workers:
+  Unavailable: ... authentication handshake failed: EOF
+```
+
+Fly's status page reported all systems operational with no unresolved
+incidents, `propertydata` obtained a builder on the same run, and the same
+token had built this app successfully five hours earlier for v1.15.0. Treated
+as transient Depot builder unavailability, not a repository or config fault.
+
+**This left the two apps on different versions**, with the app that needed the
+fix still running the stalling v1.15.0 and timing out externally at 01:03Z. The
+workflow's deploy steps have no retry, and nothing reconciles a partial
+release.
+
+### Manual recovery
+
+One authorised emergency deployment of `property-shared` only, bypassing Depot,
+from a clean checkout pinned to the release commit:
+
+```
+fly deploy --app property-shared --config fly.toml \
+  --remote-only --depot=false --ha=false
+```
+
+Preconditions confirmed from that checkout before running: `HEAD` =
+`54ac5c7a1a8709f0a4e8119c7d6fe48a0a09182a` = tag `v1.15.1`
+(`git describe --tags --exact-match` → `v1.15.1`), working tree clean and
+identical to `origin/main`, versions 1.15.1 in `pyproject.toml` and both
+`server.json` fields, `fly.toml` concurrency and health checks unchanged,
+`Dockerfile` unchanged, and no `.env*` in the build context.
+
+| Field | Value |
+|---|---|
+| Started | 2026-08-31T01:43:57Z |
+| Image | `property-shared:deployment-01M1AQTD8KN05PRA2330DX68GA` |
+| Digest | `sha256:2087c8970fa38a36e0687a4c7995d5d28d7ba627a72a06f5443e8f8e0c980252` |
+| Image size | 480 MB |
+| Machine | `7849207a412608`, version 130 → **131**, rolling update |
+| Health checks | enabled throughout; smoke and machine checks passed |
+
+Machine count, worker count, concurrency limits, secrets, Dockerfile and
+snapshot flags were not touched. `propertydata` was not redeployed and PyPI was
+not republished.
+
+### Post-deployment verification
+
+| Check | Result |
+|---|---|
+| Reported version | `{"serverInfo":{"name":"property-data","version":"1.15.1"}}` |
+| Machine check | `passing`, `{"status":"ok"}` |
+| External health | 5/5 at 200; ttfb 0.110 s then 0.046–0.051 s — no cold-start penalty |
+| MCP initialize + `tools/list` | `property-data v1.15.1`, **14 tools**, 0.22 s; repeated after the comps call, 0.18 s |
+| **Responsiveness during a slow comps call** | **NOT ESTABLISHED — see below** |
+
+### Why the decisive check is still outstanding
+
+The one bounded comps request returned **502 in 0.1 s**:
+
+```
+{"detail":"PPD comps failed: HTTP Error 429: Too Many Requests"}
+```
+
+Land Registry is rate-limiting this app. A request that fails in 0.1 s never
+occupies the loop, so it cannot demonstrate the property the hotfix exists to
+provide. Health stayed at 0.049 s throughout, but against a fast failure that
+observation is worth nothing.
+
+**A healthy server shortly after a restart does not establish that the stall is
+fixed.** The event-loop fix is proven locally by
+`tests/test_event_loop_not_blocked_by_comps.py`, which reproduces the stall
+with a slow stub and shows it gone; it is not yet proven against the deployed
+service under a genuinely slow upstream call. Deliberately not retried in a
+loop — repeated slow-query load is what provoked the throttling.
+
+**The incident stays OPEN** pending that check and the maintainer's Claude and
+ChatGPT client testing.
+
+### Also observed
+
+Upstream `429` responses mean PPD surfaces are currently returning 502 to real
+clients. That is an upstream throttle, not a regression from this release, but
+it will affect client testing until it clears. `rightmove_search` continues to
+raise `LocationLookupError` for inputs that are not resolvable full postcodes —
+the narrowed finding above, unchanged.
+
+### ChatGPT connector check, 2026-08-31
+
+**Client:** ChatGPT, via its "property-shared" MCP integration.
+**Endpoint/tool:** `property-shared` MCP, tool `ppd_transactions`.
+**Time:** ~05:51 on 2026-08-31, as reported by the maintainer. The transcript's
+own `Source` line separately states retrieval at "31 Aug 2026 (Europe/London)".
+Neither figure was cross-checked against server logs.
+
+**Evidence:** the maintainer's pasted transcript, reproduced verbatim below.
+The raw tool response (JSON, headers, `sample_complete` flag) was not
+independently re-fetched or checked — this record reflects what the
+transcript shows, not a server-side capture.
+
+```
+I'll query the shared property source directly, limited to those two areas, then report only the returned sales and its stated coverage limits.
+
+Used property-shared integration
+Ppd transactions
+
+Error calling tool 'ppd_transactions': postcode 'DE12' is not valid; expected a full UK postcode, e.g. 'B5 4BX'
+
+Ppd transactions
+
+Recent transactions returned for DE12 6LL (newest first):
+Date         Property                    Price      Type            Category
+23 Jan 2026  5 Alexandra Road            £225,000   Semi-detached   B
+5 Dec 2022   9 Alexandra Road            £330,000   Detached        A
+20 May 2022  3 Alexandra Road            £165,000   Terraced        A
+30 Jun 2021  Windyridge, Alexandra Road  £257,500   Detached        A
+5 May 2021   Glendevon, Alexandra Road   £350,000   Detached        A
+
+Source: property-shared MCP, Land Registry Price Paid data via its sparql source, retrieved 31 Aug 2026 (Europe/London).
+Limitations: the MCP rejected DE12 alone because it requires a full postcode, so this result is for DE12 6LL only. The response was capped at five and marked sample_complete: false; it does not establish the complete sales history. The newest result is transaction category B, so it may be a non-standard/bulk transfer rather than an ordinary market sale.
+```
+
+**Passed:**
+- `ppd_transactions` was called and returned five transactions for the full
+  postcode `DE12 6LL`.
+- The connector correctly distinguished the rejected outcode-only request
+  (`DE12`) from the successful full-postcode one (`DE12 6LL`). This is
+  `ppd_transactions`' documented full-postcode requirement working as
+  designed, not a defect — it does not test district containment, which needs
+  a district-capable comps tool, not `ppd_transactions`.
+- The `sparql` provenance and the `sample_complete: false` / five-result-cap
+  coverage caveat were both reported to the user.
+
+**Issue — an observed AI-answer problem, not a demonstrated server defect:**
+the connector's closing line ("may be a non-standard/bulk transfer rather than
+an ordinary market sale") overstates what Category B means. Category B is
+Land Registry's "additional transaction category" and covers several distinct
+transaction types — including identifiable buy-to-lets, repossessions, and
+transfers to non-private individuals — without identifying which one applies.
+Correct wording: "Category B: additional transaction category; the specific
+reason is not identified." This was the AI's generated interpretation; it has
+not been checked against the raw JSON response, and nothing here shows the
+tool or the `sparql` source data itself is at fault.
+
+**Not tested, not failed:** snapshot-mode serving, and district containment
+(an outcode-level query against a district-capable tool). Absence of a result
+here is not evidence either way.
+
+This single connector check does not establish, and is not sufficient on its
+own to approve, the decisive slow-comps responsiveness check above — that
+remains outstanding on its own evidence.
