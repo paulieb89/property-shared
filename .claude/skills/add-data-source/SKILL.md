@@ -87,4 +87,4 @@ Follow existing patterns (Rich tables, `_join_tokens()` for postcodes).
 - [ ] CLI command added to `property_cli/main.py`
 - [ ] Test created (at least one live test, gated with `RUN_LIVE_TESTS=1`)
 - [ ] Environment variables documented in CLAUDE.md and `.env.example`
-- [ ] All tests pass: `uv run pytest -v`
+- [ ] All validation passes: `./scripts/validate.sh`
