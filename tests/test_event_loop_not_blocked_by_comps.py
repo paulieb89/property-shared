@@ -185,3 +185,109 @@ async def test_the_mcp_tool_does_not_stall_the_loop_it_shares(monkeypatch):
         f"the event loop stalled for {worst:.2f}s during one property_comps "
         f"call; every other MCP session and /v1/health waits that long"
     )
+
+
+# ---------------------------------------------------------------------------
+# The siblings: synchronous handlers, which both dispatchers already offload.
+#
+# A synchronous *call* is not the defect. The defect is a synchronous call made
+# from an `async def` handler, because only then does it run on the loop
+# thread. `comps` was the only `async def` in the PPD router; every sibling is
+# a plain `def`, which Starlette runs in its threadpool, and FastMCP does the
+# same for a synchronous tool.
+#
+# These tests exist because that distinction is easy to assert and easy to get
+# wrong -- it was got wrong once already, when the siblings were listed as
+# defective on the strength of the call alone. They drive the real route and
+# the real tool dispatcher, so they would fail if a sibling were ever converted
+# to `async def` without an offload.
+# ---------------------------------------------------------------------------
+
+
+def _slow_search(*args, **kwargs) -> dict:
+    time.sleep(SLOW_SECONDS)
+    return {"count": 0, "limit": 5, "offset": 0, "results": [], "warnings": []}
+
+
+async def test_a_synchronous_rest_handler_does_not_block_the_loop(monkeypatch):
+    """`GET /v1/ppd/transactions` is `def`; Starlette offloads it for us."""
+    import httpx
+
+    from app.main import create_app
+    from property_core.ppd_service import PPDService
+
+    monkeypatch.setattr(PPDService, "search_transactions", _slow_search)
+
+    with _Server(create_app(), _free_port()) as server:
+        async with httpx.AsyncClient(base_url=server.base) as client:
+            slow = asyncio.ensure_future(
+                client.get(
+                    "/v1/ppd/transactions",
+                    params={"postcode_prefix": "B5", "limit": 5},
+                    timeout=30.0,
+                )
+            )
+            await asyncio.sleep(0.5)
+
+            started = time.monotonic()
+            health = await client.get("/v1/health", timeout=HEALTH_BUDGET_SECONDS + 4)
+            elapsed = time.monotonic() - started
+
+            assert health.status_code == 200, health.text
+            assert elapsed < HEALTH_BUDGET_SECONDS, (
+                f"/v1/health took {elapsed:.2f}s during a slow *synchronous* "
+                f"handler; it is no longer being offloaded"
+            )
+            # Anti-vacuity: if the stub never ran -- a 422 on params, a route
+            # that does not exist -- health would be fast for a reason that has
+            # nothing to do with offloading, and this test would prove nothing.
+            response = await slow
+            assert response.status_code == 200, response.text
+            assert time.monotonic() - started >= SLOW_SECONDS - 0.6, (
+                "the slow stub did not actually run; this test is vacuous"
+            )
+
+
+async def test_a_synchronous_mcp_tool_does_not_block_the_loop(monkeypatch):
+    """Driven through FastMCP's own dispatcher, not by calling the function."""
+    from fastmcp import Client
+
+    from app.mcp.server import mcp
+    from property_core.ppd_service import PPDService
+
+    monkeypatch.setattr(PPDService, "search_transactions", _slow_search)
+
+    gaps: list[float] = []
+
+    async def heartbeat() -> None:
+        last = time.monotonic()
+        while True:
+            await asyncio.sleep(0.05)
+            now = time.monotonic()
+            gaps.append(now - last)
+            last = now
+
+    async with Client(mcp) as client:
+        beat = asyncio.ensure_future(heartbeat())
+        await asyncio.sleep(0.3)
+        beats_before = len(gaps)
+        call_started = time.monotonic()
+        try:
+            await client.call_tool("ppd_transactions", {"postcode": "B5 4BX"})
+            elapsed = time.monotonic() - call_started
+            await asyncio.sleep(0.1)
+        finally:
+            beat.cancel()
+
+    assert beats_before >= 2, "heartbeat was not established; test proves nothing"
+    # Anti-vacuity: the tool must actually have reached the slow stub, or a
+    # quiet loop says nothing about offloading.
+    assert elapsed >= SLOW_SECONDS - 0.6, (
+        f"the tool returned in {elapsed:.2f}s; the slow stub did not run and "
+        f"this test is vacuous"
+    )
+    worst = max(gaps)
+    assert worst < HEALTH_BUDGET_SECONDS, (
+        f"the loop stalled for {worst:.2f}s dispatching a synchronous MCP tool; "
+        f"FastMCP is no longer offloading it"
+    )

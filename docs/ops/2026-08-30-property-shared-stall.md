@@ -1,5 +1,9 @@
 # property-shared stall, 2026-08-30
 
+**Status: OPEN.** It closes when the hotfix is deployed and client
+responsiveness is verified against the running service — not when the fix
+merges. The regression tests, PR #34 and this note are the durable record.
+
 Timestamped observations from the read-only diagnosis. Every figure here was
 read from the running system at the stated UTC time. This records evidence, not
 gate completion.
@@ -89,6 +93,28 @@ An earlier note in this diagnosis claimed Rightmove's location lookup was
 used a **sector**, which it is not designed to resolve. The production failures
 seen at 22:00:32Z were `LocationLookupError` for `'BB12 1AA'` — consistent with
 an unresolvable input rather than an outage.
+
+## Sibling endpoints — checked, not defective
+
+A first pass listed seven further call sites as "the identical defect" purely
+because they call synchronous code. **That was wrong.** A synchronous call is
+not the defect; a synchronous call from an `async def` handler is, because only
+then does it occupy the loop thread.
+
+`comps` was the **only** `async def` in the PPD router. `download_url`,
+`transactions`, `address_search`, `transaction_record` and `blocks` are plain
+`def`, which Starlette runs in its threadpool. The MCP sites — `ppd_transactions`
+in `app/mcp/server.py`, `analyse_blocks` and `search_ppd_transactions` in
+`property_app/tools.py` — are plain `def` tools, which FastMCP offloads the same
+way.
+
+Verified rather than reasoned: `tests/test_event_loop_not_blocked_by_comps.py`
+drives a slow stub through the real `/v1/ppd/transactions` route and through
+FastMCP's own tool dispatcher, asserting both that the stub actually ran for its
+full duration and that the loop stayed responsive throughout. Those tests would
+fail if a sibling were ever converted to `async def` without an offload.
+
+## Rightmove, continued
 
 What remains open, and is *not* claimed as a defect here: whether
 `rightmove_search` should reject a non-full-postcode input with a typed caller
