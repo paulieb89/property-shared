@@ -1,5 +1,46 @@
 # Changelog
 
+## v1.15.1 (2026-08-31) — hotfix: PPD comps no longer blocks the event loop
+
+**Upgrade if you run v1.15.0.** No API, response, error or data change; no
+dependency, image, flag or configuration change. One defect, two call sites.
+
+### Fixed
+
+- **`PPDService.comps` ran on the event loop and stalled the whole worker.**
+  It is synchronous, and both `GET /v1/ppd/comps` and the MCP `property_comps`
+  tool called it directly from inside `async def`. For the whole of an upstream
+  Land Registry round trip the single uvicorn worker could not run any other
+  task — including `/v1/health`, a constant-returning coroutine that performs
+  no I/O. Live PPD queries take 60–120 s; Fly's health check allows 5 s, so the
+  check timed out, the Machine left the proxy's candidate set, and requests
+  queued behind `could not find a good candidate`. Observed in production on
+  2026-08-30 as a total stall of `property-shared` with **load average 0.00**
+  and 1.74 GB of 2 GB free — zero CPU while serving nothing is a blocked loop,
+  not overload.
+
+  Both call sites now use the bounded `anyio.to_thread.run_sync` pattern that
+  `app/api/v1/rightmove.py` already used. Exceptions propagate unchanged, so
+  every status code, response shape and the EPC enrichment step are identical.
+
+### Not changed
+
+- **Only `comps` was defective.** It was the only `async def` handler in the
+  PPD router; the sibling endpoints and MCP tools are plain `def`, which
+  Starlette and FastMCP already run in a threadpool. Tests drive a slow stub
+  through the real route and through FastMCP's own dispatcher to demonstrate
+  that rather than assert it, and would fail if a sibling were ever converted
+  to `async def` without an offload.
+- Fly concurrency limits, worker count, Machine count, Docker dependencies and
+  `PPD_SNAPSHOT_ENABLED` are untouched, so the fix is observable against an
+  unchanged baseline. Whether `hard_limit = 10` is right is a separate question
+  to reassess now that the loop no longer blocks — it is backpressure, not a
+  bug.
+
+Incident record, with timestamped evidence:
+`docs/ops/2026-08-30-property-shared-stall.md`.
+
+
 ## v1.15.0 (2026-08-30) — PPD snapshot source routing + live-path correctness containment
 
 **Five implementation PRs** (#24-#28) and **four rollout-preparation PRs**
