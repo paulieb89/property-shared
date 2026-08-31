@@ -119,3 +119,118 @@ confirmed absent from both apps' real running processes throughout.
 delivery code) not yet merged/deployed; `include-private` smoke mode not
 yet run; G1a/G1b not yet measured; no snapshot credentials installed on
 either app.
+
+## Phase B — private-delivery code, merged and deployed with the flag off
+
+**Goal**: retarget, re-verify and merge PR#38 (`feat/ppd-private-delivery`)
+onto the post-Phase-A `main`, then deploy and observe it with
+`PPD_SNAPSHOT_ENABLED` still off.
+
+### A gap found in Phase A, corrected here
+
+Running the full test suite against PR#38's actual merge candidate (not a
+stale branch-tip diff) failed one pre-existing test:
+`tests/test_release_manifest_version.py::test_the_changelog_heads_with_the_version_being_built`.
+Cause: Phase A bumped `pyproject.toml`/`server.json`/`uv.lock` to 1.15.2 but
+never added a `CHANGELOG.md` entry — the full suite was never run against
+the release branch before merging it in Phase A, only the version files'
+own parsing was checked. Not a defect in PR#38 (its merge-candidate diff
+against `main` never touches `CHANGELOG.md`); a gap in Phase A's own
+process. Corrected by folding a `CHANGELOG.md` catch-up entry for v1.15.2
+into PR#38's own release commit, alongside its own v1.15.3 entry — see
+below. Also caught and fixed while doing this: a first attempt regenerated
+`uv.lock` before its merge conflict markers were resolved, `uv lock` failed
+to parse and the failure went unnoticed by `git rebase --continue` (which
+only checks that `git add` was run, not that the result is valid) —
+committing `uv.lock` with literal `<<<<<<<`/`=======`/`>>>>>>>` markers
+still in it. Found by re-grepping the file before pushing, fixed by hand,
+`uv lock` then confirmed clean with no further diff. Full suite green
+(1642 passed, 26 skipped) once both were corrected.
+
+### Retarget, re-verify, merge
+
+| Step | Commit | Notes |
+|---|---|---|
+| PR#38 base retargeted | `main` (was `feat/ppd-snapshot-image-dependencies`) | Did not happen automatically on PR#37's merge (branch wasn't deleted); retargeted explicitly via `gh pr edit`. |
+| Changelog + version fix pushed to PR#38's branch | `7f39e77` | Rebased onto post-Phase-A `main` (was originally based on the pre-Phase-A tip); `pyproject.toml`/`server.json`/`uv.lock` → 1.15.3, `CHANGELOG.md` gains both the v1.15.2 catch-up and v1.15.3 entries. |
+| Merge candidate built and tested | — | Real rebase result (branch sits directly on `main` as an ancestor, not a synthetic diff), diffed against `main`: exactly the 8 originally-reviewed files plus the 4 version/changelog files, nothing else. Full unit + `tests/snapshot/` suite: **1642 passed, 26 skipped**. Both Docker images rebuilt from the candidate and confirmed to build cleanly (then discarded — pre-merge verification only). |
+| PR#38 merged to `main` | `aa112ef` | Branch **not deleted**. |
+| Release published | tag `v1.15.3`, target `aa112ef` | Same clean-checkout precondition discipline as Phase A: `HEAD` matches, working tree clean and identical to `origin/main`, versions consistent (1.15.3 everywhere), `CHANGELOG.md` headed `## v1.15.3`, both Dockerfiles carry `--extra snapshot`, no `.env*` tracked or present. |
+
+### Deployment (`release.yml`, run `33415985975`)
+
+| Job | Result | Duration |
+|---|---|---|
+| Publish to PyPI | success | 27s |
+| Deploy property-shared to Fly | success | 57s |
+| Deploy propertydata to Fly | success | 1m48s |
+
+Deployed image identities (both Machines' `GH_SHA` label confirmed
+`aa112ef842f677261fa6d81252418eebcc7d1ace`):
+
+| App | Machine | Digest |
+|---|---|---|
+| `property-shared` | `7849207a412608`, version 133 | `sha256:df24d3b26fb296ddba1dc4ca305ce392aa596ba1055919f8c616ae1650c9fe7b` |
+| `propertydata` | `d897115a995d48`, version 55 | `sha256:b2aa363db38840cb8c16b4fc83c378eac2048d2c3e5e34f1e24c00d816561b9a` |
+
+### Observation
+
+**Health**: both Machines `started`, `1 total, 1 passing`. External health
+probes, 5x each, all 200 (property-shared ttfb 0.055–0.114s; propertydata
+ttfb 0.081–0.217s).
+
+**Snapshot flag off — property-shared**: `GET /v1/meta` →
+`{"snapshot": {"enabled": false, "routable": false, "source_error": null}}`.
+Also confirmed directly against the real running process: identified via
+`/proc` cmdline scan (`uvicorn app.main:app`, PID 634 — a fresh PID from the
+restart, not the same as Phase A's), `PPD_SNAPSHOT_ENABLED` absent from
+`/proc/634/environ`.
+
+**Snapshot flag off — propertydata**: same technique as Phase A (no HTTP
+introspection endpoint exists). Real server process identified (`property-app`,
+PID 634), `PPD_SNAPSHOT_ENABLED` confirmed absent from `/proc/634/environ`.
+
+**G2 — worker count**: exactly one server process found on each Machine
+again, same read-only method as Phase A.
+
+**G3 — full smoke matrix including `include-private`**: now that PR#38's
+`TigrisObjectSource`/bucket branch exists on the deployed image, ran all
+five `image_smoke.py` modes (`off`, `healthy`, `duckdb`-blocked,
+`zstandard`-blocked, `botocore`-blocked) against the pulled, digest-identified
+deployed images for both apps — not a rebuild.
+
+```
+{"python": "3.11.16", "duckdb": "1.5.5", "zstandard": "0.25.0", "botocore": "1.43.83"}
+{"image": "api", "mode": "off",       "passed": true, "live_fixture_calls": 1}
+{"image": "api", "mode": "healthy",   "passed": true, "live_fixture_calls": 0}
+{"image": "api", "mode": "duckdb",    "passed": true, "live_fixture_calls": 1}
+{"image": "api", "mode": "zstandard", "passed": true, "live_fixture_calls": 1}
+{"image": "api", "mode": "botocore",  "passed": true, "live_fixture_calls": 1}
+```
+```
+{"python": "3.11.16", "duckdb": "1.5.5", "zstandard": "0.25.0", "botocore": "1.43.83"}
+{"image": "mcp", "mode": "off",       "passed": true, "live_fixture_calls": 1}
+{"image": "mcp", "mode": "healthy",   "passed": true, "live_fixture_calls": 0}
+{"image": "mcp", "mode": "duckdb",    "passed": true, "live_fixture_calls": 1}
+{"image": "mcp", "mode": "zstandard", "passed": true, "live_fixture_calls": 1}
+{"image": "mcp", "mode": "botocore",  "passed": true, "live_fixture_calls": 1}
+```
+
+The new `botocore`-blocked mode shows the same typed-fail-closed-to-live
+behavior as `duckdb`/`zstandard`: `SnapshotExtraMissingError`, live fallback,
+no crash, no half-enablement — now exercised on the actual
+`TigrisObjectSource` code path, not just the pre-existing snapshot classes.
+
+### Result
+
+PR#38 merged and deployed with `PPD_SNAPSHOT_ENABLED` confirmed absent on
+both apps throughout, by direct process-environment inspection, not
+inference. Full `image_smoke.py` matrix (all 5 modes) passes against both
+apps' exact deployed image digests. No snapshot credentials installed on
+either app. No Fly config, worker, volume, secret, or scale change beyond
+the two release deploys themselves.
+
+**Not yet done** (per the rollout plan, deliberately): Phase C (the
+narrowly-scoped boot-only verification tool) not yet started; G1a/G1b not
+yet measured even partially; no snapshot credentials installed on either
+app.
