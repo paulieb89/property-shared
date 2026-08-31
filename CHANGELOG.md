@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — snapshot image prerequisites
+
+- Both Docker recipes install the optional `snapshot` extra unconditionally.
+  Snapshot serving remains disabled; deploying and observing these dependencies
+  is a separate step from enabling the source (G3).
+- The optional extra also includes `botocore==1.43.83` for official request
+  signing in the separately reviewed private-delivery source. No required
+  library dependency or existing pinned dependency version changes.
+- No Fly configuration, worker count, Machine count, serving flag or version
+  changes. A built image is not evidence that production has been updated.
+
 ## v1.15.1 (2026-08-31) — hotfix: PPD comps no longer blocks the event loop
 
 **Upgrade if you run v1.15.0.** No API, response, error or data change; no
