@@ -5,7 +5,7 @@ Versioning here is not strict SemVer: breaking changes are documented in a
 v1.11.0, v1.10.0, v1.4.0) rather than forcing a major bump. This entry follows
 that established practice.
 
-## v1.16.0 (2026-08-31) — removed the published `dev` extra
+## v1.16.0 (2026-09-01) — removed the published `dev` extra; property-shared-only boot-only G1a verifier, serving off
 
 This repo had two differently-named "dev" dependency mechanisms: a published
 PyPI extra (`pip install property-shared[dev]`) holding repo-internal tooling
@@ -26,6 +26,23 @@ unchanged and still explicit.
   relied on `pip install property-shared[dev]` to get a local test/lint
   environment, clone the repo and run `uv sync` instead — dev tooling now
   installs automatically via `[dependency-groups]`.
+
+### Added
+
+- **`tools/ppd_snapshot/boot_only_verify.py`**, a standalone boot-only
+  verification tool copied into the `property-shared` image only — not
+  `propertydata`, not this release's public API. Invoked out of band via
+  `fly ssh console`, never wired into the app's lifespan or process state,
+  it materializes and validates one real snapshot through the existing
+  `SnapshotRuntime`/`SnapshotAdapter` path, then discards it, to measure
+  fetch/extraction/adapter-validation timing, peak transient disk, and
+  cold-run confirmation against the declared bundle size.
+  **`PPD_SNAPSHOT_ENABLED` remains off on both apps in this release, and
+  no snapshot credentials are installed.** Every result the tool produces
+  is explicitly labelled `evidence_scope: "partial_g1a"`,
+  `g1a_complete: false`, `stage_1_evidence: false`: it measures
+  materialization and validation, not the application startup lifecycle
+  G1a requires, and produces no Stage 1 real-traffic evidence.
 
 ## v1.15.3 (2026-08-31) — private Tigris snapshot delivery, serving off
 
