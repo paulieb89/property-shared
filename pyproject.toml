@@ -64,6 +64,7 @@ dev = [
   "pytest>=9.0.2",
   "python-dotenv>=1.0.1",
   "openapi-python-client>=0.28.1",
+  "pre-commit==4.6.2",
 ]
 api = [
   "fastapi>=0.128.0",
