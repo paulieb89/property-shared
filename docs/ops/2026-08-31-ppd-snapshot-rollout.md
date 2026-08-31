@@ -234,3 +234,120 @@ the two release deploys themselves.
 narrowly-scoped boot-only verification tool) not yet started; G1a/G1b not
 yet measured even partially; no snapshot credentials installed on either
 app.
+
+## Phase C — boot-only verification tool, merged and deployed, no credentials
+
+**Goal**: land the narrowly-scoped boot-only verification tool
+(`tools/ppd_snapshot/boot_only_verify.py`) into `property-shared` only,
+deploy it, and confirm serving stays off and no snapshot credentials exist
+on either app — Phase D (staging/applying credentials and actually running
+G1a) is explicitly out of scope here.
+
+### Review round: three blocking gaps found and fixed before merge
+
+The tool was built and opened as PR#43, then held for review rather than
+merged immediately (per the rollout plan). Review found three real gaps
+against the plan's own contract, all fixed on the same PR before merge:
+
+1. **Phase timing.** The original version reported only
+   `SnapshotRuntime.boot()`'s total time, with no separate fetch/extraction
+   timing or bundle/extraction overlap window, and RSS/memory sampling
+   stopped before `SnapshotAdapter.open()` — excluding DuckDB validation
+   memory from `process_peak_rss_bytes`. Fixed by wrapping the exact
+   `download_verified`/`safe_extract` calls the runtime makes (patching
+   `property_core.snapshot.runtime`'s names for one run, restored after —
+   `runtime.py` itself untouched) and widening disk/memory sampling through
+   adapter-open validation.
+2. **Cleanup could cross into the app cache and fail silently.** The
+   collision check rejected the verifier nested inside the app's
+   `PPD_SNAPSHOT_CACHE_DIR`, but not the reverse (app cache nested inside
+   the verifier, which the unconditional `rmtree` could then delete).
+   Cleanup also used `ignore_errors=True`, hiding a removal failure behind
+   an apparently successful run. Fixed: nesting rejected in either
+   direction; a cleanup failure is now caught, recorded
+   (`cleanup_ok`/`cleanup_error`), and folded into the CLI's exit code.
+3. **The cold-run gate was user-disableable.** `--expected-bundle-bytes 0`
+   let a production invocation weaken the exact-279,109,872-byte check to
+   merely `bytes_downloaded > 0`. The flag was removed entirely from the
+   CLI; the importable function still accepts the parameter for tests only.
+
+Also added: every result the tool produces — including refusals — now
+carries `evidence_scope: "partial_g1a"`, `g1a_complete: false`,
+`stage_1_evidence: false` explicitly, replacing a generic label.
+
+**Verification of the fix**: 19 tests (up from 13), full
+`scripts/validate.sh` green, and **every new/changed guard
+mutation-tested** — each fix was temporarily reverted, its test confirmed
+to fail for the stated reason, then restored. Concrete evidence from the
+phase-binding mutation test (three independently, deliberately slowed
+phases): `fetch_ms=314.0` (300 ms injected), `extraction_ms=1.9`
+(un-delayed, correctly small), `validation_ms=157.4` (100 ms injected +
+real overhead), `materialization_ms=323.9` (≈ fetch+extraction, correctly
+excluding the validation delay).
+
+### Merge and release
+
+| Step | Commit/tag | Notes |
+|---|---|---|
+| PR#43 opened, held for review | `4efc6e9` | Not merged pending review, per the rollout plan. |
+| Fixes for the three gaps above | `8635102` | +6 tests (19 total). Full suite and image re-verified before re-review. |
+| CHANGELOG amended | `e471e22` | Corrected release date to 2026-09-01; documented the tool as an `### Added` entry under v1.16.0, stating serving stays off and no credentials are installed. |
+| PR#43 merged to `main` | `176c401` | Branch **not deleted**. |
+| Release published | tag `v1.16.0`, target `176c401` | Same clean-checkout precondition discipline as prior phases: `HEAD` matches, working tree clean and identical to `origin/main`, versions consistent (1.16.0 everywhere), `CHANGELOG.md` headed `## v1.16.0`, `Dockerfile` carries both `--extra snapshot` and the verifier `COPY`, `Dockerfile.app` correctly unchanged, no `.env*` tracked or present. |
+
+### Deployment (`release.yml`, run `33449116644`)
+
+Note: `release.yml` now runs a `Validate release revision` job first
+(added by the separate CI-safety work merged as PR#41/#42 during this
+rollout), ahead of publish/deploy.
+
+| Job | Result | Duration |
+|---|---|---|
+| Validate release revision | success | — |
+| Publish to PyPI | success | — |
+| Deploy property-shared to Fly | success | 1m10s |
+| Deploy propertydata to Fly | success | 1m37s |
+
+Deployed image identities (both Machines' `GH_SHA` label confirmed
+`176c401ce2651fb734f7908e566854e3e5cb9aad`):
+
+| App | Machine | Digest |
+|---|---|---|
+| `property-shared` | `7849207a412608`, version 134 | `sha256:5c1c4039edc1e2e47ca13180c577963272d0399c5593fcad113fc97df925f335` |
+| `propertydata` | `d897115a995d48`, version 56 | `sha256:7bc00872498c8a2fdcce8146163b3fa3c2448e96bd8476ac5a2c86a1427be9dd` |
+
+### Observation
+
+**Health**: both Machines `started`, `1 total, 1 passing`. External health
+probes, 5x each, all 200 (property-shared ttfb 0.049–0.101s; propertydata
+ttfb 0.056–0.118s).
+
+**Snapshot flag off — property-shared**: `GET /v1/meta` →
+`{"snapshot": {"enabled": false, "routable": false, "source_error": null}}`.
+Also confirmed directly against the real running process
+(`uvicorn app.main:app`, PID 634): `PPD_SNAPSHOT_ENABLED` absent from
+`/proc/634/environ`.
+
+**Snapshot flag off — propertydata**: same technique (no HTTP introspection
+endpoint exists). Real server process identified (`property-app`, PID 634),
+`PPD_SNAPSHOT_ENABLED` confirmed absent from `/proc/634/environ`.
+
+**Verifier presence, property-shared only**: `test -f
+/app/boot_only_verify.py` on the real deployed Machine — **present** on
+`property-shared`, confirmed **absent** on `propertydata` (matching the
+plan's property-shared-only scope).
+
+**No snapshot credentials on either app**: `fly secrets list` for both
+apps shows only the pre-existing `OPENAI_API_KEY`/`COMPANIES_HOUSE_API_KEY`/
+`EPC_API_TOKEN` (property-shared) and `COMPANIES_HOUSE_API_KEY`/
+`EPC_API_TOKEN` (propertydata) — no `PPD_SNAPSHOT_S3_*` secret present on
+either app.
+
+### Result
+
+The boot-only verifier is merged, released as v1.16.0, and deployed to
+`property-shared` only. Serving stays off on both apps, confirmed by direct
+process-environment inspection. No snapshot credentials exist on either
+app. Stopping here, as instructed — Phase D (staging and applying
+credentials, then running the verifier for partial G1a evidence) is not
+authorized by this entry and has not started.
