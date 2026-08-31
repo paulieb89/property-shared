@@ -138,13 +138,15 @@ class HttpObjectSource:
         return urllib.request.Request(self._url(name),
                                       headers={"User-Agent": self.user_agent})
 
+    def _open(self, name: str):
+        return urllib.request.urlopen(self._request(name), timeout=self.socket_timeout)
+
     def read_bytes(self, name: str, *, max_bytes: Optional[int] = None) -> bytes:
         cap = MAX_CONTROL_BYTES if max_bytes is None else max_bytes
         # Two separate seams: waiting for the response, then reading its body.
         # A stalled body times out in the second even though the first succeeded.
         with _timeouts_typed(f"request for {name!r}", self.socket_timeout):
-            resp = urllib.request.urlopen(self._request(name),
-                                          timeout=self.socket_timeout)
+            resp = self._open(name)
         with resp:
             with _timeouts_typed(f"read of {name!r}", self.socket_timeout):
                 # Read one byte past the cap so an oversized control object is an
@@ -159,8 +161,7 @@ class HttpObjectSource:
         # stream. A server that never sends headers times out HERE, before any
         # stream exists, so the translation cannot live only in _HttpStream.read.
         with _timeouts_typed(f"request for {name!r}", self.socket_timeout):
-            resp = urllib.request.urlopen(self._request(name),
-                                          timeout=self.socket_timeout)
+            resp = self._open(name)
         return _HttpStream(resp, socket_timeout=self.socket_timeout)
 
 

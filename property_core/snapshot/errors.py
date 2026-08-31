@@ -11,6 +11,13 @@ from typing import Any
 from property_core.exceptions import PPDError, SnapshotFailure
 
 
+class SnapshotSourceError(SnapshotFailure):
+    """Private source configuration or object addressing was rejected."""
+
+    code = "snapshot_source_invalid"
+    retryable = False
+
+
 class SnapshotExtraMissingError(SnapshotFailure):
     """A snapshot feature was used without the optional dependency installed.
 

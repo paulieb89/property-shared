@@ -27,6 +27,7 @@ from property_core.snapshot.errors import (
     SnapshotQueryError,
     SnapshotRowCountError,
     SnapshotSchemaError,
+    SnapshotSourceError,
 )
 from property_core.snapshot.fetch import DownloadResult, download_verified
 from property_core.snapshot.lock import LockTimeout, single_flight
@@ -42,6 +43,7 @@ from property_core.snapshot.source import (
     ObjectSource,
 )
 from property_core.snapshot.store import SnapshotStore
+from property_core.snapshot.s3_source import TigrisObjectSource
 
 __all__ = [
     "ArchiveRejected",
@@ -66,6 +68,8 @@ __all__ = [
     "SnapshotRowCountError",
     "SnapshotSchemaError",
     "SnapshotStore",
+    "SnapshotSourceError",
+    "TigrisObjectSource",
     "VerificationRecord",
     "download_verified",
     "safe_extract",
