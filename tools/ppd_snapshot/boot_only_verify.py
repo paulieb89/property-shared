@@ -4,16 +4,17 @@ routing any live request to it.
     fly ssh console -a property-shared
     python /app/boot_only_verify.py --verify-dir /tmp/ppd-verify-$(date +%s)
 
-Provides **partial** G1a evidence -- materialization and adapter-open/
+Provides **partial** G1a evidence -- fetch, extraction and adapter-open/
 validation timing, peak transient disk, and cold-run confirmation -- for a
-real Machine against real object storage. It is not a completed G1a
-measurement: the governing specification
+real Machine against real object storage. Every result this module produces
+carries `evidence_scope: "partial_g1a"`, `g1a_complete: false` and
+`stage_1_evidence: false` explicitly, because it is not a completed G1a
+measurement and can never become one: the governing specification
 (``docs/design/ppd-source-routing.md``) requires *application*
 time-to-readiness -- full ASGI startup, async lifespan, single-flight lock
 behaviour under the real deployed worker count -- which a standalone process
-cannot produce no matter how its output is labelled. Label results
-accordingly; do not present ``materialization_ms`` as application
-time-to-ready.
+cannot produce no matter how its output is labelled. It is also not Stage 1
+evidence: no real-traffic sample, no divergence classification.
 
 **Isolation from the live server, by construction.** This module never
 imports ``property_core.snapshot.state`` and is meant to run as an entirely
@@ -24,12 +25,16 @@ existing materialization path unchanged: ``SnapshotRuntime.boot()`` for
 fetch/verify/extract (with its own already-enforced
 ``preflight_disk_space`` free-space precondition), then
 ``SnapshotAdapter.open`` for the same structural + queryable validation the
-live path performs.
+live path performs. Fetch and extraction boundaries are timed by wrapping
+the exact functions ``SnapshotRuntime`` calls (``download_verified``,
+``safe_extract``) for the duration of one run -- not by changing what they
+do, and not by touching ``runtime.py`` itself.
 
 **Verification-only.** The materialized snapshot is always removed at the
 end of a run, successful or not -- this is a measurement, not a cache, and
-never shares a directory with the application's own
-``PPD_SNAPSHOT_CACHE_DIR``.
+never shares a directory with, or nests either way with, the application's
+own ``PPD_SNAPSHOT_CACHE_DIR``. A cleanup failure is reported explicitly
+(``cleanup_ok: false``), never silently swallowed.
 """
 
 from __future__ import annotations
@@ -41,12 +46,14 @@ import resource
 import shutil
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Iterator, Optional, Sequence
 
 #: The initial artifact's declared bundle size (design doc, "Scope and
 #: account"). A cold run must download exactly this many bytes; anything
-#: else means the bundle changed or the run was not genuinely cold.
+#: else means the bundle changed or the run was not genuinely cold. Not
+#: overridable from the CLI -- see `_is_cold_run_valid` and `main`.
 EXPECTED_BUNDLE_BYTES = 279_109_872
 
 
@@ -100,13 +107,25 @@ def assert_disk_backed(path: Path, mounts_text: Optional[str] = None) -> str:
 
 
 def _prepare_verification_directory(path: Path, cache_dir: Path) -> None:
-    """Create a unique, empty verification directory. Never the app's store."""
+    """Create a unique, empty verification directory.
+
+    Refuses nesting with the application's own store in **either**
+    direction: the verifier inside the app's cache would let a future
+    change reuse the app's materialization; the app's cache inside the
+    verifier would put it inside a directory this module unconditionally
+    `rmtree`s at the end of the run. Sibling directories only.
+    """
     resolved = path.resolve()
     cache_resolved = cache_dir.resolve()
-    if resolved == cache_resolved or cache_resolved in resolved.parents:
+    nested = (
+        resolved == cache_resolved
+        or cache_resolved in resolved.parents
+        or resolved in cache_resolved.parents
+    )
+    if nested:
         raise VerificationRefused(
-            f"{path} collides with the application's own "
-            f"PPD_SNAPSHOT_CACHE_DIR ({cache_dir}); use a separate directory"
+            f"{path} and the application's PPD_SNAPSHOT_CACHE_DIR "
+            f"({cache_dir}) must be sibling directories, not nested either way"
         )
     if resolved.exists():
         raise VerificationRefused(
@@ -143,9 +162,11 @@ class _DiskAndMemorySampler:
     """Polls verification-directory size and Machine-wide available memory.
 
     A background thread, not a hook into the runtime: the fetch/extract code
-    this wraps does blocking I/O with no yield points to sample from instead,
-    and the live server process keeps running concurrently on the same
-    Machine, so its memory pressure is part of the real headroom picture.
+    this wraps does blocking I/O with no yield points to sample from
+    instead. Must stay active through adapter-open validation, not just
+    materialization -- DuckDB's own memory use during validation is part of
+    the real headroom picture, and the live server process keeps running
+    concurrently on the same Machine throughout.
     """
 
     def __init__(self, directory: Path, interval: float = 0.2):
@@ -198,18 +219,88 @@ class _DiskAndMemorySampler:
         return self._min_available_memory_bytes
 
 
+class _PhaseTimes:
+    """Fetch and extraction wall-clock time, bound to the real boundaries."""
+
+    def __init__(self) -> None:
+        self.fetch_ms: Optional[float] = None
+        self.extraction_ms: Optional[float] = None
+
+
+@contextmanager
+def _instrumented_install_phases() -> Iterator[_PhaseTimes]:
+    """Times the exact fetch and extraction calls `SnapshotRuntime` makes.
+
+    Patches the names `property_core.snapshot.runtime` imported them under,
+    for the lifetime of this context only, then restores them -- this times
+    the real functions on their real call, it does not change what they do.
+    Neither is called at all on a reused-materialization boot, which
+    correctly leaves both fields `None` rather than reporting a phase that
+    did not run.
+
+    The bundle/extraction disk-overlap window the design doc asks about
+    (G1a) is, by `SnapshotRuntime._install`'s own structure, the extraction
+    call's duration: the bundle is fully on disk before extraction starts,
+    and is unlinked immediately after extraction returns. `overlap_window_ms`
+    is reported as exactly `extraction_ms` for that reason, not measured
+    independently.
+    """
+    import property_core.snapshot.runtime as runtime_module
+
+    times = _PhaseTimes()
+    original_download = runtime_module.download_verified
+    original_extract = runtime_module.safe_extract
+
+    def timed_download(*args: Any, **kwargs: Any) -> Any:
+        started = time.perf_counter()
+        try:
+            return original_download(*args, **kwargs)
+        finally:
+            times.fetch_ms = round((time.perf_counter() - started) * 1000, 1)
+
+    def timed_extract(*args: Any, **kwargs: Any) -> Any:
+        started = time.perf_counter()
+        try:
+            return original_extract(*args, **kwargs)
+        finally:
+            times.extraction_ms = round((time.perf_counter() - started) * 1000, 1)
+
+    runtime_module.download_verified = timed_download
+    runtime_module.safe_extract = timed_extract
+    try:
+        yield times
+    finally:
+        runtime_module.download_verified = original_download
+        runtime_module.safe_extract = original_extract
+
+
 def _is_cold_run_valid(report: Any, expected_bundle_bytes: Optional[int]) -> bool:
     """Whether this run is trustworthy as G1a cold-materialization evidence.
 
-    A reused materialization, or a transfer short of the full bundle, is not
-    a measurement of the thing G1a asks about -- record it as invalid rather
-    than silently accepting it.
+    A reused materialization, or a transfer short of (or over) the full
+    bundle, is not a measurement of the thing G1a asks about -- record it as
+    invalid rather than silently accepting it.
     """
     if report.reused_existing:
         return False
     if expected_bundle_bytes is not None:
         return report.bytes_downloaded == expected_bundle_bytes
     return report.bytes_downloaded > 0
+
+
+def _base_result() -> dict:
+    """Every result this module ever returns carries this, unconditionally.
+
+    Not computed from the run's outcome: this tool structurally cannot
+    produce a completed G1a measurement (no application startup lifecycle)
+    or Stage 1 evidence (no real traffic, no divergence classification),
+    whether this particular run succeeds, fails, or is refused outright.
+    """
+    return {
+        "evidence_scope": "partial_g1a",
+        "g1a_complete": False,
+        "stage_1_evidence": False,
+    }
 
 
 def run_boot_only_verification(
@@ -239,15 +330,39 @@ def run_boot_only_verification(
     assert_disk_backed(verify_dir.parent, mounts_text)
     _prepare_verification_directory(verify_dir, cache_dir)
 
-    result: dict[str, Any] = {"label": "boot-only verification measurement"}
+    result = _base_result()
     try:
         store = SnapshotStore(verify_dir)
         runtime = SnapshotRuntime(source=source, store=store)
 
-        with _DiskAndMemorySampler(verify_dir, interval=sample_interval) as sampler:
+        # Disk/memory sampling and fetch/extract phase timing both stay
+        # active through adapter-open validation, not just materialization --
+        # DuckDB's own memory use during validation is otherwise invisible,
+        # and process_peak_rss_bytes is read only after this block exits.
+        with _DiskAndMemorySampler(verify_dir, interval=sample_interval) as sampler, \
+             _instrumented_install_phases() as phase_times:
             started = time.perf_counter()
             report = runtime.boot()
-            materialization_ms = (time.perf_counter() - started) * 1000
+            materialization_ms = round((time.perf_counter() - started) * 1000, 1)
+
+            if report.ready and report.snapshot_dir and report.version:
+                record = store.verified_record(report.version)
+                if record is None:
+                    result["validated"] = False
+                    result["validation_error"] = (
+                        "no verification record for the materialized version"
+                    )
+                else:
+                    validation_started = time.perf_counter()
+                    with SnapshotAdapter.open(
+                            Path(report.snapshot_dir), record) as adapter:
+                        result["validated"] = True
+                        result["validation_ms"] = round(
+                            (time.perf_counter() - validation_started) * 1000, 1)
+                        result["coverage_from"] = adapter.coverage_from
+                        result["coverage_to"] = adapter.coverage_to
+            else:
+                result["validated"] = False
 
         result.update({
             "readiness": report.readiness.value,
@@ -258,7 +373,10 @@ def run_boot_only_verification(
             "source_error": report.source_error,
             "warnings": list(report.warnings),
             "runtime_timings_ms": dict(report.timings_ms),
-            "materialization_ms": round(materialization_ms, 1),
+            "fetch_ms": phase_times.fetch_ms,
+            "extraction_ms": phase_times.extraction_ms,
+            "overlap_window_ms": phase_times.extraction_ms,
+            "materialization_ms": materialization_ms,
             "peak_transient_disk_bytes": sampler.peak_disk_bytes,
             "machine_min_available_memory_bytes": sampler.min_available_memory_bytes,
             "process_peak_rss_bytes":
@@ -266,33 +384,19 @@ def run_boot_only_verification(
             "expected_bundle_bytes": expected_bundle_bytes,
             "cold_run_valid": _is_cold_run_valid(report, expected_bundle_bytes),
         })
-
-        if not report.ready or not report.snapshot_dir or not report.version:
-            result["validated"] = False
-            return result
-
-        record = store.verified_record(report.version)
-        if record is None:
-            result["validated"] = False
-            result["validation_error"] = (
-                "no verification record for the materialized version"
-            )
-            return result
-
-        validation_started = time.perf_counter()
-        with SnapshotAdapter.open(Path(report.snapshot_dir), record) as adapter:
-            result.update({
-                "validated": True,
-                "validation_ms":
-                    round((time.perf_counter() - validation_started) * 1000, 1),
-                "coverage_from": adapter.coverage_from,
-                "coverage_to": adapter.coverage_to,
-            })
         return result
     finally:
-        # Verification-only: never leave a materialized snapshot behind, and
-        # touch nothing on the Machine's filesystem beyond this one directory.
-        shutil.rmtree(verify_dir, ignore_errors=True)
+        # Verification-only: never leave a materialized snapshot behind. A
+        # removal failure is reported, never swallowed -- `ignore_errors`
+        # would let this tool claim success while leaving the artifact
+        # behind on the Machine's disk.
+        try:
+            shutil.rmtree(verify_dir)
+            result["cleanup_ok"] = True
+            result["cleanup_error"] = None
+        except Exception as exc:  # noqa: BLE001 -- recorded, not raised
+            result["cleanup_ok"] = False
+            result["cleanup_error"] = f"{type(exc).__name__}: {exc}"
 
 
 def _build_cli_source() -> Any:
@@ -323,11 +427,11 @@ def build_parser() -> argparse.ArgumentParser:
              "created fresh and removed at the end of this run",
     )
     parser.add_argument("--report", help="also write the JSON report here")
-    parser.add_argument(
-        "--expected-bundle-bytes", type=int, default=EXPECTED_BUNDLE_BYTES,
-        help="required bytes_downloaded for a valid cold run "
-             "(0 disables the exact-size check)",
-    )
+    # Deliberately no --expected-bundle-bytes flag: the CLI always requires
+    # the declared EXPECTED_BUNDLE_BYTES exactly. A configurable escape
+    # hatch here would let a production invocation report cold_run_valid
+    # from merely `bytes_downloaded > 0`, which is not what G1a asks for.
+    # `run_boot_only_verification` still takes the parameter for tests.
     return parser
 
 
@@ -336,7 +440,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     args = build_parser().parse_args(argv)
     cache_dir = Path(os.environ.get(SNAPSHOT_CACHE_ENV, DEFAULT_CACHE_DIR))
-    expected = args.expected_bundle_bytes or None
 
     try:
         source = _build_cli_source()
@@ -344,11 +447,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             source,
             verify_dir=Path(args.verify_dir),
             cache_dir=cache_dir,
-            expected_bundle_bytes=expected,
+            expected_bundle_bytes=EXPECTED_BUNDLE_BYTES,
         )
     except VerificationRefused as exc:
-        result = {"label": "boot-only verification measurement",
-                  "refused": str(exc)}
+        result = {**_base_result(), "refused": str(exc)}
         print(json.dumps(result, indent=2))
         if args.report:
             Path(args.report).write_text(json.dumps(result, indent=2))
@@ -357,7 +459,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(json.dumps(result, indent=2))
     if args.report:
         Path(args.report).write_text(json.dumps(result, indent=2))
-    return 0 if result.get("validated") and result.get("cold_run_valid") else 1
+    ok = (result.get("validated") and result.get("cold_run_valid")
+          and result.get("cleanup_ok", True))
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -12,6 +12,7 @@ from pathlib import Path
 from threading import Thread
 from unittest.mock import Mock
 import importlib.util
+import time
 
 import pytest
 
@@ -34,12 +35,19 @@ requires_sdk = pytest.mark.skipif(
 
 
 @contextmanager
-def fixture_object_server(directory: Path):
-    """Serves files from `directory` by basename -- a minimal S3-shaped GET."""
+def fixture_object_server(directory: Path, delays: dict | None = None):
+    """Serves files from `directory` by basename -- a minimal S3-shaped GET.
+
+    `delays` (object name -> seconds) sleeps before responding to that one
+    object, so tests can make a specific phase (e.g. the bundle transfer)
+    deliberately slow without touching the runtime being verified.
+    """
+    delays = delays or {}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             name = self.path.rsplit("/", 1)[-1].split("?")[0]
+            time.sleep(delays.get(name, 0))
             file_path = directory / name
             if not file_path.is_file():
                 self.send_response(404)
@@ -83,6 +91,13 @@ def _tigris_source(endpoint: str, **overrides):
     return TigrisObjectSource("ppd-test", **kwargs)
 
 
+def _build_fixture(tmp_path: Path) -> Path:
+    fixture_dir = tmp_path / "fixture"
+    fixture_dir.mkdir()
+    build_snapshot_fixture(fixture_dir)
+    return fixture_dir
+
+
 # -- disk-backed assertion ---------------------------------------------------
 
 def test_disk_backed_assertion_refuses_tmpfs(tmp_path):
@@ -101,11 +116,21 @@ def test_disk_backed_assertion_refuses_when_nothing_matches(tmp_path):
 
 # -- verification-directory preparation --------------------------------------
 
-def test_verification_directory_must_not_collide_with_app_cache(tmp_path):
+def test_verification_directory_must_not_nest_inside_the_app_cache(tmp_path):
     cache_dir = tmp_path / "app-cache"
     cache_dir.mkdir()
-    with pytest.raises(VerificationRefused, match="PPD_SNAPSHOT_CACHE_DIR"):
+    with pytest.raises(VerificationRefused, match="sibling directories"):
         _prepare_verification_directory(cache_dir / "nested" / "verify", cache_dir)
+
+
+def test_app_cache_must_not_nest_inside_the_verification_directory(tmp_path):
+    """The reverse direction: an app cache configured beneath the
+    verification directory must also be refused -- otherwise this module's
+    unconditional `rmtree(verify_dir)` would delete the application's store."""
+    verify_dir = tmp_path / "verify"
+    cache_dir = verify_dir / "nested-cache"
+    with pytest.raises(VerificationRefused, match="sibling directories"):
+        _prepare_verification_directory(verify_dir, cache_dir)
 
 
 def test_verification_directory_must_not_already_exist(tmp_path):
@@ -143,13 +168,35 @@ def test_cold_run_valid_without_an_expected_size_if_something_downloaded():
     assert _is_cold_run_valid(report, expected_bundle_bytes=None) is True
 
 
+def test_cli_exposes_no_expected_bundle_bytes_escape_hatch():
+    """The deployed CLI must always require the declared bundle size --
+    confirmed by the parser itself accepting no such flag, not just by
+    convention."""
+    from tools.ppd_snapshot.boot_only_verify import build_parser
+
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--verify-dir", "/tmp/x", "--expected-bundle-bytes", "0"])
+
+
+# -- every result carries explicit evidence-scope labelling -------------------
+
+def test_refusal_result_carries_evidence_scope_labels(tmp_path):
+    """Even a refusal before anything is materialized must say what this
+    tool can never provide -- not just a generic label."""
+    from tools.ppd_snapshot.boot_only_verify import _base_result
+
+    result = _base_result()
+    assert result["evidence_scope"] == "partial_g1a"
+    assert result["g1a_complete"] is False
+    assert result["stage_1_evidence"] is False
+
+
 # -- end-to-end against a loopback fixture -----------------------------------
 
 @requires_sdk
 def test_successful_run_validates_and_reports_a_cold_run(tmp_path):
-    fixture_dir = tmp_path / "fixture"
-    fixture_dir.mkdir()
-    build_snapshot_fixture(fixture_dir)
+    fixture_dir = _build_fixture(tmp_path)
 
     verify_dir = tmp_path / "verify-root" / "run"
     verify_dir.parent.mkdir()
@@ -163,7 +210,9 @@ def test_successful_run_validates_and_reports_a_cold_run(tmp_path):
             mounts_text=_ext4_mounts_for(verify_dir.parent),
         )
 
-    assert result["label"] == "boot-only verification measurement"
+    assert result["evidence_scope"] == "partial_g1a"
+    assert result["g1a_complete"] is False
+    assert result["stage_1_evidence"] is False
     assert result["readiness"] == "ready"
     assert result["validated"] is True
     assert result["reused_existing"] is False
@@ -173,15 +222,18 @@ def test_successful_run_validates_and_reports_a_cold_run(tmp_path):
     assert result["coverage_to"] == "2026-06-30"
     assert result["materialization_ms"] >= 0
     assert result["validation_ms"] >= 0
+    assert result["fetch_ms"] is not None and result["fetch_ms"] >= 0
+    assert result["extraction_ms"] is not None and result["extraction_ms"] >= 0
+    assert result["overlap_window_ms"] == result["extraction_ms"]
     assert result["peak_transient_disk_bytes"] > 0
     assert result["process_peak_rss_bytes"] > 0
+    assert result["cleanup_ok"] is True
+    assert result["cleanup_error"] is None
 
 
 @requires_sdk
 def test_run_cleans_up_the_verification_directory_on_success(tmp_path):
-    fixture_dir = tmp_path / "fixture"
-    fixture_dir.mkdir()
-    build_snapshot_fixture(fixture_dir)
+    fixture_dir = _build_fixture(tmp_path)
 
     verify_dir = tmp_path / "verify-root" / "run"
     verify_dir.parent.mkdir()
@@ -197,7 +249,8 @@ def test_run_cleans_up_the_verification_directory_on_success(tmp_path):
 
 
 def test_run_cleans_up_the_verification_directory_on_failure(tmp_path):
-    """An unreachable source degrades to UNREADY; cleanup still runs."""
+    """An unreachable source degrades to UNREADY; cleanup still runs, and
+    every field the base result carries is still present."""
     verify_dir = tmp_path / "verify-root" / "run"
     verify_dir.parent.mkdir()
 
@@ -209,7 +262,41 @@ def test_run_cleans_up_the_verification_directory_on_failure(tmp_path):
         )
 
     assert result["validated"] is False
+    assert result["evidence_scope"] == "partial_g1a"
+    assert result["cleanup_ok"] is True
     assert not verify_dir.exists()
+    # Nothing was ever fetched or extracted -- both phases correctly absent,
+    # not a stale zero.
+    assert result["fetch_ms"] is None
+    assert result["extraction_ms"] is None
+
+
+def test_cleanup_failure_is_recorded_explicitly_not_swallowed(tmp_path, monkeypatch):
+    """A removal failure must surface in the result, never be hidden behind
+    `ignore_errors=True` while the run is still reported as validated."""
+    import tools.ppd_snapshot.boot_only_verify as module
+
+    verify_dir = tmp_path / "verify-root" / "run"
+    verify_dir.parent.mkdir()
+
+    def failing_rmtree(_path, **_kwargs):
+        raise OSError("simulated: device busy")
+
+    monkeypatch.setattr(module.shutil, "rmtree", failing_rmtree)
+
+    with fixture_object_server(tmp_path / "empty-does-not-exist") as endpoint:
+        source = _tigris_source(endpoint)
+        result = run_boot_only_verification(
+            source, verify_dir=verify_dir, cache_dir=tmp_path / "app-cache",
+            sample_interval=0.01, mounts_text=_ext4_mounts_for(verify_dir.parent),
+        )
+
+    assert result["cleanup_ok"] is False
+    assert "simulated: device busy" in result["cleanup_error"]
+    # The directory the failed rmtree was supposed to remove is exactly the
+    # one this run created -- prove the tool is not silently pointed
+    # elsewhere by asserting it still exists (the mock never removed it).
+    assert verify_dir.exists()
 
 
 @requires_sdk
@@ -221,9 +308,7 @@ def test_run_never_installs_into_process_state(tmp_path, monkeypatch):
     install_spy = Mock(wraps=state.install)
     monkeypatch.setattr(state, "install", install_spy)
 
-    fixture_dir = tmp_path / "fixture"
-    fixture_dir.mkdir()
-    build_snapshot_fixture(fixture_dir)
+    fixture_dir = _build_fixture(tmp_path)
 
     verify_dir = tmp_path / "verify-root" / "run"
     verify_dir.parent.mkdir()
@@ -237,3 +322,97 @@ def test_run_never_installs_into_process_state(tmp_path, monkeypatch):
 
     assert result["validated"] is True
     install_spy.assert_not_called()
+
+
+@requires_sdk
+def test_process_rss_is_sampled_after_adapter_validation_not_before(tmp_path, monkeypatch):
+    """DuckDB validation memory must be included in process_peak_rss_bytes --
+    proven by ordering (getrusage called after _validate), since a magnitude
+    assertion against a KB-scale fixture would be unreliable."""
+    import property_core.snapshot.adapter as adapter_module
+    import tools.ppd_snapshot.boot_only_verify as module
+
+    call_order = []
+
+    original_validate = adapter_module.SnapshotAdapter._validate
+
+    def recording_validate(self):
+        call_order.append("validate")
+        return original_validate(self)
+
+    original_getrusage = module.resource.getrusage
+
+    def recording_getrusage(*args, **kwargs):
+        call_order.append("getrusage")
+        return original_getrusage(*args, **kwargs)
+
+    monkeypatch.setattr(adapter_module.SnapshotAdapter, "_validate", recording_validate)
+    monkeypatch.setattr(module.resource, "getrusage", recording_getrusage)
+
+    fixture_dir = _build_fixture(tmp_path)
+    verify_dir = tmp_path / "verify-root" / "run"
+    verify_dir.parent.mkdir()
+
+    with fixture_object_server(fixture_dir) as endpoint:
+        source = _tigris_source(endpoint)
+        result = run_boot_only_verification(
+            source, verify_dir=verify_dir, cache_dir=tmp_path / "app-cache",
+            sample_interval=0.01, mounts_text=_ext4_mounts_for(verify_dir.parent),
+        )
+
+    assert result["validated"] is True
+    assert "validate" in call_order and "getrusage" in call_order
+    assert call_order.index("validate") < call_order.index("getrusage"), (
+        "process_peak_rss_bytes must be read after adapter validation, "
+        f"not before: {call_order}"
+    )
+
+
+@requires_sdk
+def test_phase_timings_bind_to_the_correct_phase(tmp_path, monkeypatch):
+    """Deliberately slows fetch, extraction and adapter-validation by
+    different, distinguishable amounts, and proves each reported timing
+    binds to its own phase rather than to the run as a whole."""
+    import property_core.snapshot.adapter as adapter_module
+
+    fixture_dir = _build_fixture(tmp_path)
+    bundle_name = "fixture.tar.zst"
+
+    original_validate = adapter_module.SnapshotAdapter._validate
+
+    def slow_validate(self):
+        time.sleep(0.10)
+        return original_validate(self)
+
+    monkeypatch.setattr(adapter_module.SnapshotAdapter, "_validate", slow_validate)
+
+    verify_dir = tmp_path / "verify-root" / "run"
+    verify_dir.parent.mkdir()
+
+    with fixture_object_server(fixture_dir, delays={bundle_name: 0.30}) as endpoint:
+        source = _tigris_source(endpoint)
+        result = run_boot_only_verification(
+            source, verify_dir=verify_dir, cache_dir=tmp_path / "app-cache",
+            expected_bundle_bytes=None, sample_interval=0.01,
+            mounts_text=_ext4_mounts_for(verify_dir.parent),
+        )
+
+    assert result["validated"] is True
+
+    # Fetch was slowed by 0.30s -- must dominate.
+    assert result["fetch_ms"] >= 250
+    # Extraction was not slowed (only the download response was delayed);
+    # it must be well below the injected fetch delay, not smeared across it.
+    assert result["extraction_ms"] is not None
+    assert result["extraction_ms"] < 150
+    # Validation was slowed by 0.10s, independently of fetch/extraction.
+    assert result["validation_ms"] >= 80
+    assert result["validation_ms"] < result["fetch_ms"]
+
+    # materialization_ms wraps only runtime.boot() (fetch + extract), and
+    # must NOT include the adapter-validation delay that happens afterward.
+    assert result["materialization_ms"] >= result["fetch_ms"]
+    assert result["materialization_ms"] < result["fetch_ms"] + 150
+
+    # overlap_window_ms is defined as exactly extraction_ms.
+    assert result["overlap_window_ms"] == result["extraction_ms"]
