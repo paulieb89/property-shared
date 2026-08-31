@@ -20,7 +20,7 @@ requires_sdk = pytest.mark.skipif(importlib.util.find_spec("botocore") is None,
 
 @contextmanager
 def object_server(body=b'{"current_manifest":"manifest-v1.json"}', *, redirect=None,
-                  delay=0):
+                  delay=0, status=200):
     calls = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -33,6 +33,11 @@ def object_server(body=b'{"current_manifest":"manifest-v1.json"}', *, redirect=N
                 self.end_headers()
                 return
             time.sleep(delay)
+            if status != 200:
+                self.send_response(status)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -80,6 +85,19 @@ def test_boot_selects_private_source_without_credential_discovery(monkeypatch):
     monkeypatch.setenv("PPD_SNAPSHOT_S3_BUCKET", "ppd-test")
     monkeypatch.setenv("PPD_SNAPSHOT_S3_ACCESS_KEY_ID", "test-key")
     monkeypatch.setenv("PPD_SNAPSHOT_S3_SECRET_ACCESS_KEY", "test-secret")
+    source = _build_source()
+    assert isinstance(source, TigrisObjectSource)
+    assert source.base_url == "https://t3.storage.dev/ppd-test/ppd"
+
+
+@requires_sdk
+def test_boot_treats_blank_prefix_as_unset(monkeypatch):
+    monkeypatch.delenv("PPD_SNAPSHOT_URL", raising=False)
+    monkeypatch.delenv("PPD_SNAPSHOT_DIR", raising=False)
+    monkeypatch.setenv("PPD_SNAPSHOT_S3_BUCKET", "ppd-test")
+    monkeypatch.setenv("PPD_SNAPSHOT_S3_ACCESS_KEY_ID", "test-key")
+    monkeypatch.setenv("PPD_SNAPSHOT_S3_SECRET_ACCESS_KEY", "test-secret")
+    monkeypatch.setenv("PPD_SNAPSHOT_S3_PREFIX", "")
     source = _build_source()
     assert isinstance(source, TigrisObjectSource)
     assert source.base_url == "https://t3.storage.dev/ppd-test/ppd"
@@ -139,6 +157,22 @@ def test_signed_header_timeout_is_typed_and_not_retried(method):
 
 
 @requires_sdk
+@pytest.mark.parametrize("method", ["read_bytes", "open_stream"])
+def test_signed_http_error_is_typed_and_preserves_cause(method):
+    import urllib.error
+
+    with object_server(status=403) as (endpoint, calls):
+        source = TigrisObjectSource("ppd-test", access_key="test-key",
+                                    secret_key="test-secret", endpoint=endpoint)
+        with pytest.raises(SnapshotSourceError) as caught:
+            getattr(source, method)("current.json")
+    assert len(calls) == 1
+    assert "403" in str(caught.value)
+    assert isinstance(caught.value.__cause__, urllib.error.HTTPError)
+    assert caught.value.__cause__.code == 403
+
+
+@requires_sdk
 def test_control_body_has_the_existing_size_limit():
     with object_server(body=b"123456789") as (endpoint, calls):
         source = TigrisObjectSource("ppd-test", access_key="test-key",
@@ -164,6 +198,25 @@ def test_ambiguous_source_configuration_is_refused(monkeypatch):
     monkeypatch.setenv("PPD_SNAPSHOT_URL", "https://example.invalid")
     monkeypatch.setenv("PPD_SNAPSHOT_S3_BUCKET", "ppd-test")
     with pytest.raises(RuntimeError, match="exactly one"):
+        _build_source()
+
+
+def test_dir_and_url_together_keeps_legacy_directory_precedence(monkeypatch, tmp_path):
+    from property_core.snapshot.source import LocalDirectorySource
+
+    monkeypatch.delenv("PPD_SNAPSHOT_S3_BUCKET", raising=False)
+    monkeypatch.setenv("PPD_SNAPSHOT_DIR", str(tmp_path))
+    monkeypatch.setenv("PPD_SNAPSHOT_URL", "https://example.invalid")
+    source = _build_source()
+    assert isinstance(source, LocalDirectorySource)
+    assert source.root == tmp_path
+
+
+def test_dir_and_bucket_together_is_refused(monkeypatch, tmp_path):
+    monkeypatch.delenv("PPD_SNAPSHOT_URL", raising=False)
+    monkeypatch.setenv("PPD_SNAPSHOT_DIR", str(tmp_path))
+    monkeypatch.setenv("PPD_SNAPSHOT_S3_BUCKET", "ppd-test")
+    with pytest.raises(RuntimeError, match="cannot be combined"):
         _build_source()
 
 

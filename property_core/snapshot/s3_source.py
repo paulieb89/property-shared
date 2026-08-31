@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 
 from property_core.snapshot.errors import SnapshotExtraMissingError, SnapshotSourceError
 from property_core.snapshot.models import validate_component
-from property_core.snapshot.source import HttpObjectSource
+from property_core.snapshot.source import DEFAULT_TIMEOUT, HttpObjectSource
 
 TIGRIS_ENDPOINT = "https://t3.storage.dev"
 
@@ -43,7 +44,7 @@ class TigrisObjectSource(HttpObjectSource):
 
     def __init__(self, bucket: str, *, access_key: str, secret_key: str,
                  prefix: str = "ppd", endpoint: str = TIGRIS_ENDPOINT,
-                 socket_timeout: float = 10.0):
+                 socket_timeout: float = DEFAULT_TIMEOUT):
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", bucket):
             raise SnapshotSourceError("invalid snapshot bucket name")
         if not access_key or not secret_key:
@@ -84,4 +85,10 @@ class TigrisObjectSource(HttpObjectSource):
         return request
 
     def _open(self, name: str):
-        return self._opener.open(self._request(name), timeout=self.socket_timeout)
+        request = self._request(name)
+        try:
+            return self._opener.open(request, timeout=self.socket_timeout)
+        except urllib.error.HTTPError as exc:
+            raise SnapshotSourceError(
+                f"snapshot source returned HTTP {exc.code} for {name!r}"
+            ) from exc

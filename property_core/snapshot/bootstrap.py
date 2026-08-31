@@ -53,14 +53,17 @@ def _build_source() -> Any:
     directory = os.getenv(SNAPSHOT_DIR_ENV)
     url = os.getenv(SNAPSHOT_URL_ENV)
     bucket = os.getenv(SNAPSHOT_BUCKET_ENV)
-    if sum(bool(value) for value in (directory, url, bucket)) > 1:
-        raise RuntimeError("configure exactly one PPD snapshot source")
+    if bucket and (directory or url):
+        raise RuntimeError(
+            f"{SNAPSHOT_BUCKET_ENV} cannot be combined with {SNAPSHOT_DIR_ENV} or "
+            f"{SNAPSHOT_URL_ENV}; configure exactly one PPD snapshot source"
+        )
     if bucket:
         from property_core.snapshot.s3_source import TigrisObjectSource
 
         return TigrisObjectSource(
             bucket,
-            prefix=os.getenv("PPD_SNAPSHOT_S3_PREFIX", "ppd"),
+            prefix=os.getenv("PPD_SNAPSHOT_S3_PREFIX") or "ppd",
             access_key=os.getenv("PPD_SNAPSHOT_S3_ACCESS_KEY_ID", ""),
             secret_key=os.getenv("PPD_SNAPSHOT_S3_SECRET_ACCESS_KEY", ""),
         )
