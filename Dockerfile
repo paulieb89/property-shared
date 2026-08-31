@@ -27,6 +27,12 @@ RUN uv sync --frozen --no-dev --extra api --extra snapshot
 COPY app ./app
 COPY property_core ./property_core
 
+# G1a boot-only verification (docs/design/ppd-private-delivery.md step 4):
+# materializes and validates a real snapshot, off the app's own lifespan and
+# process state, invoked out of band via `fly ssh console`. Not wired into
+# CMD; the app never imports it. One file only -- not tools/ or property_cli/.
+COPY tools/ppd_snapshot/boot_only_verify.py ./boot_only_verify.py
+
 EXPOSE 8080
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
