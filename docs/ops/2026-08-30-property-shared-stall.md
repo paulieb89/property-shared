@@ -120,3 +120,109 @@ What remains open, and is *not* claimed as a defect here: whether
 `rightmove_search` should reject a non-full-postcode input with a typed caller
 error instead of raising and rendering a large traceback per call. That needs
 its own valid-input controls before anything is asserted about it.
+
+
+## Recovery, 2026-08-31
+
+### The release workflow deployed only one of the two apps
+
+`v1.15.1` was tagged on `54ac5c7` and the GitHub Release published, triggering
+`release.yml` (run `33345291490`). Results:
+
+| Job | Outcome |
+|---|---|
+| Publish to PyPI | success — 1.15.1 live |
+| Deploy propertydata to Fly | success — reported 1.15.1 |
+| Deploy property-shared to Fly | **failure**, twice |
+
+Both attempts (00:41Z, and a re-run at 00:52Z) failed identically, before any
+build began:
+
+```
+Waiting for depot builder...
+error releasing builder: deadline_exceeded: context deadline exceeded   (x2, 5 min each)
+Error: failed to fetch an image or build from source: error building:
+  timed out connecting to machine: failed to list workers:
+  Unavailable: ... authentication handshake failed: EOF
+```
+
+Fly's status page reported all systems operational with no unresolved
+incidents, `propertydata` obtained a builder on the same run, and the same
+token had built this app successfully five hours earlier for v1.15.0. Treated
+as transient Depot builder unavailability, not a repository or config fault.
+
+**This left the two apps on different versions**, with the app that needed the
+fix still running the stalling v1.15.0 and timing out externally at 01:03Z. The
+workflow's deploy steps have no retry, and nothing reconciles a partial
+release.
+
+### Manual recovery
+
+One authorised emergency deployment of `property-shared` only, bypassing Depot,
+from a clean checkout pinned to the release commit:
+
+```
+fly deploy --app property-shared --config fly.toml \
+  --remote-only --depot=false --ha=false
+```
+
+Preconditions confirmed from that checkout before running: `HEAD` =
+`54ac5c7a1a8709f0a4e8119c7d6fe48a0a09182a` = tag `v1.15.1`
+(`git describe --tags --exact-match` → `v1.15.1`), working tree clean and
+identical to `origin/main`, versions 1.15.1 in `pyproject.toml` and both
+`server.json` fields, `fly.toml` concurrency and health checks unchanged,
+`Dockerfile` unchanged, and no `.env*` in the build context.
+
+| Field | Value |
+|---|---|
+| Started | 2026-08-31T01:43:57Z |
+| Image | `property-shared:deployment-01M1AQTD8KN05PRA2330DX68GA` |
+| Digest | `sha256:2087c8970fa38a36e0687a4c7995d5d28d7ba627a72a06f5443e8f8e0c980252` |
+| Image size | 480 MB |
+| Machine | `7849207a412608`, version 130 → **131**, rolling update |
+| Health checks | enabled throughout; smoke and machine checks passed |
+
+Machine count, worker count, concurrency limits, secrets, Dockerfile and
+snapshot flags were not touched. `propertydata` was not redeployed and PyPI was
+not republished.
+
+### Post-deployment verification
+
+| Check | Result |
+|---|---|
+| Reported version | `{"serverInfo":{"name":"property-data","version":"1.15.1"}}` |
+| Machine check | `passing`, `{"status":"ok"}` |
+| External health | 5/5 at 200; ttfb 0.110 s then 0.046–0.051 s — no cold-start penalty |
+| MCP initialize + `tools/list` | `property-data v1.15.1`, **14 tools**, 0.22 s; repeated after the comps call, 0.18 s |
+| **Responsiveness during a slow comps call** | **NOT ESTABLISHED — see below** |
+
+### Why the decisive check is still outstanding
+
+The one bounded comps request returned **502 in 0.1 s**:
+
+```
+{"detail":"PPD comps failed: HTTP Error 429: Too Many Requests"}
+```
+
+Land Registry is rate-limiting this app. A request that fails in 0.1 s never
+occupies the loop, so it cannot demonstrate the property the hotfix exists to
+provide. Health stayed at 0.049 s throughout, but against a fast failure that
+observation is worth nothing.
+
+**A healthy server shortly after a restart does not establish that the stall is
+fixed.** The event-loop fix is proven locally by
+`tests/test_event_loop_not_blocked_by_comps.py`, which reproduces the stall
+with a slow stub and shows it gone; it is not yet proven against the deployed
+service under a genuinely slow upstream call. Deliberately not retried in a
+loop — repeated slow-query load is what provoked the throttling.
+
+**The incident stays OPEN** pending that check and the maintainer's Claude and
+ChatGPT client testing.
+
+### Also observed
+
+Upstream `429` responses mean PPD surfaces are currently returning 502 to real
+clients. That is an upstream throttle, not a regression from this release, but
+it will affect client testing until it clears. `rightmove_search` continues to
+raise `LocationLookupError` for inputs that are not resolvable full postcodes —
+the narrowed finding above, unchanged.
