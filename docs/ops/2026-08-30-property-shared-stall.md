@@ -226,3 +226,68 @@ clients. That is an upstream throttle, not a regression from this release, but
 it will affect client testing until it clears. `rightmove_search` continues to
 raise `LocationLookupError` for inputs that are not resolvable full postcodes —
 the narrowed finding above, unchanged.
+
+### ChatGPT connector check, 2026-08-31
+
+**Client:** ChatGPT, via its "property-shared" MCP integration.
+**Endpoint/tool:** `property-shared` MCP, tool `ppd_transactions`.
+**Time:** ~05:51 on 2026-08-31, as reported by the maintainer. The transcript's
+own `Source` line separately states retrieval at "31 Aug 2026 (Europe/London)".
+Neither figure was cross-checked against server logs.
+
+**Evidence:** the maintainer's pasted transcript, reproduced verbatim below.
+The raw tool response (JSON, headers, `sample_complete` flag) was not
+independently re-fetched or checked — this record reflects what the
+transcript shows, not a server-side capture.
+
+```
+I'll query the shared property source directly, limited to those two areas, then report only the returned sales and its stated coverage limits.
+
+Used property-shared integration
+Ppd transactions
+
+Error calling tool 'ppd_transactions': postcode 'DE12' is not valid; expected a full UK postcode, e.g. 'B5 4BX'
+
+Ppd transactions
+
+Recent transactions returned for DE12 6LL (newest first):
+Date         Property                    Price      Type            Category
+23 Jan 2026  5 Alexandra Road            £225,000   Semi-detached   B
+5 Dec 2022   9 Alexandra Road            £330,000   Detached        A
+20 May 2022  3 Alexandra Road            £165,000   Terraced        A
+30 Jun 2021  Windyridge, Alexandra Road  £257,500   Detached        A
+5 May 2021   Glendevon, Alexandra Road   £350,000   Detached        A
+
+Source: property-shared MCP, Land Registry Price Paid data via its sparql source, retrieved 31 Aug 2026 (Europe/London).
+Limitations: the MCP rejected DE12 alone because it requires a full postcode, so this result is for DE12 6LL only. The response was capped at five and marked sample_complete: false; it does not establish the complete sales history. The newest result is transaction category B, so it may be a non-standard/bulk transfer rather than an ordinary market sale.
+```
+
+**Passed:**
+- `ppd_transactions` was called and returned five transactions for the full
+  postcode `DE12 6LL`.
+- The connector correctly distinguished the rejected outcode-only request
+  (`DE12`) from the successful full-postcode one (`DE12 6LL`). This is
+  `ppd_transactions`' documented full-postcode requirement working as
+  designed, not a defect — it does not test district containment, which needs
+  a district-capable comps tool, not `ppd_transactions`.
+- The `sparql` provenance and the `sample_complete: false` / five-result-cap
+  coverage caveat were both reported to the user.
+
+**Issue — an observed AI-answer problem, not a demonstrated server defect:**
+the connector's closing line ("may be a non-standard/bulk transfer rather than
+an ordinary market sale") overstates what Category B means. Category B is
+Land Registry's "additional transaction category" and covers several distinct
+transaction types — including identifiable buy-to-lets, repossessions, and
+transfers to non-private individuals — without identifying which one applies.
+Correct wording: "Category B: additional transaction category; the specific
+reason is not identified." This was the AI's generated interpretation; it has
+not been checked against the raw JSON response, and nothing here shows the
+tool or the `sparql` source data itself is at fault.
+
+**Not tested, not failed:** snapshot-mode serving, and district containment
+(an outcode-level query against a district-capable tool). Absence of a result
+here is not evidence either way.
+
+This single connector check does not establish, and is not sufficient on its
+own to approve, the decisive slow-comps responsiveness check above — that
+remains outstanding on its own evidence.
