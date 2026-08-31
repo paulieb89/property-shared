@@ -197,16 +197,23 @@ async def property_comps(
     limit caps returned transactions (max 200). enrich_epc attaches EPC floor
     area and price-per-sqft to each transaction — slower but richer.
     """
+    import anyio
     from property_core import PPDService
-    result = PPDService().comps(
-        postcode=postcode,
-        months=months,
-        property_type=property_type,
-        transaction_category=transaction_category,
-        filter_outliers=filter_outliers,
-        search_level=search_level,
-        address=address,
-        limit=limit,
+
+    # Offloaded: PPDService.comps is synchronous. Called on the event loop it
+    # stalled every other MCP session and /v1/health for the whole upstream
+    # round trip -- see tests/test_event_loop_not_blocked_by_comps.py.
+    result = await anyio.to_thread.run_sync(
+        lambda: PPDService().comps(
+            postcode=postcode,
+            months=months,
+            property_type=property_type,
+            transaction_category=transaction_category,
+            filter_outliers=filter_outliers,
+            search_level=search_level,
+            address=address,
+            limit=limit,
+        )
     )
     if enrich_epc and result.transactions:
         from property_core import EPCClient

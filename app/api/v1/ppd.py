@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Literal, Optional
 
+import anyio
 from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas.ppd import (
@@ -227,16 +229,26 @@ async def comps(
             transaction_category = tc_clean.upper()
 
     try:
-        result = service.comps(
-            postcode=postcode,
-            property_type=property_type,
-            transaction_category=transaction_category,
-            filter_outliers=filter_outliers,
-            months=months,
-            limit=limit,
-            search_level=search_level,
-            address=address,
-            auto_escalate=auto_escalate,
+        # Offloaded: PPDService.comps is synchronous and blocks for the whole
+        # upstream round trip. Run on the event loop it stopped this worker
+        # answering anything else, /v1/health included -- see
+        # tests/test_event_loop_not_blocked_by_comps.py. anyio's default thread
+        # limiter bounds the pool, so this adds concurrency without unbounded
+        # threads. Exceptions propagate unchanged, so the handlers below keep
+        # their existing status codes.
+        result = await anyio.to_thread.run_sync(
+            partial(
+                service.comps,
+                postcode=postcode,
+                property_type=property_type,
+                transaction_category=transaction_category,
+                filter_outliers=filter_outliers,
+                months=months,
+                limit=limit,
+                search_level=search_level,
+                address=address,
+                auto_escalate=auto_escalate,
+            )
         )
     except PPDCoverageError as exc:
         # 422, not 404 or a partial 200: the request is unsatisfiable as stated,
