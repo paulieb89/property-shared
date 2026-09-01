@@ -16,6 +16,13 @@ _TRUE = frozenset({"1", "true", "yes", "on"})
 
 PPD_SNAPSHOT_ENABLED_ENV = "PPD_SNAPSHOT_ENABLED"
 
+#: Control-only. Starts the snapshot boot without ever making it routable, so
+#: the real application startup lifecycle can be measured (G1a) against a real
+#: artifact while every user request is still answered from the live source.
+#: It is deliberately NOT consulted by `state.active_adapter()`:
+#: `PPD_SNAPSHOT_ENABLED` remains the sole authority to route.
+PPD_SNAPSHOT_SHADOW_ENABLED_ENV = "PPD_SNAPSHOT_SHADOW_ENABLED"
+
 
 def parse_bool_flag(value: object) -> bool:
     """Parse a feature-flag value. Fails CLOSED on anything unrecognised.
@@ -39,3 +46,13 @@ def ppd_snapshot_enabled() -> bool:
     without reimporting the package.
     """
     return parse_bool_flag(os.getenv(PPD_SNAPSHOT_ENABLED_ENV))
+
+
+def ppd_snapshot_shadow_enabled() -> bool:
+    """Whether to materialize a snapshot without routing to it. Defaults to False.
+
+    Same fail-closed parsing and same call-time read as the serving flag. This
+    flag governs *whether the work happens*, never *what a request is answered
+    from*.
+    """
+    return parse_bool_flag(os.getenv(PPD_SNAPSHOT_SHADOW_ENABLED_ENV))

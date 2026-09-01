@@ -439,7 +439,7 @@ def test_the_changelog_still_records_the_sizing_correction():
 # Rev 8 -- the corpus-acceptance and artifact-distribution decision round
 # ---------------------------------------------------------------------------
 
-def test_the_specification_declares_revision_8_and_a_revision_note():
+def test_the_specification_declares_revision_9_and_a_revision_note():
     """History is appended, never overwritten.
 
     A revision that replaced its predecessor's note would make the document's
@@ -448,14 +448,59 @@ def test_the_specification_declares_revision_8_and_a_revision_note():
     """
     body = _text(SPEC)
     head = body.splitlines()[0]
-    assert "rev 8" in head and "FROZEN" in head, head
+    assert "rev 9" in head and "FROZEN" in head, head
     normalised = _normalised(SPEC)
-    assert "**Revision 8**" in normalised, "rev 8 landed without a revision note"
-    for earlier in ("**Revision 7**", "**Revision 6**"):
+    assert "**Revision 9**" in normalised, "rev 9 landed without a revision note"
+    for earlier in ("**Revision 8**", "**Revision 7**", "**Revision 6**"):
         assert earlier in normalised, (
             f"{earlier} was overwritten; revision notes accumulate, they do not "
             f"replace each other"
         )
+
+
+def test_revision_9_relaxed_no_requirement():
+    """Rev 9 moves *when* the boot runs. It must move nothing else.
+
+    This is the round most likely to soften the 30 s target by accident, since
+    the whole point of the change is that the old design could not meet it.
+    Making the target measurable is not the same as relaxing it.
+    """
+    normalised = _normalised(SPEC)
+    for requirement in (
+        "30 s readiness target",
+        "bundle_bytes * 2.5",
+        "Passing G1a authorises neither `propertydata` nor Stage 3",
+        "blocking G2 if the deployed count exceeds one",
+    ):
+        assert requirement in normalised, (
+            f"rev 9 relaxed a requirement it had no authority to touch: "
+            f"{requirement!r}"
+        )
+    assert "The 30 s readiness target is unchanged" in normalised, (
+        "rev 9 must say plainly that it does not relax the readiness target"
+    )
+
+
+def test_revision_9_does_not_claim_the_readiness_target_is_met():
+    """Non-blocking startup makes the target measurable, not satisfied.
+
+    Full G1a still requires measuring application time-to-readiness; nothing in
+    rev 9 may read as though that measurement has already happened.
+    """
+    normalised = _normalised(SPEC)
+    assert "makes it *measurable* rather than unreachable-by-construction" in normalised
+    assert "does not claim it is met" in normalised
+
+
+def test_shadow_flag_is_documented_as_control_only():
+    """The flag must never read as a second way to serve snapshot data."""
+    normalised = _normalised(SPEC)
+    assert "PPD_SNAPSHOT_SHADOW_ENABLED" in normalised
+    assert "never makes the result routable" in normalised
+    assert (
+        "Enabling it is not, and never becomes, permission to serve snapshot data"
+        in normalised
+    )
 
 
 def test_revision_8_relaxed_no_requirement():
