@@ -351,3 +351,220 @@ process-environment inspection. No snapshot credentials exist on either
 app. Stopping here, as instructed — Phase D (staging and applying
 credentials, then running the verifier for partial G1a evidence) is not
 authorized by this entry and has not started.
+
+## Phase D — credentials installed, boot-only verification run, partial G1a measured
+
+**Date**: 2026-09-01. **Goal**: stage and apply the bucket-scoped ReadOnly
+Tigris credentials on `property-shared` only, then run
+`/app/boot_only_verify.py` once against the real private artifact to obtain
+**partial G1a** evidence. Serving stayed off throughout. No release, no image
+change, no `propertydata` work.
+
+The deployed image is unchanged from Phase C: v1.16.0, digest
+`sha256:5c1c4039edc1e2e47ca13180c577963272d0399c5593fcad113fc97df925f335`,
+label `GH_SHA=176c401ce2651fb734f7908e566854e3e5cb9aad`. No release was needed
+— the verifier was already in that image.
+
+### Preconditions, verified before any credential was staged
+
+| Check | Result |
+|---|---|
+| Machine identity | `7849207a412608`, version 134, `lhr`, `started` |
+| Health | `servicecheck-00-http-8080` passing, 1 total / 1 passing |
+| Snapshot serving | `GET /v1/meta` → `{"enabled": false, "routable": false, "source_error": null}` |
+| Snapshot credentials | `fly secrets list` showed only `OPENAI_API_KEY`, `COMPANIES_HOUSE_API_KEY`, `EPC_API_TOKEN` |
+| Worker count | `Dockerfile` CMD is `uvicorn app.main:app --host 0.0.0.0 --port 8080`, no `--workers` → one worker (G2) |
+| Verifier present | `test -f /app/boot_only_verify.py` → exit 0 |
+| Verify dir absent | `test ! -e /ppd-verify-<ts>` → exit 0 |
+| App cache absent | `test ! -e /tmp/ppd-snapshot` → exit 0, nothing previously materialized |
+| Rootfs free | 8,319,373,312 B against the §4.7 preflight requirement of 279,109,872 × 2.5 = 697,774,680 B |
+
+Baseline from `scripts/fly_observability_snapshot.py` (1 h window): Machine
+memory total 2,064,257,024 B, available 1,791,881,216 B, rootfs free
+8,319,373,312 B, process RSS 109,432,832 B, no OOM exits. Three series
+returned `no_data` (`app_concurrency`, `instance_exit_oom`, `app_tool_calls`)
+— all known-absent corroborating series, not a Phase D failure.
+
+### Credential installation
+
+The owner — not the agent — staged and applied the four values through
+`fly secrets import -a property-shared --stage` on stdin followed by
+`fly secrets deploy -a property-shared`. The agent never saw, typed, echoed or
+logged the values, and never read the contents of `/proc/<pid>/environ`.
+
+Exactly four names were added: `PPD_SNAPSHOT_S3_ACCESS_KEY_ID`,
+`PPD_SNAPSHOT_S3_SECRET_ACCESS_KEY`, `PPD_SNAPSHOT_S3_BUCKET`,
+`PPD_SNAPSHOT_S3_PREFIX`. **`PPD_SNAPSHOT_ENABLED` was not included**, and was
+confirmed absent from the Machine environment by
+`grep -ac PPD_SNAPSHOT_ENABLED /proc/self/environ` → `0` (count only; contents
+never read). `GET /v1/meta` continued to report `enabled: false,
+routable: false` throughout. `propertydata` was untouched.
+
+The Machine restarted 134 → 135 and returned to 1 total / 1 passing.
+
+### Two blockers before a measurement was obtained
+
+**1. Verifier defect — the documented invocation could not run.**
+`--verify-dir /tmp/ppd-verify-<ts>` was refused with
+`{"refused": "no mount entry matches /tmp"}`. Root cause, reproduced against
+the Machine's real `/proc/mounts`: `_filesystem_type()` built its prefix test
+as `resolved.startswith(stripped + "/")`, and for the root mount `stripped` is
+`"/"`, so the prefix became `"//"` — which no absolute path starts with. The
+root filesystem matched only the exact path `/`, never anything beneath it. A
+Fly Machine has no dedicated `/tmp` mount (`/tmp` falls under `/`, an overlay
+whose upper layer is ext4 on `/dev/vdb` at `/.fly-upper-layer`), so every run
+was refused, including the invocation in the tool's own docstring.
+
+Nothing was materialized: the check runs before the verification directory is
+created and before the `try/finally`, so the refusal was inert — no Tigris
+request, no filesystem change, no cleanup pending. Fix raised separately as a
+narrow PR with three regression tests; **not merged, released or deployed**.
+
+**Amendment to the sibling-path requirement, authorised by the owner.** With
+the fix undeployed, the verify directory was moved to `/ppd-verify-<ts>` —
+parent `/`, an exact mount entry. Recorded explicitly because it departs from
+the `/tmp` sibling form: `/` is the *same* disk-backed overlay as `/tmp` (same
+device, same free space, same `/.fly-upper-layer` Prometheus series), it
+cannot nest with `/tmp/ppd-snapshot` in either direction, and the check's
+intent — refuse a tmpfs/ramfs root — is still satisfied, as `/dev/shm` still
+resolves to `tmpfs`. The measurement is equivalent to one taken under `/tmp`.
+
+**2. Tigris rejected the first credential pair.** The second invocation
+reached materialization and failed with
+`SnapshotSourceError: snapshot source returned HTTP 403 for 'current.json'`,
+`bytes_downloaded: 0`, `cold_run_valid: false`, `cleanup_ok: true`. No retry
+was attempted. Note that HTTP 403 does not distinguish rejected credentials
+from a missing object: an S3-compatible store returns 403 rather than 404 when
+the key lacks `ListBucket`. The owner replaced both credential values; the
+`PPD_SNAPSHOT_S3_BUCKET` and `PPD_SNAPSHOT_S3_PREFIX` digests were unchanged,
+so the bucket and prefix were never in question. Machine restarted 135 → 136,
+health returned to 1 total / 1 passing.
+
+Neither of these two runs produced any measurement, and neither is recorded as
+one.
+
+### The measured run
+
+One invocation, `--verify-dir /ppd-verify-20260901T053928Z`, against artifact
+`v20260828T194003Z`. Exit 0.
+
+| Field | Value |
+|---|---|
+| `evidence_scope` | `partial_g1a` |
+| `g1a_complete` / `stage_1_evidence` | `false` / `false` |
+| `readiness` | `ready` |
+| `version` | `v20260828T194003Z` |
+| `reused_existing` | **`false`** — genuinely cold |
+| `bytes_downloaded` | **`279109872`** — exactly `EXPECTED_BUNDLE_BYTES` |
+| `cold_run_valid` | **`true`** |
+| `validated` | `true` |
+| `coverage_from` .. `coverage_to` | `2016-01-01` .. `2026-06-30` |
+| `behind_advertised_release` | `false` |
+| `source_error` | `null` |
+| `warnings` | `[]` |
+| `fetch_ms` | 35,080.9 |
+| `extraction_ms` | 919.3 |
+| `overlap_window_ms` | 919.3 |
+| `materialization_ms` | 36,699.8 |
+| `validation_ms` | 3,108.2 |
+| `peak_transient_disk_bytes` | 539,565,056 (514.6 MiB) |
+| `machine_min_available_memory_bytes` | 1,707,376,640 (1.59 GiB) |
+| `process_peak_rss_bytes` | 118,976,512 (113.5 MiB) |
+| `cleanup_ok` / `cleanup_error` | `true` / `null` |
+
+No unexpected fields were present.
+
+### Reading the numbers against the design doc's calculated inputs
+
+The rev-8 figures were explicitly labelled calculations to be confirmed or
+refuted. They are refuted in one respect and confirmed in another.
+
+* **Transfer time. Refuted.** The calculation assumed a nominal 100 Mbit/s and
+  derived ~22.3 s. Measured: 35.1 s, an effective **63.6 Mbit/s** from Tigris
+  to this Machine. The estimate was optimistic by ~57%.
+* **Simultaneous payload. Confirmed, with a sampling caveat.** The calculated
+  ~534.1 MiB (266.2 + 267.9, arithmetic only) sits just above the measured
+  peak of 514.6 MiB. The sampler polls every 0.2 s and extraction lasted only
+  0.92 s, so the observed peak is a **lower bound**: at the sampled maximum
+  260,455,184 B of payload had been extracted alongside the full bundle,
+  roughly 93% of the declared ~267.9 MiB. The true instantaneous peak is
+  therefore close to the ~560 MB arithmetic ceiling. Report 514.6 MiB as
+  measured, not as the maximum that occurred.
+* **Preflight headroom. Ample.** 697,774,680 B required against 8,319,373,312 B
+  free — a factor of ~11.9.
+* **Memory. Comfortable.** Machine-wide available memory never fell below
+  1,707,376,640 B on a 2 GB Machine, and the verifier process peaked at
+  118,976,512 B RSS while the live server continued serving.
+
+**The 30 s readiness target is not met by materialization alone.**
+`materialization_ms` was 36,699.8 ms, and a further 3,108.2 ms of adapter-open
+validation brings the cold path to ~39.8 s before any application startup
+work is counted. This is a measured fact about this artifact on this Machine,
+not a projection, and it is the single most consequential result of Phase D.
+It does not by itself fail G1a — G1a is about application time-to-readiness,
+which has not been measured — but no application-startup measurement can be
+faster than the materialization it contains. Any plan that assumes a 30 s cold
+boot needs to be revisited before enablement.
+
+**On `warnings: []`.** The artifact's `coverage_to` of 2026-06-30 was 63 days
+old on the measurement date, beyond the `FRESHNESS_WARNING_DAYS = 45`
+threshold. No warning appears here because that threshold is applied in
+`property_core/ppd_source.py` at query/provenance time, not at boot. The
+verifier performs boot and adapter validation only. The freshness warning will
+fire once serving is enabled against this artifact.
+
+### Cleanup and post-run state
+
+`cleanup_ok: true` was corroborated independently: `test ! -e
+/ppd-verify-20260901T053928Z` → exit 0. Machine remained version 136 — the
+verifier caused no restart — `started`, 1 total / 1 passing,
+`GET /v1/health` → 200 in 50 ms, `GET /v1/meta` →
+`{"enabled": false, "routable": false, "source_error": null}`.
+
+The after-state collector report corroborates both the materialization and the
+cleanup:
+
+| Series | Before | After |
+|---|---|---|
+| `rootfs_free_bytes` | 8,319,373,312 | 8,319,373,312 |
+| `rootfs_free_bytes_min` (15 s resolution) | 8,319,373,312 | 8,038,354,944 |
+| `memory_available_min` | 1,791,881,216 | 1,688,379,392 |
+
+Free space returned exactly to baseline, confirming the materialization left
+nothing behind.
+
+**The two disk measurements disagree, and the difference is instructive.** The
+collector's free-space delta is 281,018,368 B; the verifier's directory-size
+peak is 539,565,056 B — roughly double. Fly stores one sample per 15 s, so the
+collector's minimum landed at a moment when approximately one payload was on
+disk rather than at the brief simultaneous bundle-plus-extraction peak. This is
+exactly the resolution limitation recorded in the collector's own
+`TRANSIENT_DISK_NOTE`. **The verifier's 0.2 s sampling is authoritative for
+transient disk; the collector figure corroborates only** — and here it would
+have understated the peak by a factor of ~1.9 if taken as the measurement.
+
+### Result
+
+**Partial G1a. Materialization measured; application startup lifecycle not
+measured.**
+
+What this establishes on the real `property-shared` Machine, against the real
+private artifact: a genuinely cold fetch of exactly the declared 279,109,872
+bytes, its extraction, its adapter-open validation, the transient disk and
+memory cost of doing so, and complete cleanup — with serving off and the live
+path unaffected throughout.
+
+What it explicitly does **not** establish, and must not be cited as:
+
+* **Not completed G1a.** No application time-to-readiness: no ASGI startup, no
+  async lifespan, no single-flight lock behaviour under the deployed worker
+  count. A standalone process cannot produce these.
+* **Not Stage 1 evidence.** No real-traffic sample, no divergence
+  classification.
+* **Not G1b.** `propertydata` was not touched: no credentials, no deployment,
+  no verifier — it does not carry the verifier in its image.
+* **Not authority to enable serving.** `PPD_SNAPSHOT_ENABLED` remains absent on
+  both apps.
+
+Credentials remain installed on `property-shared` only. The verifier defect
+fix is open as a separate PR and is not merged, released or deployed.
