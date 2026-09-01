@@ -78,6 +78,37 @@ def materialized(tmp_path):
     opened.adapter.close()
 
 
+#: One consistent set of figures, shared by the fixture Instance and its
+#: qualification block so the loader's cross-checks pass.
+BASELINES = {"S1_full": 100, "S3_full": 40, "S9_full": 55}
+NEIGHBOUR_ROWS = 120
+
+
+def _shortfall_block(ratio_numerator: int = 31, definitional=None,
+                     **s1_overrides) -> dict:
+    """A qualification block whose neighbour falls short of the literal rule.
+
+    Still internally consistent -- the shortfall is in the measurement, not in
+    the bookkeeping, which is what makes it an adjudication question rather
+    than a malformed Instance.
+    """
+    block = _qualification_block(definitional)
+    geo = block["S1_district"]["geography"]
+    block["S1_district"] = {
+        "rule": "the neighbour holds comparable or greater volume",
+        "geography": geo,
+        "measured_rows": BASELINES["S1_full"],
+        "neighbour_geography": block["S2_district"]["geography"],
+        "measured_neighbour_rows": ratio_numerator,
+        "measured_neighbour_ratio": round(
+            ratio_numerator / BASELINES["S1_full"], 4),
+        "comparable_or_greater": False,
+        **s1_overrides,
+    }
+    block["S2_district"]["measured_rows"] = ratio_numerator
+    return block
+
+
 def _qualification_block(definitional=None, **overrides) -> dict:
     """A complete qualification block bound to the effective geographies."""
     from tools.ppd_snapshot.corpus import DEFINITIONAL_GEOGRAPHIES
@@ -85,19 +116,31 @@ def _qualification_block(definitional=None, **overrides) -> dict:
     geo = {**DEFINITIONAL_GEOGRAPHIES, **(definitional or {})}
     block = {key: {"rule": "qualified for the test fixture"}
              for key in sorted(s1.REQUIRED_QUALIFICATION_KEYS)}
+    # Internally consistent with BASELINES below: the loader cross-checks every
+    # one of these against the baselines and against the effective geographies,
+    # so a fixture carrying arbitrary numbers is not a valid Instance either.
     block["S1_district"] = {
         "rule": "the neighbour holds comparable or greater volume",
         "geography": geo["S1_district"],
-        "measured_neighbour_ratio": 1.2,
+        "measured_rows": BASELINES["S1_full"],
+        "neighbour_geography": geo["S2_neighbour_district"],
+        "measured_neighbour_rows": NEIGHBOUR_ROWS,
+        "measured_neighbour_ratio": round(
+            NEIGHBOUR_ROWS / BASELINES["S1_full"], 4),
         "comparable_or_greater": True,
     }
     block["S2_district"] = {
         "rule": "non-empty under frozen parameters",
         "geography": geo["S2_neighbour_district"],
+        "measured_rows": NEIGHBOUR_ROWS,
     }
     block["S3_sector"] = {
         "rule": "a strict subset of S1's district",
         "geography": geo["S3_sector"],
+        "measured_rows": BASELINES["S3_full"],
+        "measured_rows_category_all": BASELINES["S9_full"],
+        "inside_s1_district": (
+            geo["S3_sector"].split()[0] == geo["S1_district"]),
     }
     for key, value in overrides.items():
         block[key] = value
@@ -110,7 +153,7 @@ def _instance_dict(m) -> dict:
         "snapshot_version": m.version,
         "bundle_sha256": m.bundle_sha256,
         "geographies": dict(GEOGRAPHIES),
-        "aggregate_baselines": {"S1_full": 100, "S3_full": 40, "S9_full": 55},
+        "aggregate_baselines": dict(BASELINES),
         "qualified_at": "2026-09-01",
         # Complete: every case whose geography the Instance fixes, with the
         # three definitional entries bound to the geographies they measured.
@@ -2329,13 +2372,7 @@ def test_a_pending_adjudication_is_refused_not_carried(materialized, tmp_path):
     nothing. Mutation: accept a False `comparable_or_greater` with no
     `owner_decision` and a pending judgement qualifies a Stage 1 run.
     """
-    block = _qualification_block()
-    block["S1_district"] = {
-        "rule": "the neighbour holds comparable or greater volume",
-        "geography": "B5",
-        "measured_neighbour_ratio": 0.31,
-        "comparable_or_greater": False,
-    }
+    block = _shortfall_block()
     path = _write(tmp_path, materialized, qualification=block)
     with pytest.raises(InstanceRefused) as exc:
         s1.load_instance(path, materialized)
@@ -2345,12 +2382,8 @@ def test_a_pending_adjudication_is_refused_not_carried(materialized, tmp_path):
 
 def test_an_accepted_shortfall_needs_a_justification(materialized, tmp_path):
     """A decision nobody can review is not a decision that was recorded."""
-    block = _qualification_block()
-    block["S1_district"] = {
-        "rule": "neighbour volume", "geography": "B5",
-        "measured_neighbour_ratio": 0.31, "comparable_or_greater": False,
-        "owner_decision": {"decision": "accepted", "justification": "   "},
-    }
+    block = _shortfall_block(owner_decision={"decision": "accepted",
+                                             "justification": "   "})
     path = _write(tmp_path, materialized, qualification=block)
     with pytest.raises(InstanceRefused) as exc:
         s1.load_instance(path, materialized)
@@ -2360,29 +2393,20 @@ def test_an_accepted_shortfall_needs_a_justification(materialized, tmp_path):
 def test_a_recorded_acceptance_with_a_reason_qualifies_the_case(materialized,
                                                                 tmp_path):
     """The route the Definition offers, taken properly, is accepted."""
-    block = _qualification_block()
-    block["S1_district"] = {
-        "rule": "neighbour volume", "geography": "B5",
-        "measured_neighbour_ratio": 0.31, "comparable_or_greater": False,
-        "owner_decision": {
-            "decision": "accepted",
-            "justification": ("B50 is a small rural outcode; 31% still returns "
-                              "hundreds of rows, enough for contamination to "
-                              "show. Reviewed 2026-09-01."),
-        },
-    }
+    block = _shortfall_block(owner_decision={
+        "decision": "accepted",
+        "justification": ("B50 is a small rural outcode; 31% still returns "
+                          "hundreds of rows, enough for contamination to "
+                          "show. Reviewed 2026-09-01."),
+    })
     path = _write(tmp_path, materialized, qualification=block)
     assert s1.load_instance(path, materialized).governs_run
 
 
 @pytest.mark.parametrize("decision", ["pending", "rejected", "deferred", ""])
 def test_only_an_explicit_acceptance_qualifies(materialized, tmp_path, decision):
-    block = _qualification_block()
-    block["S1_district"] = {
-        "rule": "neighbour volume", "geography": "B5",
-        "measured_neighbour_ratio": 0.31, "comparable_or_greater": False,
-        "owner_decision": {"decision": decision, "justification": "a reason"},
-    }
+    block = _shortfall_block(owner_decision={"decision": decision,
+                                             "justification": "a reason"})
     path = _write(tmp_path, materialized, qualification=block)
     with pytest.raises(InstanceRefused) as exc:
         s1.load_instance(path, materialized)
@@ -2391,13 +2415,19 @@ def test_only_an_explicit_acceptance_qualifies(materialized, tmp_path, decision)
 
 def test_an_instance_that_does_not_record_comparability_is_refused(
         materialized, tmp_path):
-    """It is the fact an adjudication would be answering."""
+    """It is the fact an adjudication would be answering.
+
+    Refused by the cross-check, which recomputes the field from the counts --
+    a missing value cannot equal the recomputed one. There is deliberately no
+    second guard for it: an unreachable check is not a safety net.
+    """
     block = _qualification_block()
-    block["S1_district"] = {"rule": "neighbour volume", "geography": "B5"}
+    block["S1_district"].pop("comparable_or_greater")
     path = _write(tmp_path, materialized, qualification=block)
     with pytest.raises(InstanceRefused) as exc:
         s1.load_instance(path, materialized)
     assert "comparable_or_greater" in str(exc.value)
+    assert "may not be asserted independently" in str(exc.value)
 
 
 def test_a_substitution_bolted_onto_unchanged_evidence_is_refused(
@@ -2543,9 +2573,10 @@ def test_qualify_re_measures_against_a_substitution(tmp_path):
     build_snapshot(tmp_path, rows, version="v20260828T194003Z")
     opened = s1.open_materialized(tmp_path)
     try:
-        out = s1.qualify(opened, today=date(2026, 6, 15), definitional={
-            "S1_district": "M3", "S2_neighbour_district": "M30",
-            "S3_sector": "M3 7"})
+        out = s1.qualify(opened, today=date(2026, 6, 15), substitutions={
+            "S1_district": {"geography": "M3", "justification": "r"},
+            "S2_neighbour_district": {"geography": "M30", "justification": "r"},
+            "S3_sector": {"geography": "M3 7", "justification": "r"}})
     finally:
         opened.adapter.close()
     assert out["substituted"] is True
@@ -2646,3 +2677,358 @@ def test_the_qualify_cli_refuses_a_geometrically_broken_substitutions_file(
                     "--substitutions", str(subs), "--out", str(out_path)])
     assert code == 2
     assert not out_path.exists(), "a refused qualification still wrote output"
+
+
+# ---------------------------------------------------------------------------
+# The emitted candidate is a document the loader accepts
+# ---------------------------------------------------------------------------
+
+#: Inside the frozen 24-month window and inside the 6-month one.
+RECENT = "2026-05-04"
+#: Inside the 24-month window, outside the 6-month one -- which is what makes a
+#: sector empty for S11 while still being a sector the artifact knows about.
+OLDER = "2025-01-15"
+
+
+def _fully_qualifiable_rows() -> list[dict]:
+    """Rows that satisfy every qualification rule, so `qualify` emits a
+    complete candidate.
+
+    Each group exists for one placeholder, and the comments say which -- a
+    fixture that qualifies by accident is one nobody can repair when a rule
+    changes.
+    """
+    rows: list[dict] = []
+    # The definitional trio, twice over: B5/B50/B5 4 and the M3/M30/M3 7 set a
+    # substitution moves to. Both need S3 < S1 strictly and S9 > S3.
+    for district, sector, neighbour in (("B5", "B5 4", "B50"),
+                                        ("M3", "M3 7", "M30")):
+        rows += [row(f"T-{sector}-{i:03d}", f"{sector}AA", RECENT, 200_000 + i)
+                 for i in range(30)]
+        rows.append(row(f"T-{sector}-CATB", f"{sector}AB", RECENT, 900_000,
+                        ppd_category="B"))
+        rows += [row(f"T-{neighbour}-{i:03d}", f"{neighbour} 4AA", RECENT,
+                     400_000 + i) for i in range(60)]
+        # A second, thin sector inside the district: S4, and it keeps S3 a
+        # STRICT subset of S1 rather than equal to it.
+        rows += [row(f"T-{district}6-{i}", f"{district} 6QQ", RECENT,
+                     300_000 + i, property_type=t)
+                 for i, t in enumerate("DSTF")]
+    # S5 (dense, well past limit), S7 (>=90% F) and S6/S13 (a dense unit with
+    # no D rows) all come from one deliberately large single-type sector.
+    rows += [row(f"T-NG11-{i:03d}", "NG1 1AA", RECENT, 250_000 + i)
+             for i in range(260)]
+    # S8: a real spread across F/D/S/T with F well under half.
+    rows += [row(f"T-NG21-{i:03d}", "NG2 1AA", RECENT, 260_000 + i,
+                 property_type="FDST"[i % 4]) for i in range(60)]
+    # S11: known to the artifact over 24 months, empty over 6.
+    rows += [row(f"T-NG41-{i:03d}", "NG4 1AA", OLDER, 270_000 + i)
+             for i in range(20)]
+    return rows
+
+
+def _emit_candidate(tmp_path, monkeypatch, substitutions=None) -> dict:
+    """Run the CLI and return the candidate instance it wrote."""
+    build_snapshot(tmp_path, _fully_qualifiable_rows(),
+                   version="v20260828T194003Z")
+    argv = ["qualify", "--cache-dir", str(tmp_path),
+            "--out", str(tmp_path / "candidate.json")]
+    if substitutions is not None:
+        subs = tmp_path / "subs.json"
+        subs.write_text(json.dumps({"substitutions": substitutions}))
+        argv += ["--substitutions", str(subs)]
+    monkeypatch.setenv(s1.SHADOW_COMPARE_ENABLED_ENV, "1")
+    code = s1.main(argv)
+    written = json.loads((tmp_path / "candidate.json").read_text())
+    assert not written["unqualified_placeholders"], (
+        f"the fixture does not qualify every placeholder: "
+        f"{written['unqualified_placeholders']}")
+    assert not written["unqualified_definitional_cases"], (
+        written["unqualified_definitional_cases"])
+    assert code in (0, 1)   # 1 only if adjudication is pending
+    return written["candidate_instance"]
+
+def test_a_cli_candidate_round_trips_into_a_loadable_substituted_instance(
+        tmp_path, monkeypatch):
+    """The acceptance test for the whole qualify -> review -> run path.
+
+    Run the CLI against a substitution, take exactly what it wrote, change
+    ONLY the two fields a reviewer is meant to fill in -- `governs_run`, and
+    the owner decision where the neighbour falls short -- and load it. Then
+    confirm the corpus actually executes the substituted trio.
+
+    Everything else is used verbatim. If the tool emitted a document its own
+    loader rejects, an operator would have to hand-reconstruct a block the tool
+    had already validated, and any hand-reconstruction is a place for the
+    evidence and the run to drift apart. Before this test the candidate carried
+    substituted measurements and no `substitutions` key, so it was refused by
+    the very check that exists to keep those two together.
+    """
+    candidate = _emit_candidate(tmp_path, monkeypatch, substitutions={
+        "S1_district": {"geography": "M3",
+                        "justification": "B50 too thin on this artifact"},
+        "S2_neighbour_district": {"geography": "M30",
+                                  "justification": "the longer neighbour of M3"},
+        "S3_sector": {"geography": "M3 7", "justification": "inside M3"},
+    })
+
+    # The substitution survives into the candidate, justifications intact.
+    assert candidate["substitutions"]["S1_district"]["geography"] == "M3"
+    assert candidate["substitutions"]["S1_district"]["justification"] == (
+        "B50 too thin on this artifact")
+    assert set(candidate["substitutions"]) == {
+        "S1_district", "S2_neighbour_district", "S3_sector"}
+
+    # --- the only edits a reviewer makes -------------------------------------
+    candidate["governs_run"] = "stage-1-substituted"
+    if candidate["qualification"]["S1_district"]["comparable_or_greater"] is False:
+        candidate["qualification"]["S1_district"]["owner_decision"] = {
+            "decision": "accepted",
+            "justification": "reviewed and accepted for this artifact",
+        }
+
+    instance_path = tmp_path / "instance.json"
+    instance_path.write_text(json.dumps(candidate))
+    opened = s1.open_materialized(tmp_path)
+    try:
+        loaded = s1.load_instance(instance_path, opened)
+    finally:
+        opened.adapter.close()
+
+    assert loaded.governs_run == "stage-1-substituted"
+    assert loaded.substitutions == {
+        "S1_district": "M3", "S2_neighbour_district": "M30",
+        "S3_sector": "M3 7"}
+
+    # --- and the corpus executes the substituted trio ------------------------
+    from tools.ppd_snapshot.corpus import cases as build
+
+    shapes = {c.shape: (c.postcode, c.search_level)
+              for c in build(loaded.geographies, loaded.substitutions)}
+    assert shapes["S1"] == ("M3", "district")
+    assert shapes["S2"] == ("M30", "district")
+    assert shapes["S3"] == ("M3 7", "sector")
+    assert shapes["S9"] == ("M3 7", "sector")
+    assert shapes["S12"] == ("M3", "district")
+    assert shapes["S14"] == ("M3 7", "sector")
+    # Only the six shapes the definitional trio drives. The seven placeholders
+    # are selected independently and may legitimately sit anywhere in the
+    # artifact -- S4's thin sector here is `B5 6`, which is not a leftover.
+    driven = ("S1", "S2", "S3", "S9", "S12", "S14")
+    assert not any(shapes[shape][0].split()[0] in {"B5", "B50"}
+                   for shape in driven), (
+        f"a default B5/B50 geography survived into a substituted run: "
+        f"{ {k: shapes[k] for k in driven} }")
+
+
+def test_an_unsubstituted_candidate_round_trips_too(tmp_path, monkeypatch):
+    """The same path with no substitution: no `substitutions` key is emitted."""
+    candidate = _emit_candidate(tmp_path, monkeypatch)
+    assert "substitutions" not in candidate
+    candidate["governs_run"] = "stage-1-default"
+    if candidate["qualification"]["S1_district"]["comparable_or_greater"] is False:
+        candidate["qualification"]["S1_district"]["owner_decision"] = {
+            "decision": "accepted", "justification": "reviewed"}
+    path = tmp_path / "instance.json"
+    path.write_text(json.dumps(candidate))
+    opened = s1.open_materialized(tmp_path)
+    try:
+        loaded = s1.load_instance(path, opened)
+    finally:
+        opened.adapter.close()
+    assert loaded.substitutions == {}
+    from tools.ppd_snapshot.corpus import cases as build
+
+    assert {c.shape: c.postcode
+            for c in build(loaded.geographies, loaded.substitutions)}["S1"] == "B5"
+
+
+# ---------------------------------------------------------------------------
+# Measurements, baselines and geographies must be the same numbers
+# ---------------------------------------------------------------------------
+
+def test_a_measurement_disagreeing_with_its_baseline_is_refused(materialized,
+                                                                tmp_path):
+    """The same count over the same geography cannot be two numbers.
+
+    Mutation: skip the cross-check and an Instance can name the right places
+    while carrying a figure pasted from a previous run.
+    """
+    block = _qualification_block()
+    block["S1_district"]["measured_rows"] = BASELINES["S1_full"] + 1
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "S1_full" in str(exc.value)
+    assert "cannot be two numbers" in str(exc.value)
+
+
+@pytest.mark.parametrize("field,baseline", [
+    ("measured_rows", "S3_full"),
+    ("measured_rows_category_all", "S9_full"),
+])
+def test_the_sector_measurements_must_match_their_baselines(
+        materialized, tmp_path, field, baseline):
+    block = _qualification_block()
+    block["S3_sector"][field] = BASELINES[baseline] + 7
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert baseline in str(exc.value)
+
+
+def test_the_neighbour_count_must_agree_with_itself(materialized, tmp_path):
+    """It appears twice -- as S2's measurement and as S1's ratio input."""
+    block = _qualification_block()
+    block["S2_district"]["measured_rows"] = NEIGHBOUR_ROWS + 5
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "same count over the same geography" in str(exc.value)
+
+
+def test_a_ratio_edited_to_clear_the_rule_is_refused(materialized, tmp_path):
+    """The most consequential single edit anyone could make to an Instance.
+
+    Raising the ratio past 1.0 without moving the counts turns a case that
+    needs an owner decision into one that appears to qualify outright.
+    Mutation: trust the recorded ratio instead of recomputing it, and this
+    Instance loads.
+    """
+    block = _shortfall_block()
+    block["S1_district"]["measured_neighbour_ratio"] = 1.5
+    block["S1_district"]["comparable_or_greater"] = True
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "must follow from the counts" in str(exc.value)
+
+
+def test_comparability_asserted_against_the_measurement_is_refused(
+        materialized, tmp_path):
+    """`comparable_or_greater` decides whether a decision is required.
+
+    Asserting it independently of the counts would let an Instance skip the
+    adjudication entirely while every number beside it stayed honest.
+    """
+    block = _shortfall_block()
+    block["S1_district"]["comparable_or_greater"] = True
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "may not be asserted independently of the measurement" in str(exc.value)
+
+
+def test_the_neighbour_geography_must_be_the_effective_one(materialized,
+                                                           tmp_path):
+    """Otherwise the ratio describes a district the run does not use."""
+    block = _qualification_block()
+    block["S1_district"]["neighbour_geography"] = "M30"
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "the ratio would describe" in str(exc.value)
+
+
+def test_a_false_inside_s1_district_claim_is_refused(materialized, tmp_path):
+    block = _qualification_block()
+    block["S3_sector"]["inside_s1_district"] = False
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "inside_s1_district" in str(exc.value)
+
+
+@pytest.mark.parametrize("entry,field", [
+    ("S1_district", "measured_rows"),
+    ("S1_district", "measured_neighbour_rows"),
+    ("S1_district", "measured_neighbour_ratio"),
+    ("S2_district", "measured_rows"),
+    ("S3_sector", "measured_rows"),
+    ("S3_sector", "measured_rows_category_all"),
+])
+def test_a_missing_definitional_measurement_is_refused(materialized, tmp_path,
+                                                       entry, field):
+    """The baselines cannot be checked against a measurement not recorded."""
+    block = _qualification_block()
+    block[entry].pop(field)
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert field in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# Malformed substitution JSON refuses cleanly
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("payload", ["[]", '"a string"', "42", "null", "true",
+                                     '{"substitutions": []}',
+                                     '{"substitutions": "M3"}'])
+def test_non_object_substitution_json_is_refused_with_exit_two(
+        tmp_path, monkeypatch, payload):
+    """A clean refusal, not an AttributeError traceback.
+
+    `raw.get(...)` on a list or a string raises, and that reached the operator
+    as a stack trace from inside the tool rather than a sentence saying what
+    was wrong with their file.
+    """
+    build_snapshot(tmp_path, _rows(), version="v20260828T194003Z")
+    subs = tmp_path / "subs.json"
+    subs.write_text(payload)
+    monkeypatch.setenv(s1.SHADOW_COMPARE_ENABLED_ENV, "1")
+    out_path = tmp_path / "candidate.json"
+    code = s1.main(["qualify", "--cache-dir", str(tmp_path),
+                    "--substitutions", str(subs), "--out", str(out_path)])
+    assert code == 2
+    assert not out_path.exists(), "a refused qualification still wrote output"
+
+
+def test_unreadable_substitution_json_is_refused_with_exit_two(
+        tmp_path, monkeypatch):
+    build_snapshot(tmp_path, _rows(), version="v20260828T194003Z")
+    subs = tmp_path / "subs.json"
+    subs.write_text("{not json at all")
+    monkeypatch.setenv(s1.SHADOW_COMPARE_ENABLED_ENV, "1")
+    code = s1.main(["qualify", "--cache-dir", str(tmp_path),
+                    "--substitutions", str(subs),
+                    "--out", str(tmp_path / "candidate.json")])
+    assert code == 2
+
+
+def test_a_missing_substitutions_file_is_refused_with_exit_two(
+        tmp_path, monkeypatch):
+    build_snapshot(tmp_path, _rows(), version="v20260828T194003Z")
+    monkeypatch.setenv(s1.SHADOW_COMPARE_ENABLED_ENV, "1")
+    code = s1.main(["qualify", "--cache-dir", str(tmp_path),
+                    "--substitutions", str(tmp_path / "nope.json"),
+                    "--out", str(tmp_path / "candidate.json")])
+    assert code == 2
+
+
+def test_a_non_object_substitutions_value_is_refused_by_the_validator():
+    """Not by a second isinstance check in the CLI, which would be unreachable.
+
+    Pins where the refusal comes from, so removing the validator's own guard
+    fails here rather than silently relying on a CLI check that no longer
+    exists.
+    """
+    from tools.ppd_snapshot.corpus import validate_substitutions
+
+    for value in ([], "M3", 42, True):
+        with pytest.raises(InstanceRefused) as exc:
+            validate_substitutions(value)
+        assert "must be a JSON object" in str(exc.value)
+
+
+def test_the_runbook_says_the_candidate_is_taken_as_written():
+    body = RUNBOOK.read_text()
+    assert "justifications included" in body
+    assert "hand-reconstructing any of it" in body
+
+
+def test_the_runbook_documents_the_measurement_cross_checks():
+    body = RUNBOOK.read_text()
+    assert "must agree with each other" in body
+    assert "recomputed from the counts" in body
+    assert "most consequential edit" in body

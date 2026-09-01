@@ -221,6 +221,13 @@ PPD_SHADOW_COMPARE_ENABLED=1 python -m tools.ppd_snapshot.stage1_shadow \
             --out /tmp/stage1-candidate-instance.json
 ```
 
+The candidate this writes carries the **complete substitution block,
+justifications included** — take it as written. A reviewer fills in
+`governs_run`, and an owner decision where one is required, and nothing else:
+every measurement, geography and derived field is already bound to the
+substituted run, and hand-reconstructing any of it is a place for the evidence
+and the run to drift apart.
+
 The three move together, and their **geometry is validated**: substituting is
 permitted, substituting into a shape that tests nothing is not.
 
@@ -265,6 +272,18 @@ but the frozen window moves forward every day, so counts qualified months ago
 describe a query nobody now runs. Re-run `qualify` rather than reusing them.
 `qualified_at` must be a canonical `YYYY-MM-DD` string and may not be in the
 future.
+
+**The Instance's numbers must agree with each other.** The loader cross-checks
+every recorded definitional measurement and derived field against the aggregate
+baselines and the effective geographies, and refuses any mismatch:
+`S1_district.measured_rows` against `S1_full`, `S3_sector.measured_rows` and
+`measured_rows_category_all` against `S3_full` and `S9_full`, the neighbour
+count against itself in both places it appears, `measured_neighbour_ratio`
+recomputed from the counts, `comparable_or_greater` recomputed from the ratio,
+and `neighbour_geography` / `inside_s1_district` against the effective
+geographies. A ratio edited to clear the literal rule while the counts stay put
+is the single most consequential edit anyone could make to an Instance, and it
+is refused.
 
 Set `governs_run` to the Stage 1 run it governs. The comparator **refuses** an
 Instance whose `governs_run` is blank or still carries the placeholder `qualify`

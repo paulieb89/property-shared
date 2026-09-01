@@ -305,6 +305,100 @@ class Stage1Instance:
     substitutions: dict[str, str]
 
 
+def _required_number(entry: dict[str, Any], key: str, where: str) -> float:
+    value = entry.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise InstanceRefused(
+            f"qualification[{where}].{key} is {value!r}, not a number; the "
+            f"baselines cannot be checked against a measurement that is not "
+            f"recorded")
+    return value
+
+
+def _cross_check_measurements(qualification: dict[str, Any],
+                              baselines: dict[str, int],
+                              effective: dict[str, str]) -> None:
+    """Every recorded definitional measurement and derived field must agree.
+
+    Checked against the aggregate baselines and the effective geographies, so
+    the three sets of numbers in an Instance cannot disagree with each other.
+    Each mismatch below has the same shape: a document that looks internally
+    complete while one figure came from somewhere the run will not go.
+    """
+    s1_entry = qualification["S1_district"]
+    s2_entry = qualification["S2_district"]
+    s3_entry = qualification["S3_sector"]
+
+    s1_rows = _required_number(s1_entry, "measured_rows", "S1_district")
+    if s1_rows != baselines["S1_full"]:
+        raise InstanceRefused(
+            f"qualification[S1_district].measured_rows is {s1_rows}, but "
+            f"aggregate_baselines.S1_full is {baselines['S1_full']}; the same "
+            f"count over the same geography cannot be two numbers")
+
+    s3_rows = _required_number(s3_entry, "measured_rows", "S3_sector")
+    if s3_rows != baselines["S3_full"]:
+        raise InstanceRefused(
+            f"qualification[S3_sector].measured_rows is {s3_rows}, but "
+            f"aggregate_baselines.S3_full is {baselines['S3_full']}")
+    s9_rows = _required_number(s3_entry, "measured_rows_category_all", "S3_sector")
+    if s9_rows != baselines["S9_full"]:
+        raise InstanceRefused(
+            f"qualification[S3_sector].measured_rows_category_all is {s9_rows}, "
+            f"but aggregate_baselines.S9_full is {baselines['S9_full']}")
+
+    # The neighbour count appears twice -- once as S2's own measurement, once
+    # as the input to S1's ratio. They are the same query.
+    s2_rows = _required_number(s2_entry, "measured_rows", "S2_district")
+    neighbour_rows = _required_number(
+        s1_entry, "measured_neighbour_rows", "S1_district")
+    if s2_rows != neighbour_rows:
+        raise InstanceRefused(
+            f"qualification[S2_district].measured_rows is {s2_rows} but "
+            f"qualification[S1_district].measured_neighbour_rows is "
+            f"{neighbour_rows}; they are the same count over the same "
+            f"geography")
+
+    neighbour_geography = str(s1_entry.get("neighbour_geography", "")).strip().upper()
+    if neighbour_geography != effective["S2_neighbour_district"]:
+        raise InstanceRefused(
+            f"qualification[S1_district].neighbour_geography is "
+            f"{neighbour_geography!r}, but this Instance's neighbour is "
+            f"{effective['S2_neighbour_district']!r}; the ratio would describe "
+            f"a district the run does not use")
+
+    # Derived, so recomputed rather than trusted. A ratio edited to clear the
+    # literal rule while the counts stayed put is exactly what this catches.
+    expected_ratio = round((neighbour_rows / s1_rows) if s1_rows else 0.0, 4)
+    recorded_ratio = round(
+        _required_number(s1_entry, "measured_neighbour_ratio", "S1_district"), 4)
+    if recorded_ratio != expected_ratio:
+        raise InstanceRefused(
+            f"qualification[S1_district].measured_neighbour_ratio is "
+            f"{recorded_ratio}, but {neighbour_rows} / {s1_rows} is "
+            f"{expected_ratio}; a derived field must follow from the counts "
+            f"recorded beside it")
+
+    expected_comparable = bool(s1_rows > 0
+                               and expected_ratio >= NEIGHBOUR_COMPARABLE_RATIO)
+    if s1_entry.get("comparable_or_greater") is not expected_comparable:
+        raise InstanceRefused(
+            f"qualification[S1_district].comparable_or_greater is "
+            f"{s1_entry.get('comparable_or_greater')!r}, but a ratio of "
+            f"{expected_ratio} against the literal rule "
+            f"({NEIGHBOUR_COMPARABLE_RATIO}) gives {expected_comparable}. This "
+            f"field decides whether an owner decision is required, so it may "
+            f"not be asserted independently of the measurement")
+
+    inside = s3_entry.get("inside_s1_district")
+    expected_inside = effective["S3_sector"].split()[0] == effective["S1_district"]
+    if inside is not expected_inside:
+        raise InstanceRefused(
+            f"qualification[S3_sector].inside_s1_district is {inside!r}, but "
+            f"{effective['S3_sector']!r} inside {effective['S1_district']!r} is "
+            f"{expected_inside}")
+
+
 def load_instance(path: Path, materialized: Materialized) -> Stage1Instance:
     """Validate the Instance and bind it to the artifact actually on this Machine.
 
@@ -426,8 +520,16 @@ def load_instance(path: Path, materialized: Materialized) -> Stage1Instance:
                 f"artifact -- evidence for one geography cannot be attached to "
                 f"a run over another.")
 
-    # The S1/S3/S9 baselines are counts over exactly those three geographies,
-    # so binding the qualification entries above binds the baselines with them.
+    # -- the measurements and the baselines must be the same numbers --------
+    #
+    # Binding the geographies is half of it. The other half is that the counts
+    # recorded beside them agree with the baselines the corpus is qualified on,
+    # and that every derived field follows from those counts. Otherwise an
+    # Instance can name the right places and carry figures from somewhere else
+    # -- a re-qualification where one number was pasted from the previous run,
+    # or a ratio edited to clear the literal rule without the counts moving.
+    _cross_check_measurements(qualification, baselines, effective)
+
 
     # -- the neighbour rule: an explicit decision, or a refusal --------------
     #
@@ -436,14 +538,11 @@ def load_instance(path: Path, materialized: Materialized) -> Stage1Instance:
     # substitute-with-recorded-justification, and `qualify` deliberately refers
     # rather than settles it. An Instance that simply carries the shortfall and
     # says nothing about it is that referral going unanswered.
+    # `comparable_or_greater` has already been recomputed from the counts by
+    # `_cross_check_measurements`, which refuses a missing or dishonest value,
+    # so it can be read here as an established fact rather than re-guarded.
     s1_entry = qualification["S1_district"]
-    comparable = s1_entry.get("comparable_or_greater")
-    if not isinstance(comparable, bool):
-        raise InstanceRefused(
-            "qualification[S1_district] does not record comparable_or_greater; "
-            "whether the neighbour satisfied the literal rule is the fact an "
-            "adjudication would be answering")
-    if comparable is False:
+    if s1_entry["comparable_or_greater"] is False:
         decision = s1_entry.get("owner_decision")
         if not isinstance(decision, dict):
             raise InstanceRefused(
@@ -611,7 +710,7 @@ def _type_mix(m: Materialized, sector: str, *, months: int,
 
 
 def qualify(m: Materialized, *, today: Optional[date] = None,
-            definitional: Optional[dict[str, str]] = None) -> dict[str, Any]:
+            substitutions: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """Select the seven placeholders and measure the three baselines.
 
     Read-only throughout: aggregate COUNT and GROUP BY only, no download, no
@@ -619,7 +718,15 @@ def qualify(m: Materialized, *, today: Optional[date] = None,
     **candidate** Instance for review, never a runtime input.
     """
     today = today or date.today()
-    definitional = {**DEFINITIONAL_GEOGRAPHIES, **(definitional or {})}
+    # The block is carried through whole, justifications included, so the
+    # candidate this emits is a document the loader accepts. Passing only the
+    # resolved geographies dropped the justifications, and the candidate then
+    # described substituted geographies while carrying no `substitutions` key
+    # to declare them -- which the loader refuses, correctly, as evidence
+    # attached to the wrong run.
+    block = dict(substitutions or {})
+    resolved = validate_substitutions(block) if block else {}
+    definitional = {**DEFINITIONAL_GEOGRAPHIES, **resolved}
     qualification: dict[str, Any] = {}
     geo: dict[str, str] = {}
 
@@ -800,6 +907,12 @@ def qualify(m: Materialized, *, today: Optional[date] = None,
         "staleness_bound_days": 45,
         "governs_run": GOVERNS_RUN_PLACEHOLDER,
     }
+    if block:
+        # Verbatim, justifications and all. An operator must be able to take
+        # this candidate, fill in `governs_run` (and any owner decision), and
+        # have it load -- without reconstructing by hand a block the tool
+        # already validated.
+        candidate["substitutions"] = block
     return {
         "kind": "stage1_qualification_candidate",
         "is_instance": False,
@@ -1767,20 +1880,32 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     try:
         if args.mode == "qualify":
-            substitutions: dict[str, str] = {}
+            substitutions: dict[str, Any] = {}
             if args.substitutions is not None:
                 try:
                     raw = json.loads(args.substitutions.read_text())
                 except (OSError, ValueError) as exc:
                     print(f"refused: substitutions file unreadable: {exc}")
                     return 2
+                if not isinstance(raw, dict):
+                    # A list, a string or a bare number. `.get` on it raises
+                    # AttributeError, which reached the operator as a traceback
+                    # rather than a refusal.
+                    print(f"refused: substitutions file must contain a JSON "
+                          f"object, got {type(raw).__name__}")
+                    return 2
+                # A non-dict `substitutions` value needs no guard here:
+                # `validate_substitutions` refuses anything that is not an
+                # object, with a message naming the problem, and the refusal is
+                # caught below. A second isinstance check would be unreachable.
+                candidate_block = raw.get("substitutions", raw)
                 try:
-                    substitutions = validate_substitutions(
-                        raw.get("substitutions", raw))
+                    validate_substitutions(candidate_block)
                 except InstanceRefused as exc:
                     print(f"refused: {exc}")
                     return 2
-            out = qualify(materialized, definitional=substitutions or None)
+                substitutions = candidate_block
+            out = qualify(materialized, substitutions=substitutions or None)
             args.out.parent.mkdir(parents=True, exist_ok=True)
             args.out.write_text(json.dumps(out, indent=2, sort_keys=False))
             print(f"candidate instance written to {args.out}")
