@@ -18,6 +18,7 @@ import importlib.util
 import json
 import os
 import sys
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -787,17 +788,27 @@ _MOUNT_LABELS = {
 
 
 class RootfsFetch:
-    """Serves a realistic rootfs matrix on query_range and totals on query."""
+    """Serves a realistic rootfs matrix on query_range and totals on query.
+
+    Matches on the *decoded* `query` parameter. Matching raw URL text silently
+    fails for anything containing PromQL punctuation: `urlencode` turns `{`
+    into `%7B`, so a needle like `fly_instance_filesystem_blocks{` can never
+    appear in the URL and its branch is dead. That is not hypothetical — this
+    fixture had exactly that bug, and the totals branch never ran while the
+    tests still passed on the fallback.
+    """
 
     def __init__(self, *, with_range: bool = True) -> None:
         self.with_range = with_range
         self.calls: list[dict[str, Any]] = []
+        self.matched_totals = 0
 
     def __call__(self, url: str, headers: dict[str, str], timeout: float) -> tuple[int, bytes]:
         self.calls.append({"url": url, "headers": dict(headers), "timeout": timeout})
-        is_range = "query_range" in url
+        is_range = "query_range" in urllib.parse.urlparse(url).path
+        promql = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("query", [""])[0]
 
-        if is_range and "filesystem_blocks_free" in url:
+        if is_range and "fly_instance_filesystem_blocks_free{" in promql:
             if not self.with_range:
                 return 200, json.dumps(_EMPTY_VECTOR).encode()
             payload = {
@@ -821,20 +832,36 @@ class RootfsFetch:
         if is_range:
             return 200, json.dumps(_EMPTY_VECTOR).encode()
 
-        if "fly_instance_filesystem_blocks{" in url:
+        if "fly_instance_filesystem_blocks{" in promql:
+            self.matched_totals += 1
             return 200, json.dumps(_vector((dict(_MOUNT_LABELS), str(_TOTAL)))).encode()
 
         return 200, json.dumps(_vector((dict(_MOUNT_LABELS), "1"))).encode()
 
 
-def test_run_reports_a_transient_disk_summary(tmp_path: Path) -> None:
-    collector = _collector(fetch=RootfsFetch())
+def test_run_reports_a_transient_disk_summary() -> None:
+    fetch = RootfsFetch()
+    collector = _collector(fetch=fetch)
 
     report = collector.run()
 
     assert report["transient_disk"], "the collector computed no transient-disk summary"
     entry = report["transient_disk"][0]
     assert entry["status"] == "ok"
+    assert entry["delta_bytes"] == pytest.approx(_BASELINE_FREE - _MIN_FREE)
+    # Guards the fixture itself: if the totals branch stops matching, the
+    # generic fallback quietly supplies 1 and the pairing below is untested.
+    assert fetch.matched_totals == 1
+
+
+def test_transient_disk_entry_is_paired_with_the_total_for_its_mount() -> None:
+    """Total is context, not arithmetic — but it must still be the real total."""
+    collector = _collector(fetch=RootfsFetch())
+
+    entry = collector.run()["transient_disk"][0]
+
+    assert entry["total_bytes"] == pytest.approx(_TOTAL)
+    # ...and it must not have leaked into the delta.
     assert entry["delta_bytes"] == pytest.approx(_BASELINE_FREE - _MIN_FREE)
 
 
