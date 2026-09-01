@@ -283,3 +283,59 @@ def test_the_freeze_does_not_claim_an_instance():
             f"the freeze describes the absent Instance as incomplete work "
             f"({overreach!r}); it is deferred by design, not missing"
         )
+
+
+def test_the_definition_carries_the_rev_10_p95_qualification():
+    """§8 must not keep the pre-rev-10 wording while §7.2 has moved on.
+
+    The Definition says its criteria are carried forward from the governing
+    spec. Two documents stating the same criterion differently is the failure
+    mode that makes "which one governs?" an open question mid-run.
+    """
+    body = _normalised(DEFINITION)
+    assert ("p95 < 1 second on the deployed production Machine and selected "
+            "artifact, measured across the frozen corpus request mix") in body
+    assert "on real traffic" not in body, (
+        "the Definition still carries the pre-rev-10 'on real traffic' wording"
+    )
+
+
+def test_the_definition_excludes_non_machine_latency_from_the_percentile():
+    """A rehearsal's latency must not be able to reach the gate percentile.
+
+    Both tools record per-case latency in the same shape. Without an explicit
+    exclusion rule, the cheap mistake is to pool them -- and a workstation run
+    against a local artifact is faster than the Machine, so pooling would
+    flatter the gate.
+    """
+    body = _normalised(DEFINITION)
+    assert "controlled_synthetic" in body
+    assert "excluded from this percentile" in body
+
+
+def test_the_definition_decides_the_postcode_less_row_question():
+    """§11 left it undecided; leaving it so in code would settle it silently.
+
+    Skipping a returned row that carries no postcode means a source could
+    return arbitrary rows with the geography blanked and every containment
+    check would pass. The decision is recorded here, before Stage 1, rather
+    than living only in an implementation.
+    """
+    body = _normalised(DEFINITION)
+    assert "Decided before Stage 1 began" in body
+    assert "containment failure" in body
+    assert "rows_without_postcode" in body
+
+
+def test_the_definition_forbids_weakening_the_neighbour_volume_rule():
+    """The rule stays qualitative, and tooling refers rather than redefines."""
+    body = _normalised(DEFINITION)
+    assert "refers the judgement rather than deciding it" in body
+    assert "is forbidden" in body
+    assert "substitute with recorded justification" in body
+
+
+def test_the_definition_keeps_the_substitution_route_and_links_the_three():
+    body = _normalised(DEFINITION)
+    assert "may substitute with recorded justification" in body
+    assert "silently false" in body

@@ -142,6 +142,18 @@ because that boundary is a definitional choice rather than an artifact property,
 though an Instance must still qualify them and may substitute with recorded
 justification.
 
+**On S1's rule.** "Comparable or greater volume" is qualitative, and it stays
+qualitative: tooling checks it literally and, where an artifact falls below it,
+**refers the judgement rather than deciding it**. A threshold weaker than the
+words — an implementation quietly reading "comparable" as, say, a tenth — would
+be a downward revision of a frozen qualification rule made inside code, and is
+forbidden. The two ways to settle a below-threshold artifact are the ones this
+section already gives: accept it for that artifact with the decision recorded,
+or substitute with recorded justification. Substitution moves `B5`, `B50` and
+`B5 4` **together**: S3 and S9 are a sector inside S1's district and S2 is its
+neighbouring outcode, so moving one alone leaves the containment relation the
+baselines establish silently false.
+
 | # | Request shape | Intent | Instance qualifies by verifying |
 |---|---|---|---|
 | S1 | `postcode=B5`, `search_level=district` | contamination boundary | the longer neighbouring outcode holds comparable or greater volume |
@@ -284,8 +296,9 @@ in whichever source produced it.
 
 ## 8. Stage 1 exit criteria
 
-Carried forward from rev 7 §7.2 unchanged, and unchanged again by rev 8. All
-must hold. **No percentage threshold.**
+Carried forward from rev 7 §7.2, unchanged by rev 8, and changed by **rev 10 in
+exactly one criterion — p95 — before Stage 1 started**. All must hold. **No
+percentage threshold.**
 
 * **Zero unexplained false empties** — no case where the snapshot returns empty
   and live returns rows within coverage without a classified explanation.
@@ -296,7 +309,18 @@ must hold. **No percentage threshold.**
   blocks exit.
 * **Zero snapshot errors** in the agreed corpus — no unhandled exception, no
   typed error where the request was in-coverage and well-formed.
-* **p95 < 1 second** on real traffic.
+* **p95 < 1 second on the deployed production Machine and selected artifact,
+  measured across the frozen corpus request mix** (rev 10). The governing
+  §7.2 carries the reasoning; in short, organic `comps` traffic here is sparse
+  and uncontrolled, so a percentile over it measures the callers rather than the
+  adapter, while this corpus is risk-shaped, repeatable and attributable.
+  **The request mix is chosen, not observed** — a corpus run is never to be
+  described as organic traffic.
+
+  Latency recorded by any run that is **not** on the deployed Machine and the
+  selected artifact — a local rehearsal above all — is `controlled_synthetic`
+  and is excluded from this percentile. The two are separate fields in a report
+  and no code path merges them.
 
 ---
 
@@ -366,8 +390,9 @@ expected shape — before any production shadow.
    dropping an adapter the caller had installed, would leave that process
    quietly different afterwards.
 
-**A rehearsal produces no real-traffic sample.** It can satisfy neither the p95
-criterion nor any divergence criterion — there is no live arm to diverge from.
+**A rehearsal is neither a production-Machine measurement nor a comparison.** It
+runs on a workstation against a local artifact, so it satisfies no p95 criterion,
+and it has no live arm, so it satisfies no divergence criterion.
 Its output is labelled a rehearsal result and is **never filed as Stage 1
 evidence**.
 
@@ -394,7 +419,17 @@ and the Stage 1 run it governs.
   S13 and S14 use geographies with confirmed activity and an empty *filter*.
 * **Rows with no geography** — a small share of PPD rows carry no postcode, and
   so can never be returned by a geography-filtered query while still counting
-  toward snapshot totals. Whether any case should assert this is undecided.
+  toward snapshot totals. **Decided before Stage 1 began:** a row *returned* by
+  a geography-filtered query while carrying no usable postcode is a
+  **containment failure**, on whichever arm produced it, and blocks exit. This
+  is about what a query returns, not about rows sitting un-returnable in the
+  artifact — the limit above is unchanged.
+
+  Leaving it open in the implementation would have settled it in the weakest
+  direction: skipping such rows means a source could return arbitrary rows with
+  the postcode blanked and every containment check would still pass. Only the
+  count reaches a report (`rows_without_postcode`); the row is by definition the
+  one whose geography cannot be stated, so there is nothing else safe to record.
 * **All shape expectations are snapshot-side.** Live counts are unknown by
   construction; establishing them would require live queries, which are
   separately authorised.

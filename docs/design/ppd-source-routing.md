@@ -1,7 +1,32 @@
-# PPD source-routing and implementation specification (rev 9 — FROZEN)
+# PPD source-routing and implementation specification (rev 10 — FROZEN)
 
-**Status:** **FROZEN at rev 9.** Accepted. No further architecture work. Changes
+**Status:** **FROZEN at rev 10.** Accepted. No further architecture work. Changes
 to this document require a new decision round, not an edit in passing.
+
+**Revision 10** was authorised by the Stage 1 mechanism decision round, before
+Stage 1 started and before any Stage 1 evidence existed. It changes **one exit
+criterion and nothing else**: §7.2's "p95 < 1 second **on real traffic**" becomes
+"**p95 < 1 second on the deployed production Machine and selected artifact,
+measured across the frozen corpus request mix**".
+
+The reasoning is stated in full at §7.2 and is summarised here: organic `comps`
+traffic on `property-shared` is sparse and uncontrolled, so a percentile over it
+measures the callers rather than the adapter, and could not be reproduced or
+attributed; the frozen thirteen-case corpus is deliberately risk-shaped, is
+identical between runs, and is harder than organic traffic. The revision also
+avoids adding permanent request-path machinery — a queue, a worker thread,
+sampling configuration and a telemetry stream inside the serving application —
+that would exist solely to produce rollout evidence and would outlive the gate.
+
+**What is given up is stated rather than hidden: the request mix is chosen, not
+observed.** This is a gate revision made *before* Stage 1, not a claim that a
+corpus run is organic traffic, and not a licence to relabel one as the other.
+
+**No other requirement is relaxed.** The 30 s readiness target, the
+`bundle_bytes * 2.5` headroom rule, the other five Stage 1 exit criteria, the
+`comps`-only corpus scope, and G1a, G1b, G2 and G3 are unchanged.
+`PPD_SNAPSHOT_ENABLED` remains the sole authority to route and remains absent.
+Nothing is enabled, no image is deployed, and no artifact is replaced.
 
 **Revision 9** was authorised by the Phase D review round, after the partial-G1a
 measurement recorded in
@@ -1141,15 +1166,56 @@ explanation, not a similarity score.
   ordering differences. An unclassified divergence blocks exit.
 * **Zero snapshot errors in the agreed corpus** — no unhandled exception, no
   typed error where the request was in-coverage and well-formed.
-* **p95 < 1 second** on real traffic.
+* **p95 < 1 second on the deployed production Machine and selected artifact,
+  measured across the frozen corpus request mix.** *(Revised at rev 10, before
+  Stage 1 began — see below.)*
 
 The corpus is agreed before Stage 1 begins and is fixed for the duration.
 
-**A local rehearsal is not Stage 1.** Exercising the fixed corpus against an
-already-verified local artifact validates routing, coverage handling and
-divergence classification. It produces no real-traffic sample, so it **cannot
-satisfy** the p95 criterion or the divergence exit criteria, and must never be
-recorded as a Stage 1 result. Consistent with the rule above, live SPARQL is
+**Rev 10 revision of the p95 criterion — made before Stage 1 started, and not a
+claim that synthetic traffic is organic traffic.** Rev 9 and earlier wrote this
+criterion as "p95 < 1 second **on real traffic**", which presumed a
+traffic-sampling shadow: a fraction of arriving `comps` requests would be
+compared and timed in the request path.
+
+That is deliberately no longer the mechanism, for two reasons.
+
+* **Organic `comps` traffic on `property-shared` is sparse and uncontrolled.**
+  A percentile over whatever requests happen to arrive is dominated by whatever
+  geography and window a caller happened to choose, and by how few of them there
+  were. It measures the callers, not the adapter. Reaching a defensible sample
+  size would take weeks, and the resulting mix would still be unknown and
+  unrepeatable — a number nobody could reproduce or attribute.
+* **The frozen corpus is risk-shaped on purpose.** Its thirteen cases were
+  chosen to span the contamination boundary, the thin and dense extremes,
+  truncation at `limit`, the widest 120-month window, type and category
+  filtering, and the expected-empty cases. That mix is *harder* than organic
+  traffic, is identical between runs, and is attributable case by case. A p95
+  over it is a statement about the adapter.
+
+The measurement therefore moves to the frozen corpus, executed **on the deployed
+production Machine, against the selected artifact** — which is what makes it a
+production measurement rather than a workstation one. What is given up is stated
+plainly rather than papered over: **the request mix is chosen, not observed.**
+This is a gate revision, made before any Stage 1 evidence existed, and it must
+never be read as a claim that a corpus run is organic traffic. Nothing else in
+the exit criteria is relaxed.
+
+**It also removes permanent production machinery introduced solely for rollout
+evidence.** Traffic sampling would have required a background queue, a worker
+thread, sampling configuration and a telemetry stream inside the serving
+application — code that exists only to measure a rollout, in the request path of
+a live service, outliving the gate it was built for. An out-of-band comparator
+on the same Machine has none of that: it is not in any request path, so "shadow
+comparison never makes a live request fail" holds by construction rather than by
+careful coding.
+
+**A local rehearsal is still not Stage 1.** Exercising the fixed corpus against
+an already-verified local artifact validates routing, coverage handling and
+divergence classification. It runs on a workstation with no live arm, so it is
+neither a production-Machine measurement nor a divergence comparison, and it
+**cannot satisfy** the p95 criterion or the divergence exit criteria. It must
+never be recorded as a Stage 1 result. Consistent with the rule above, live SPARQL is
 diagnostic, not the numerical gold standard; any new live SPARQL call is a
 separately authorised action.
 
@@ -1360,8 +1426,9 @@ Then, each separately authorised:
    separate design, and every mutation remains separately authorised.**
 6. **Fixed shadow corpus** — *merged (PR #30), and frozen.* Agreed before Stage 1
    and frozen for its duration. Its **local rehearsal** — *merged (PR #31)* — is
-   a correctness exercise only: it **cannot satisfy** Stage 1's real-traffic p95
-   or divergence exit criteria. The artifact-bound corpus **Instance** is written
+   a correctness exercise only: it runs on a workstation with no live arm, so
+   it **cannot satisfy** Stage 1's production-Machine p95 or divergence exit
+   criteria. The artifact-bound corpus **Instance** is written
    when the Stage 1 artifact is selected, and has not been.
 7. **Rollout gates** — G1a (`property-shared`, 2 GB), G1b (`propertydata`,
    512 MB), G2 (verified worker count, or one worker pinned) and G3

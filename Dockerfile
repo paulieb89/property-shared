@@ -33,6 +33,19 @@ COPY property_core ./property_core
 # CMD; the app never imports it. One file only -- not tools/ or property_cli/.
 COPY tools/ppd_snapshot/boot_only_verify.py ./boot_only_verify.py
 
+# Stage 1 shadow comparison (docs/ops/ppd-stage1-shadow-runbook.md). Same
+# out-of-band contract as the verifier above: never imported by the app, never
+# wired into CMD, and refusing to do anything unless PPD_SHADOW_COMPARE_ENABLED
+# is explicitly set for the invocation.
+#
+# Three named files, not `tools/`. The comparator needs the frozen corpus
+# definition, and the definition is shared with the local rehearsal so that the
+# two tools cannot drift apart -- copying one without the other would ship a
+# comparator that cannot import its own corpus. Nothing else from `tools/`
+# (the build, packaging and release pipeline) belongs in a serving image.
+COPY tools/ppd_snapshot/__init__.py tools/ppd_snapshot/corpus.py \
+     tools/ppd_snapshot/stage1_shadow.py ./tools/ppd_snapshot/
+
 EXPOSE 8080
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

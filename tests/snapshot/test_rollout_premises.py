@@ -360,7 +360,7 @@ def test_nothing_in_the_correction_relaxed_a_requirement():
 
 def test_a_local_rehearsal_is_not_recorded_as_a_stage_1_result():
     normalised = _normalised(SPEC)
-    assert "A local rehearsal is not Stage 1" in normalised
+    assert "A local rehearsal is still not Stage 1" in normalised
     assert "cannot satisfy" in normalised and "p95" in normalised
 
 
@@ -439,7 +439,7 @@ def test_the_changelog_still_records_the_sizing_correction():
 # Rev 8 -- the corpus-acceptance and artifact-distribution decision round
 # ---------------------------------------------------------------------------
 
-def test_the_specification_declares_revision_9_and_a_revision_note():
+def test_the_specification_declares_revision_10_and_a_revision_note():
     """History is appended, never overwritten.
 
     A revision that replaced its predecessor's note would make the document's
@@ -448,10 +448,11 @@ def test_the_specification_declares_revision_9_and_a_revision_note():
     """
     body = _text(SPEC)
     head = body.splitlines()[0]
-    assert "rev 9" in head and "FROZEN" in head, head
+    assert "rev 10" in head and "FROZEN" in head, head
     normalised = _normalised(SPEC)
-    assert "**Revision 9**" in normalised, "rev 9 landed without a revision note"
-    for earlier in ("**Revision 8**", "**Revision 7**", "**Revision 6**"):
+    assert "**Revision 10**" in normalised, "rev 10 landed without a revision note"
+    for earlier in ("**Revision 9**", "**Revision 8**", "**Revision 7**",
+                    "**Revision 6**"):
         assert earlier in normalised, (
             f"{earlier} was overwritten; revision notes accumulate, they do not "
             f"replace each other"
@@ -719,3 +720,80 @@ def test_the_lock_wait_versus_grace_period_question_is_recorded_not_resolved():
     assert "deliberately does not resolve it" in normalised
     for number in ("420 s", "60 s (`property-shared`)", "30 s (`propertydata`)"):
         assert number in normalised, f"G2's open question no longer cites {number}"
+
+
+# ---------------------------------------------------------------------------
+# Rev 10 -- the Stage 1 mechanism decision round
+# ---------------------------------------------------------------------------
+
+def test_revision_10_relaxed_no_requirement_but_the_one_it_names():
+    """Rev 10 moves *where* p95 is measured. It must move nothing else.
+
+    A round whose whole purpose is to change an exit criterion is exactly where
+    a second one gets softened in passing, because the diff already touches the
+    criteria list and one more line there looks like part of the same edit.
+    """
+    normalised = _normalised(SPEC)
+    for requirement in (
+        "30 s readiness target",
+        "bundle_bytes * 2.5",
+        "Zero unexplained false empties",
+        "Zero geography contamination",
+        "100% field equality on shared transaction IDs",
+        "Every divergence classified",
+        "Zero snapshot errors",
+        "p95 < 1 second",
+        "Passing G1a authorises neither `propertydata` nor Stage 3",
+        "blocking G2 if the deployed count exceeds one",
+    ):
+        assert requirement in normalised, (
+            f"rev 10 relaxed a requirement it had no authority to touch: "
+            f"{requirement!r}"
+        )
+
+
+def test_the_p95_criterion_names_the_machine_and_the_artifact():
+    """The revised criterion is only meaningful if it says where it was measured.
+
+    "p95 < 1 second" on its own is satisfiable by a workstation run against a
+    local artifact, which is precisely the reading the rehearsal paragraph
+    exists to forbid. The qualification is the criterion.
+    """
+    normalised = _normalised(SPEC)
+    assert ("p95 < 1 second on the deployed production Machine and selected "
+            "artifact, measured across the frozen corpus request mix") in normalised, (
+        "the p95 criterion no longer names the Machine, the artifact and the "
+        "request mix it is measured over"
+    )
+
+
+def test_the_revision_does_not_claim_a_corpus_run_is_organic_traffic():
+    """The honest half of the revision, and the half most likely to be dropped.
+
+    A later editor tidying this section could remove the concession and leave a
+    criterion that reads as though it were measured on real users. The whole
+    justification for the change is that it says out loud what it gave up.
+    """
+    normalised = _normalised(SPEC)
+    assert "the request mix is chosen, not observed" in normalised.lower(), (
+        "the specification no longer concedes that the corpus mix is chosen "
+        "rather than observed"
+    )
+    assert "not a claim that synthetic traffic is organic traffic" in normalised, (
+        "the specification no longer states that this is a gate revision rather "
+        "than a relabelling of synthetic traffic as organic"
+    )
+
+
+def test_the_revision_records_that_it_was_made_before_stage_1():
+    """A gate revision made *after* seeing evidence is a different act entirely.
+
+    Rev 10 is defensible only because no Stage 1 evidence existed when it was
+    written. If that ordering stops being recorded, the revision stops being
+    distinguishable from moving the goalposts.
+    """
+    normalised = _normalised(SPEC)
+    assert ("before Stage 1 started and before any Stage 1 evidence existed"
+            in normalised), (
+        "the specification no longer records that rev 10 preceded Stage 1"
+    )

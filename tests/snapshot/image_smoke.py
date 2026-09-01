@@ -47,6 +47,56 @@ def fixture(root):
     (root / "current.json").write_text(json.dumps({"current_manifest": "manifest.json"}))
 
 
+def stage1(target):
+    """Invoke the Stage 1 comparator inside the built image, flag off.
+
+    Reading the Dockerfile proves nothing about whether the files landed, the
+    package imports on this platform, or the CLI wires up -- and the one thing
+    that must hold on a serving image is that the comparator does NOTHING
+    unless it is deliberately enabled. So this actually runs it.
+
+    Only the API image carries the comparator; `propertydata` is out of Stage 1
+    scope and must not have gained it.
+    """
+    root = Path(os.getcwd())
+    present = (root / "tools" / "ppd_snapshot" / "stage1_shadow.py").is_file()
+    if target != "api":
+        assert not present, (
+            "the propertydata image carries the Stage 1 comparator; Stage 1 is "
+            "property-shared only and propertydata must stay untouched")
+        print(json.dumps({"image": target, "mode": "stage1", "passed": True,
+                          "comparator_present": False}))
+        return
+    assert present, "the API image does not carry tools/ppd_snapshot/stage1_shadow.py"
+
+    helped = subprocess.run(
+        [sys.executable, "-m", "tools.ppd_snapshot.stage1_shadow", "--help"],
+        capture_output=True, text=True, cwd=root)
+    assert helped.returncode == 0, helped.stderr
+    assert "qualify" in helped.stdout and "compare" in helped.stdout, helped.stdout
+
+    # Default off: with the flag absent it must refuse, exit 2, and never reach
+    # an adapter -- even though this image has DuckDB installed and the app on
+    # this Machine may well have a snapshot materialized.
+    environment = {k: v for k, v in os.environ.items()
+                   if k != "PPD_SHADOW_COMPARE_ENABLED"}
+    for argv in (["qualify", "--out", "/tmp/should-not-exist.json"],
+                 ["compare", "--instance", "/tmp/nope.json",
+                  "--report", "/tmp/should-not-exist.json"]):
+        refused = subprocess.run(
+            [sys.executable, "-m", "tools.ppd_snapshot.stage1_shadow", *argv],
+            capture_output=True, text=True, cwd=root, env=environment)
+        assert refused.returncode == 2, (argv, refused.returncode, refused.stdout,
+                                         refused.stderr)
+        assert "refused" in refused.stdout, refused.stdout
+        assert "PPD_SHADOW_COMPARE_ENABLED" in refused.stdout, refused.stdout
+    assert not Path("/tmp/should-not-exist.json").exists(), (
+        "a refused invocation still wrote its output file")
+
+    print(json.dumps({"image": target, "mode": "stage1", "passed": True,
+                      "comparator_present": True, "default_off_exit_code": 2}))
+
+
 def child(root, mode, target):
     blocked = mode if mode in {"duckdb", "zstandard", "botocore"} else None
     if blocked:
@@ -145,6 +195,8 @@ def child(root, mode, target):
 if __name__ == "__main__":
     if sys.argv[1] == "child":
         child(Path(sys.argv[2]), sys.argv[3], sys.argv[4])
+    elif sys.argv[1] == "stage1":
+        stage1(sys.argv[2])
     else:
         import duckdb, zstandard, botocore
         print(json.dumps({"python": sys.version.split()[0], "duckdb": duckdb.__version__,
