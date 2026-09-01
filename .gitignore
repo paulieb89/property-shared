@@ -55,4 +55,5 @@ scripts/*
 !scripts/measure_mcp_quality.py
 !scripts/epc_token_test.py
 !scripts/rightmove_address_dump.py
+!scripts/fly_observability_snapshot.py
 !scripts/validate.sh
