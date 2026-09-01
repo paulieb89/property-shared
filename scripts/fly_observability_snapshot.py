@@ -22,13 +22,20 @@ without them:
   1. **`0` and "no data" are different answers.** An absent series is reported
      as `no_data` with a null value, never as zero. `fly_app_concurrency` has
      no series for this app, and a report that renders that as `0 connections`
-     is a lie about idle traffic.
+     is a lie about idle traffic. The same applies to NaN and ±Inf, which the
+     API really does return and which `float()` accepts without complaint: a
+     quantile over a histogram with no traffic is `NaN`, not a latency.
   2. **Partial failure stays partial.** One dead command or one unavailable
      series becomes a typed entry in the report; it never aborts the run and
      never silently becomes a number.
   3. **The token never lands anywhere.** It is read into memory, used only as
      an `Authorization` header, and scrubbed out of every string — including
      exception text — before anything is written or printed.
+
+What this collector does *not* measure: transient disk during a short
+operation. See `TRANSIENT_DISK_NOTE` — Fly stores one sample every 15 s, so
+these figures corroborate the verifier's own 0.2 s sampling rather than
+standing in for it.
 
 Usage:
     uv run python scripts/fly_observability_snapshot.py \\
@@ -40,12 +47,16 @@ Usage:
 
 Auth: reads `FLY_API_TOKEN` or `FLY_ACCESS_TOKEN` if set, otherwise captures
 `fly auth token` into memory. The token is never passed as a command argument.
+The `Authorization` scheme depends on the token type, so it is negotiated once
+per run and cached; `--auth-scheme` pins it. The negotiated scheme is recorded
+in the report, the token never is.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import string
 import subprocess
@@ -64,11 +75,21 @@ PROMETHEUS_BASE = "https://api.fly.io/prometheus"
 REDACTION_PLACEHOLDER = "<redacted>"
 DEFAULT_TIMEOUT = 30.0
 
-# flyctl authenticates with a macaroon. It is sent as `Authorization: FlyV1
-# <token>`; `Bearer <token>` is rejected with 401 "something went wrong
-# resolving organization", which reads like a permissions problem rather than
-# an auth-scheme one, so it is worth stating plainly here.
-AUTH_SCHEME = "FlyV1"
+# The Authorization scheme depends on the *token type*, not on the endpoint.
+# Verified 2026-09-01: a macaroon from `fly auth token` (fm2_...) is accepted
+# as `FlyV1 <token>` and rejected 401 as `Bearer <token>` — with the message
+# "something went wrong resolving organization", which reads like a
+# permissions problem rather than an auth-scheme one. Tokens minted by
+# `fly tokens create` take the other scheme. Only one token type has been
+# observed here, so the scheme is negotiated once per run and cached rather
+# than hard-coded; `--auth-scheme` overrides the negotiation.
+AUTH_SCHEMES: tuple[str, ...] = ("FlyV1", "Bearer")
+
+# Fly's stored resolution, measured on 2026-09-01 with
+# `timestamp(fly_instance_filesystem_blocks_free{...})` over a range query:
+# consecutive distinct sample timestamps are exactly 15 s apart, for both the
+# built-in instance metrics and the app's own scraped metrics.
+FLY_SCRAPE_INTERVAL_SECONDS = 15
 
 DASHBOARD_GAP_NOTE = (
     "No Grafana dashboard titled 'BOUCH MCP Fleet' is checked in anywhere under "
@@ -297,12 +318,25 @@ SERIES: tuple[MetricSpec, ...] = (
     MetricSpec(
         key="rootfs_free_bytes_min",
         title="Root filesystem free, minimum over window",
-        promql=f"min_over_time(({_FS_FREE})[$window:1m])",
+        promql=(
+            f"min_over_time(({_FS_FREE})[$window:{FLY_SCRAPE_INTERVAL_SECONDS}s])"
+        ),
         unit="bytes",
         derived=True,
         derivation=(
-            "min_over_time of (blocks_free * block_size) sampled at 1m over the window. "
-            "The low-water mark; peak transient disk use is total minus this."
+            "min_over_time of (blocks_free * block_size) on the same mount, sampled at "
+            f"{FLY_SCRAPE_INTERVAL_SECONDS}s (Fly's real stored resolution) over the "
+            "window. This is the free-space low-water mark, nothing more. The "
+            "additional space a run consumed is baseline_free - minimum_free on that "
+            "mount — see summarise_transient_disk(). It is NOT total_bytes - "
+            "minimum_free, which is total disk in use including the image and "
+            "everything already present."
+        ),
+        note=(
+            f"Corroborating only. At {FLY_SCRAPE_INTERVAL_SECONDS}s resolution a "
+            "materialisation lasting ~20 s yields one or two samples and its true peak "
+            "can fall entirely between them. The verifier's own 0.2 s directory "
+            "sampling is the authoritative transient-disk measurement."
         ),
     ),
     MetricSpec(
@@ -536,6 +570,10 @@ class SeriesResult:
     samples: list[dict[str, Any]] = field(default_factory=list)
     value: float | None = None
     error: str | None = None
+    # Why a no_data result is empty: `empty_result` (the query matched no
+    # series at all) or `non_finite` (series matched, but every value was NaN
+    # or ±Inf). The two mean different things to a reader.
+    no_data_reason: str | None = None
     kind: str = "instant"
     provenance: str = "fly_builtin"
     derived: bool = False
@@ -553,6 +591,7 @@ class SeriesResult:
             "value": self.value,
             "samples": self.samples,
             "error": self.error,
+            "no_data_reason": self.no_data_reason,
             "provenance": self.provenance,
             "derived": self.derived,
             "derivation": self.derivation,
@@ -579,6 +618,25 @@ def _labels(metric: dict[str, str]) -> dict[str, str]:
     return {k: v for k, v in metric.items() if k != "__name__"}
 
 
+def _coerce_finite(raw: Any) -> float | None:
+    """Parse a Prometheus sample value, rejecting anything non-finite.
+
+    Prometheus returns values as strings, and `float()` cheerfully accepts
+    `"NaN"`, `"+Inf"` and `"-Inf"` — all three of which the live API does emit
+    (`1/0` returns `+Inf`; a quantile over a histogram with no traffic returns
+    `NaN`). Reporting those as measurements is precisely the confusion this
+    script exists to prevent, and `json.dumps` would then write bare `NaN` /
+    `Infinity`, which is not valid JSON. `None` means "not a measurement".
+    """
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    return value
+
+
 def parse_instant_response(
     spec: MetricSpec, payload: dict[str, Any], promql: str | None = None
 ) -> SeriesResult:
@@ -591,16 +649,15 @@ def parse_instant_response(
 
     result = payload.get("data", {}).get("result", []) or []
     if not result:
-        return _from_spec(spec, promql, status="no_data")
+        return _from_spec(spec, promql, status="no_data", no_data_reason="empty_result")
 
     samples: list[dict[str, Any]] = []
     for entry in result:
         raw = entry.get("value")
         if not raw or len(raw) < 2:
             continue
-        try:
-            value = float(raw[1])
-        except (TypeError, ValueError):
+        value = _coerce_finite(raw[1])
+        if value is None:
             continue
         samples.append(
             {
@@ -611,7 +668,9 @@ def parse_instant_response(
         )
 
     if not samples:
-        return _from_spec(spec, promql, status="no_data")
+        # The query matched series but every value was NaN, ±Inf or
+        # unparseable — a different fact from "there is no such series".
+        return _from_spec(spec, promql, status="no_data", no_data_reason="non_finite")
 
     single = samples[0]["value"] if len(samples) == 1 else None
     return _from_spec(spec, promql, status="ok", samples=samples, value=single)
@@ -629,7 +688,7 @@ def parse_range_response(
 
     result = payload.get("data", {}).get("result", []) or []
     if not result:
-        return _from_spec(spec, promql, status="no_data")
+        return _from_spec(spec, promql, status="no_data", no_data_reason="empty_result")
 
     samples: list[dict[str, Any]] = []
     for entry in result:
@@ -637,10 +696,11 @@ def parse_range_response(
         for raw in entry.get("values", []) or []:
             if not raw or len(raw) < 2:
                 continue
-            try:
-                points.append((raw[0], float(raw[1])))
-            except (TypeError, ValueError):
+            value = _coerce_finite(raw[1])
+            if value is None:
+                # A single +Inf must not become the reported maximum.
                 continue
+            points.append((raw[0], value))
         if not points:
             continue
         values = [v for _, v in points]
@@ -656,8 +716,63 @@ def parse_range_response(
         )
 
     if not samples:
-        return _from_spec(spec, promql, status="no_data")
+        return _from_spec(spec, promql, status="no_data", no_data_reason="non_finite")
     return _from_spec(spec, promql, status="ok", samples=samples)
+
+
+TRANSIENT_DISK_NOTE = (
+    "Transient disk from this collector is corroborating evidence, never the "
+    "measurement. The additional space a run consumed on a mount is "
+    "baseline_free - minimum_free on that same mount; total_bytes - minimum_free "
+    "would instead report total disk in use at the low-water mark, including the "
+    f"image and everything already present. Fly stores samples every "
+    f"{FLY_SCRAPE_INTERVAL_SECONDS}s, so a ~20 s materialisation yields one or two "
+    "samples and its true peak can fall entirely between them. "
+    "/app/boot_only_verify.py samples the verifier directory every 0.2 s and is the "
+    "authoritative transient-disk measurement."
+)
+
+
+def summarise_transient_disk(
+    baseline_free_bytes: float | None,
+    minimum_free_bytes: float | None,
+    total_bytes: float | None = None,
+) -> dict[str, Any]:
+    """Describe the free-space delta across a window, with its limits.
+
+    `total_bytes` is accepted and echoed for context only; it deliberately
+    plays no part in the delta, because subtracting the low-water mark from
+    the filesystem size measures total occupancy rather than what a particular
+    run added.
+    """
+    if baseline_free_bytes is None or minimum_free_bytes is None:
+        delta: float | None = None
+        status = "no_data"
+    else:
+        delta = baseline_free_bytes - minimum_free_bytes
+        status = "ok"
+
+    return {
+        "status": status,
+        "baseline_free_bytes": baseline_free_bytes,
+        "minimum_free_bytes": minimum_free_bytes,
+        "total_bytes": total_bytes,
+        "delta_bytes": delta,
+        "method": (
+            "delta_bytes = baseline_free - minimum_free, on one mount. Not "
+            "total_bytes - minimum_free, which measures total occupancy."
+        ),
+        "resolution_caveat": (
+            f"Fly stores one sample per {FLY_SCRAPE_INTERVAL_SECONDS}s. A "
+            "materialisation lasting ~20 s produces one or two samples, so this "
+            "delta may understate the true peak or miss it entirely."
+        ),
+        "authoritative_source": (
+            "/app/boot_only_verify.py, which samples the verifier directory every "
+            "0.2 s, is the authoritative transient-disk measurement; this delta only "
+            "corroborates it."
+        ),
+    }
 
 
 def summarise_http_errors(error_count: float, total_count: float) -> dict[str, Any]:
@@ -774,6 +889,7 @@ class Collector:
         metrics_prefix: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         fly_binary: str = "fly",
+        auth_scheme: str | None = None,
     ) -> None:
         self.app = app
         self.org = org
@@ -786,6 +902,10 @@ class Collector:
         self.metrics_prefix = metrics_prefix or app.replace("-", "_")
         self.timeout = timeout
         self.fly_binary = fly_binary
+        # None until negotiated on the first Prometheus request, then cached
+        # for the rest of the run. An explicit scheme skips negotiation.
+        self.auth_scheme: str | None = auth_scheme
+        self._auth_failed: str | None = None
 
     # -- redaction helper ------------------------------------------------
 
@@ -798,19 +918,52 @@ class Collector:
         base = f"{PROMETHEUS_BASE}/{urllib.parse.quote(self.org)}/api/v1/{path}"
         return f"{base}?{urllib.parse.urlencode(params)}"
 
-    def _prom_get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
-        """Query Prometheus. Raises with a scrubbed message on any failure."""
-        url = self._prom_url(path, params)
+    def _attempt(
+        self, url: str, scheme: str
+    ) -> tuple[int, bytes]:
+        """One authenticated GET. The token exists only in this header."""
         headers = {
-            "Authorization": f"{AUTH_SCHEME} {self._token}",
+            "Authorization": f"{scheme} {self._token}",
             "Accept": "application/json",
         }
         try:
-            status, body = self.fetch(url, headers, self.timeout)
+            return self.fetch(url, headers, self.timeout)
         except Exception as exc:  # noqa: BLE001 - re-raised scrubbed below
             raise RuntimeError(
                 f"{type(exc).__name__}: {self._scrub(str(exc))}"
             ) from None
+
+    def _prom_get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Query Prometheus. Raises with a scrubbed message on any failure.
+
+        On the first request the Authorization scheme is negotiated: each
+        candidate is tried in turn until one is not rejected, and the winner
+        is cached for the rest of the run. Only an auth rejection (401/403)
+        advances to the next candidate — any other status is that request's
+        real answer and is reported as such.
+        """
+        url = self._prom_url(path, params)
+        if self._auth_failed:
+            # Every scheme was already rejected once. Re-probing per series
+            # would hammer the API with a token that cannot work.
+            raise RuntimeError(self._auth_failed)
+
+        candidates = [self.auth_scheme] if self.auth_scheme else list(AUTH_SCHEMES)
+
+        status, body = -1, b""
+        for scheme in candidates:
+            assert scheme is not None
+            status, body = self._attempt(url, scheme)
+            if status not in (401, 403):
+                self.auth_scheme = scheme
+                break
+        else:
+            detail = self._scrub(body.decode("utf-8", "replace"))[:200]
+            self._auth_failed = (
+                f"HTTP {status} from Prometheus for every Authorization scheme tried "
+                f"({', '.join(str(c) for c in candidates)}): {detail}"
+            )
+            raise RuntimeError(self._auth_failed)
 
         if status != 200:
             detail = self._scrub(body.decode("utf-8", "replace"))[:300]
@@ -951,7 +1104,7 @@ class Collector:
         logs = self.collect_logs()
         ended_at = _utc_now()
 
-        notes = [DASHBOARD_GAP_NOTE]
+        notes = [DASHBOARD_GAP_NOTE, TRANSIENT_DISK_NOTE]
         notes.extend(_interpretation_notes(series))
 
         return build_report(
@@ -965,6 +1118,7 @@ class Collector:
             logs=logs,
             notes=notes,
             metrics_prefix=self.metrics_prefix,
+            auth_scheme=self.auth_scheme,
         )
 
 
@@ -1116,6 +1270,7 @@ def build_report(
     logs: dict[str, Any] | None,
     notes: list[str],
     metrics_prefix: str | None = None,
+    auth_scheme: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the stable-schema report."""
     return {
@@ -1130,6 +1285,10 @@ def build_report(
             "started_at": started_at,
             "ended_at": ended_at,
             "prometheus_base": f"{PROMETHEUS_BASE}/{org}/api/v1",
+            # Which Authorization scheme the token turned out to need. The
+            # scheme is not a secret; the token it accompanied never appears.
+            "auth_scheme": auth_scheme,
+            "scrape_interval_seconds": FLY_SCRAPE_INTERVAL_SECONDS,
         },
         "series": [s.to_dict() for s in series],
         "commands": commands,
@@ -1236,7 +1395,14 @@ def render_markdown(report: dict[str, Any]) -> str:
         out.append("| Metric | Status | Detail |")
         out.append("|---|---|---|")
         for entry in problems:
-            detail = entry["error"] or entry["note"] or "no samples in window"
+            reason = entry.get("no_data_reason")
+            if reason == "non_finite":
+                prefix = "series matched but every value was NaN or ±Inf — not a reading. "
+            elif reason == "empty_result":
+                prefix = "query matched no series. "
+            else:
+                prefix = ""
+            detail = prefix + (entry["error"] or entry["note"] or "no samples in window")
             out.append(f"| {entry['title']} | `{entry['status']}` | {detail} |")
         out.append("")
 
@@ -1300,8 +1466,14 @@ def write_outputs(report: dict[str, Any], path: Path, force: bool = False) -> li
                     "another --output so the earlier report survives"
                 )
 
+    # allow_nan=False: Python would otherwise emit bare `NaN` / `Infinity`,
+    # which no strict JSON parser accepts. A non-finite value reaching here
+    # means the parser guards were bypassed, and that must fail loudly rather
+    # than produce a report that reads fine and cannot be loaded.
+    serialised = json.dumps(report, indent=2, sort_keys=False, allow_nan=False)
+
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(json.dumps(report, indent=2, sort_keys=False) + "\n")
+    json_path.write_text(serialised + "\n")
     md_path.write_text(render_markdown(report))
     return [json_path, md_path]
 
@@ -1337,6 +1509,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Prefix for app-exposed metrics (default: the app name with - replaced by _)",
     )
     parser.add_argument(
+        "--auth-scheme",
+        choices=("auto", *AUTH_SCHEMES),
+        default="auto",
+        help=(
+            "Authorization scheme for the Prometheus API. Default 'auto' tries "
+            f"{' then '.join(AUTH_SCHEMES)} and caches whichever the token accepts."
+        ),
+    )
+    parser.add_argument(
         "--force", action="store_true", help="Overwrite an existing report at --output"
     )
     parser.add_argument(
@@ -1362,6 +1543,7 @@ def main(argv: list[str] | None = None) -> int:
         include_logs=args.include_logs,
         metrics_prefix=args.metrics_prefix,
         timeout=args.timeout,
+        auth_scheme=None if args.auth_scheme == "auto" else args.auth_scheme,
     )
     report = collector.run()
     written = write_outputs(report, Path(args.output), force=args.force)

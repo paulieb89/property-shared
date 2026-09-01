@@ -490,6 +490,282 @@ def test_logs_when_requested_are_bounded_and_flagged_sensitive() -> None:
 
 
 # --------------------------------------------------------------------------
+# Auth scheme negotiation
+# --------------------------------------------------------------------------
+
+# Verified 2026-09-01: a macaroon from `fly auth token` (fm2_...) is accepted
+# with `FlyV1 <token>` and rejected 401 with `Bearer <token>`. That is one
+# token type. Tokens minted by `fly tokens create` are documented to take the
+# other scheme, so the scheme is negotiated rather than hard-coded.
+
+
+class SchemeAwareFetch:
+    """Accepts exactly one Authorization scheme; 401s every other."""
+
+    def __init__(self, accepts: str, payload: Any = None) -> None:
+        self.accepts = accepts
+        self.payload = payload if payload is not None else _EMPTY_VECTOR
+        self.calls: list[dict[str, Any]] = []
+
+    def schemes_tried(self) -> list[str]:
+        return [c["headers"]["Authorization"].split(" ", 1)[0] for c in self.calls]
+
+    def __call__(self, url: str, headers: dict[str, str], timeout: float) -> tuple[int, bytes]:
+        self.calls.append({"url": url, "headers": dict(headers), "timeout": timeout})
+        scheme = headers["Authorization"].split(" ", 1)[0]
+        if scheme != self.accepts:
+            return 401, b"something went wrong resolving organization"
+        return 200, json.dumps(self.payload).encode()
+
+
+def test_flyv1_scheme_is_tried_first_and_bearer_is_never_needed() -> None:
+    fetch = SchemeAwareFetch(accepts="FlyV1")
+    collector = _collector(fetch=fetch)
+
+    collector.collect_series()
+
+    assert "Bearer" not in fetch.schemes_tried()
+    assert collector.auth_scheme == "FlyV1"
+
+
+def test_bearer_token_is_negotiated_when_flyv1_is_rejected() -> None:
+    """A token type that needs Bearer must not fail the whole collection."""
+    fetch = SchemeAwareFetch(accepts="Bearer", payload=_vector(({"app": "x"}, "1")))
+    collector = _collector(fetch=fetch)
+
+    results = collector.collect_series()
+
+    assert collector.auth_scheme == "Bearer"
+    assert any(r.status == "ok" for r in results), "Bearer-only token must still collect"
+
+
+def test_negotiation_happens_once_not_per_series() -> None:
+    fetch = SchemeAwareFetch(accepts="Bearer", payload=_vector(({"app": "x"}, "1")))
+    collector = _collector(fetch=fetch)
+
+    collector.collect_series()
+
+    rejected = [c for c in fetch.calls if c["headers"]["Authorization"].startswith("FlyV1")]
+    assert len(rejected) == 1, f"negotiated per request instead of once: {len(rejected)} probes"
+
+
+def test_explicit_auth_scheme_is_honoured_without_negotiation() -> None:
+    fetch = SchemeAwareFetch(accepts="Bearer", payload=_vector(({"app": "x"}, "1")))
+    collector = _collector(fetch=fetch, auth_scheme="Bearer")
+
+    collector.collect_series()
+
+    assert set(fetch.schemes_tried()) == {"Bearer"}
+
+
+def test_report_records_the_negotiated_scheme_and_not_the_token() -> None:
+    fetch = SchemeAwareFetch(accepts="Bearer", payload=_vector(({"app": "x"}, "1")))
+    collector = _collector(fetch=fetch)
+
+    report = collector.run()
+
+    assert report["query"]["auth_scheme"] == "Bearer"
+    blob = json.dumps(report)
+    assert FAKE_TOKEN not in blob
+    assert "fm2_" not in blob
+
+
+def test_every_scheme_failing_is_a_typed_error_not_a_crash() -> None:
+    fetch = SchemeAwareFetch(accepts="NoSuchScheme")
+    collector = _collector(fetch=fetch)
+
+    results = collector.collect_series()
+
+    assert all(r.status == "error" for r in results)
+    assert any("401" in (r.error or "") for r in results)
+    assert all("fm2_" not in (r.error or "") for r in results)
+
+
+# --------------------------------------------------------------------------
+# Non-finite values must never be reported as measurements
+# --------------------------------------------------------------------------
+
+# Verified 2026-09-01 against the live API: `1/0` returns the literal "+Inf"
+# and `-1/0` returns "-Inf" as ordinary sample values. `float()` accepts
+# "NaN"/"+Inf" happily, and `json.dumps` then emits bare NaN/Infinity, which
+# is not valid JSON. A quantile with no traffic is the case that matters:
+# reporting NaN as a successful reading defeats the whole zero-vs-no_data point.
+
+
+@pytest.mark.parametrize("raw", ["NaN", "nan", "+Inf", "-Inf", "inf"])
+def test_non_finite_sample_is_no_data_not_a_measurement(raw: str) -> None:
+    spec = fos.MetricSpec(key="p95", title="p95", promql="q", unit="seconds")
+
+    result = fos.parse_instant_response(spec, _vector(({"app": "x"}, raw)))
+
+    assert result.status == "no_data"
+    assert result.value is None
+    assert result.samples == []
+    assert result.no_data_reason == "non_finite"
+
+
+def test_no_data_reason_distinguishes_an_empty_result_from_a_non_finite_one() -> None:
+    spec = fos.MetricSpec(key="k", title="T", promql="q", unit="u")
+
+    empty = fos.parse_instant_response(spec, _EMPTY_VECTOR)
+    non_finite = fos.parse_instant_response(spec, _vector(({"app": "x"}, "NaN")))
+
+    assert empty.no_data_reason == "empty_result"
+    assert non_finite.no_data_reason == "non_finite"
+
+
+def test_finite_samples_survive_alongside_discarded_non_finite_ones() -> None:
+    spec = fos.MetricSpec(key="k", title="T", promql="q", unit="u")
+    payload = _vector(
+        ({"status": "200"}, "42"),
+        ({"status": "500"}, "NaN"),
+        ({"status": "404"}, "7"),
+    )
+
+    result = fos.parse_instant_response(spec, payload)
+
+    assert result.status == "ok"
+    assert [s["labels"]["status"] for s in result.samples] == ["200", "404"]
+
+
+def test_range_series_of_only_non_finite_points_is_no_data() -> None:
+    spec = fos.MetricSpec(key="k", title="T", promql="q", unit="u", kind="range")
+    payload = {
+        "status": "success",
+        "data": {
+            "resultType": "matrix",
+            "result": [{"metric": {"app": "x"}, "values": [[1, "NaN"], [2, "+Inf"]]}],
+        },
+    }
+
+    result = fos.parse_range_response(spec, payload)
+
+    assert result.status == "no_data"
+    assert result.no_data_reason == "non_finite"
+
+
+def test_range_min_and_max_ignore_non_finite_points() -> None:
+    """A single +Inf must not become the reported maximum."""
+    spec = fos.MetricSpec(key="k", title="T", promql="q", unit="bytes", kind="range")
+    payload = {
+        "status": "success",
+        "data": {
+            "resultType": "matrix",
+            "result": [
+                {
+                    "metric": {"app": "x"},
+                    "values": [[1, "100"], [2, "+Inf"], [3, "50"], [4, "NaN"], [5, "80"]],
+                }
+            ],
+        },
+    }
+
+    result = fos.parse_range_response(spec, payload)
+
+    assert result.status == "ok"
+    sample = result.samples[0]
+    assert sample["min"] == 50.0
+    assert sample["max"] == 100.0
+    assert sample["last"] == 80.0
+    assert sample["points"] == 3
+
+
+def test_written_json_is_strict_and_would_reject_a_non_finite_value(tmp_path: Path) -> None:
+    """allow_nan=False, so a leak becomes a loud failure rather than bad JSON."""
+    report = fos.build_report(
+        app="a", org="o", window="30m",
+        started_at="2026-09-01T12:00:00Z", ended_at="2026-09-01T12:00:04Z",
+        series=[
+            fos.SeriesResult(
+                key="k", title="T", promql="q", unit="u",
+                status="ok", value=float("nan"), samples=[],
+            )
+        ],
+        commands=[], logs=None, notes=[],
+    )
+
+    with pytest.raises(ValueError) as caught:
+        fos.write_outputs(report, tmp_path / "bad.json", force=False)
+
+    # Must come from json.dumps(allow_nan=False), not incidentally from
+    # int(nan) inside the Markdown formatter.
+    assert "JSON compliant" in str(caught.value)
+
+
+def test_a_clean_report_still_writes_strict_json(tmp_path: Path) -> None:
+    report = fos.build_report(
+        app="a", org="o", window="30m",
+        started_at="2026-09-01T12:00:00Z", ended_at="2026-09-01T12:00:04Z",
+        series=[], commands=[], logs=None, notes=[],
+    )
+
+    out = tmp_path / "good.json"
+    fos.write_outputs(report, out, force=False)
+
+    text = out.read_text()
+    assert "NaN" not in text
+    assert "Infinity" not in text
+    json.loads(text)
+
+
+# --------------------------------------------------------------------------
+# Transient disk: the corroborating delta, and its limits
+# --------------------------------------------------------------------------
+
+
+def test_transient_disk_delta_is_baseline_minus_minimum() -> None:
+    """Total minus minimum would report the image and everything already there."""
+    summary = fos.summarise_transient_disk(
+        baseline_free_bytes=8_319_373_312.0,
+        minimum_free_bytes=8_040_263_440.0,
+        total_bytes=8_350_298_112.0,
+    )
+
+    assert summary["delta_bytes"] == pytest.approx(279_109_872.0)
+    # The wrong calculation would give total - minimum = 310,034,672.
+    assert summary["delta_bytes"] != pytest.approx(8_350_298_112.0 - 8_040_263_440.0)
+    assert "baseline_free" in summary["method"]
+    assert "minimum_free" in summary["method"]
+
+
+def test_transient_disk_summary_states_the_scrape_resolution_limit() -> None:
+    summary = fos.summarise_transient_disk(
+        baseline_free_bytes=100.0, minimum_free_bytes=50.0, total_bytes=200.0
+    )
+
+    assert str(fos.FLY_SCRAPE_INTERVAL_SECONDS) in summary["resolution_caveat"]
+    assert "authoritative" in summary["authoritative_source"].lower()
+    assert "boot_only_verify" in summary["authoritative_source"]
+
+
+def test_transient_disk_delta_is_none_when_an_input_is_missing() -> None:
+    summary = fos.summarise_transient_disk(
+        baseline_free_bytes=None, minimum_free_bytes=50.0, total_bytes=200.0
+    )
+
+    assert summary["delta_bytes"] is None
+    assert summary["status"] == "no_data"
+
+
+def test_rootfs_subquery_samples_at_the_real_scrape_interval() -> None:
+    """1m sampling would miss most of a ~20s materialisation."""
+    spec = next(s for s in fos.SERIES if s.key == "rootfs_free_bytes_min")
+
+    rendered = spec.render(app="property-shared", window="30m", prefix="property_shared")
+
+    assert f":{fos.FLY_SCRAPE_INTERVAL_SECONDS}s]" in rendered
+    assert ":1m]" not in rendered
+
+
+def test_no_derivation_claims_peak_disk_is_total_minus_minimum() -> None:
+    """Guard against the incorrect explanation coming back."""
+    for spec in fos.SERIES + fos.RANGE_SERIES:
+        blob = f"{spec.derivation} {spec.note}".lower()
+        assert "total minus this" not in blob
+        assert "total minus" not in blob
+
+
+# --------------------------------------------------------------------------
 # Log stream parsing
 # --------------------------------------------------------------------------
 
