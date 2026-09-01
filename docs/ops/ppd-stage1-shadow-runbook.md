@@ -98,6 +98,9 @@ Check two fields before going further:
   substituted geography with recorded justification, which is an authoring
   decision, not one this tool may make.
 
+**`qualify` exits non-zero on either of those**, so a scripted invocation cannot
+mistake an unusable candidate for success.
+
 ## Step 3 — review and commit the Instance
 
 Retrieve the candidate, review it, and commit it as **its own small
@@ -107,8 +110,11 @@ evidence/configuration change**:
 fly ssh sftp get /tmp/stage1-candidate-instance.json
 ```
 
-Set `governs_run` to the Stage 1 run it governs. Nothing artifact-specific is
-hard-coded in the tool, and the Instance is never read as runtime configuration.
+Set `governs_run` to the Stage 1 run it governs. The comparator **refuses** an
+Instance whose `governs_run` is blank or still carries the placeholder `qualify`
+wrote: unfilled, that field ties the Instance to nothing, and its whole purpose
+is to record that this review happened. Nothing artifact-specific is hard-coded
+in the tool, and the Instance is never read as runtime configuration.
 
 **A new artifact creates a new Instance and restarts Stage 1.** It never
 silently mutates the corpus.
@@ -137,9 +143,32 @@ Two passes:
 * **latency** — the snapshot arm alone, 13 cases × 30 repetitions = **390
   observations**, with **no further live calls at all**.
 
+`--latency-repeats` is deliberately not a way to lower the bar: the gate is
+defined at 30 repetitions per case, and a run producing fewer reports
+`insufficient_evidence`, never a pass.
+
 The run stops, and still writes its report, on any of: a failed `/v1/health`, a
-Machine `MemAvailable` below the floor, a snapshot error, the deadline, or an
-unclassified divergence.
+Machine `MemAvailable` below the floor, the deadline, an unclassified
+divergence, or a midnight crossing. A health, memory and deadline check also
+runs **after the final observation**, so a run cannot finish on a Machine that
+went bad during its last case and report a pass measured under conditions
+nobody checked.
+
+### Midnight
+
+`comps` derives its window from `date.today()`, so an observation straddling
+midnight describes a different window from the one recorded. Such an observation
+is **never skipped** — skipping it would leave a report claiming thirteen cases
+while holding twelve, and a latency sample short of its declared size, with the
+totals concealing both.
+
+The snapshot arm retries up to three times, because a local retry costs nothing.
+The live arm does not: a retry there is another request to HM Land Registry and
+the correctness pass is budgeted at one per case. A crossing that survives its
+retries **aborts the run and writes a failed report**. The two arms of a pair
+must also share a calendar date; if they do not, the pair compares two different
+windows and the run aborts — nothing downstream could detect that, since both
+arms look internally consistent on their own.
 
 ## Step 5 — close the evidence
 
@@ -155,7 +184,16 @@ verdict against each exit criterion, and anything the run could not decide.
 
 ## Reading the report
 
-`exit_criteria` carries one block per criterion. Three deserve care:
+`exit_criteria` carries one block per criterion, and **every one of them can
+only move the verdict towards failure**. There is no path by which a missing
+observation, an absent arm, a short sample or an unconfirmed classification
+produces a pass: absence is never evidence of compliance.
+
+`all_thirteen_cases_compared` is a precondition for most of the others. A report
+covering fewer than thirteen cases with two successful arms each is not a
+smaller Stage 1 result — it is not a Stage 1 result.
+
+Four blocks deserve particular care:
 
 **`field_equality_on_shared_ids`** — check `vacuous_comparison_shapes` before
 believing a pass. A shape listed there shared **no** transaction id while both
@@ -163,16 +201,49 @@ arms returned rows. "100% equality on shared ids" is trivially true over an
 empty intersection, which is exactly what a systematic difference in id spelling
 between the two sources would produce. The tool reports that as a failure.
 
-**`every_divergence_classified`** — `unclassified` must be `0`.
+**`every_divergence_classified`** — `unclassified` must be `0`. Note that
+**live truncation or ordering is classified only from captured live transport
+evidence** (`raw_bindings_returned` against `fetch_limit`). Page saturation on
+either side is recorded under `context_not_evidence` and classifies nothing: a
+live page at `limit` says our own presentation limit was reached, not that the
+upstream window was, and a saturated snapshot page says nothing about live at
+all. With no transport evidence a divergence stays unclassified and blocks exit,
+which is the fail-closed direction.
+
+**`no_unconfirmed_classifications`** — **blocking, not advisory.**
 `operator_confirmation_required` counts proposed **later A/C/D revisions**,
 which cannot be evidenced from these two sources: confirming one needs the
-monthly change records published after the build. They are proposed, never
-asserted.
+monthly change records published after the build. While any remain proposed,
+Stage 1 cannot exit on this report alone. Obtaining that external confirmation
+is a separately authorised step.
 
-**`p95_under_one_second`** — measured over the 390 snapshot-arm observations by
-nearest rank (sorted ascending, 1-based rank `ceil(p/100 × N)`; for N=390 and
-p=95 that is rank 371). An observed value, never an interpolation. `p50`, `p99`
-and `max` are reported for context; **only p95 < 1 s is the gate.**
+**`p95_under_one_second`** — carries a `verdict` of `pass`, `fail` or
+`insufficient_evidence`. It requires **exactly 390 observations and exactly 30
+for every case**; anything less is `insufficient_evidence`, never a pass, and
+`cases_short_of_the_required_repeats` names the shortfall. A total that happens
+to come out right while one case was measured 29 times and another 31 is also
+`insufficient_evidence` — the percentile would be weighted towards the
+over-sampled shapes, which is a different measurement from the one the gate is
+defined over. Computed by nearest rank (sorted ascending, 1-based rank
+`ceil(p/100 × N)`; for N=390 and p=95 that is rank 371) — an observed value,
+never an interpolation. `p50`, `p99` and `max` are reported for context;
+**only p95 < 1 s is the gate.**
+
+## Corpus invariants
+
+`corpus_invariants_hold` asserts Definition §3's universal invariants on the
+snapshot arm of every case — the coverage-clamp warning present,
+`sample_complete` false, `completeness_basis` null, `recent_period_provisional`
+true, answered by the snapshot — plus each shape's own intent: S1's geography
+isolation, S4's thin-market flag, S5 and S12 truncated at `limit`, S11 empty
+while still flagged provisional, S13 and S14 empty. These are structural, not
+situational: a case reporting `sample_complete: true` is a **defect**, not a
+divergence.
+
+The same assertions are used by the local rehearsal, from the one shared
+Definition module, so the two tools cannot check different things. Each arm also
+records `returned_date_from` / `returned_date_to` (Definition §9) — the bounds
+that show a window was honoured. Two dates are not a transaction.
 
 ## Hygiene
 

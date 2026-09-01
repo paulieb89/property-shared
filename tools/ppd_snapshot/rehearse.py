@@ -45,6 +45,7 @@ from tools.ppd_snapshot.corpus import (
     cases,
     derived_from_date,
     ids as _ids,
+    snapshot_invariants as _invariants,
     outcodes as _outcodes,
     sectors as _sectors,
     validate_artifact_identity,
@@ -429,41 +430,6 @@ def run_rehearsal(*, instance: RehearsalInstance, dist_dir: Path,
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=False))
     return report
-
-
-def _invariants(case: Case, response: Any, provenance: Any,
-                classes: list[str]) -> dict[str, bool]:
-    """The Definition's per-case assertions. Booleans only."""
-    inv: dict[str, bool] = {
-        # Universal (Definition section 3): comps never sends to_date.
-        "coverage_clamp_warning_present": "coverage_clamp" in classes,
-        "sample_complete_is_false": bool(
-            provenance is not None and provenance.sample_complete is False),
-        "completeness_basis_is_null": bool(
-            provenance is not None and provenance.completeness_basis is None),
-        "answered_by_snapshot": bool(
-            provenance is not None and "snapshot" in str(provenance.source).lower()),
-        # Universal, not per-shape: the resolved upper bound is always
-        # `coverage_to` and `provisional_from` never exceeds it, so every comps
-        # window intersects the provisional period (Definition section 3).
-        "provisional_flagged": bool(
-            provenance is not None and provenance.recent_period_provisional is True),
-    }
-
-    outcodes = _outcodes(response.transactions)
-    requested_outcode = case.postcode.split()[0].upper()
-    if case.search_level in {"district", "sector", "postcode"}:
-        inv["geography_isolation"] = all(o == requested_outcode for o in outcodes)
-
-    if case.shape in {"S5", "S12"}:
-        inv["truncated_at_limit"] = response.count == 50
-    if case.shape == "S4":
-        inv["thin_market_flagged"] = response.thin_market is True
-    if case.shape == "S11":
-        inv["empty_result"] = response.count == 0
-    if case.shape in {"S13", "S14"}:
-        inv["expected_empty"] = response.count == 0
-    return inv
 
 
 _SATURATED = (

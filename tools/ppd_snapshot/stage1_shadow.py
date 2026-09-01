@@ -66,6 +66,8 @@ from tools.ppd_snapshot.corpus import (
     derived_from_date,
     ids as _ids,
     outcodes as _outcodes,
+    returned_date_bounds,
+    snapshot_invariants,
     sectors as _sectors,
     validate_artifact_identity,
     validate_baselines,
@@ -107,6 +109,20 @@ THIN_MARKET_THRESHOLD = 5
 
 #: The residential default the corpus selects by omitting `property_type`.
 RESIDENTIAL_TYPES = ("F", "D", "S", "T")
+
+#: The frozen corpus is thirteen cases. A report covering fewer is not a
+#: smaller Stage 1 result; it is not a Stage 1 result.
+REQUIRED_CASES = 13
+
+#: The latency sample the gate is defined over: every case repeated this many
+#: times. Fixed rather than taken from the CLI, so a run cannot lower the bar
+#: it is measured against by passing a smaller number.
+REQUIRED_LATENCY_REPEATS = 30
+REQUIRED_LATENCY_OBSERVATIONS = REQUIRED_CASES * REQUIRED_LATENCY_REPEATS
+
+#: The placeholder `qualify` writes into a candidate Instance. An Instance still
+#: carrying it has not been through the review the field exists to record.
+GOVERNS_RUN_PLACEHOLDER = "<fill in: the Stage 1 run this Instance governs>"
 
 
 class ComparisonRefused(RuntimeError):
@@ -289,6 +305,20 @@ def load_instance(path: Path, materialized: Materialized) -> Stage1Instance:
         raise InstanceRefused(
             "qualification must record, per placeholder, the rule it satisfied; "
             "an Instance that does not say how it qualified qualifies nothing")
+
+    # `governs_run` is what ties this Instance to one Stage 1 run. Left blank or
+    # left as the placeholder `qualify` wrote, it ties it to nothing -- and an
+    # Instance nobody named a run for has not been through the review that field
+    # exists to record.
+    governs = raw["governs_run"]
+    if not isinstance(governs, str) or not governs.strip():
+        raise InstanceRefused(
+            "governs_run is blank; an Instance must name the Stage 1 run it "
+            "governs")
+    if governs.strip() == GOVERNS_RUN_PLACEHOLDER or governs.strip().startswith("<"):
+        raise InstanceRefused(
+            f"governs_run is still the placeholder {governs.strip()!r}; the "
+            f"candidate Instance has not been reviewed and named")
 
     # Binding. An Instance that is internally valid but describes a different
     # artifact would produce a report whose provenance is a fiction.
@@ -544,7 +574,7 @@ def qualify(m: Materialized, *, today: Optional[date] = None) -> dict[str, Any]:
         "qualified_at": today.isoformat(),
         "qualification": qualification,
         "staleness_bound_days": 45,
-        "governs_run": "<fill in: the Stage 1 run this Instance governs>",
+        "governs_run": GOVERNS_RUN_PLACEHOLDER,
     }
     return {
         "kind": "stage1_qualification_candidate",
@@ -663,10 +693,17 @@ def classify(*, only_live_months: dict[str, int], only_snapshot_months: dict[str
              live_truncation_evidenced: bool) -> dict[str, Any]:
     """Definition section 7's four classes, and nothing else.
 
-    Class 3 (**live truncation or ordering**) is only ever assigned on
-    evidence -- `raw_bindings_returned == fetch_limit`, or a page saturated at
-    `limit`. The Definition says so explicitly, because "the snapshot returned
-    more, so live must have truncated" is an assumption dressed as a finding.
+    Class 3 (**live truncation or ordering**) is assigned **only** from
+    captured live transport evidence -- `raw_bindings_returned` against
+    `fetch_limit`, which is a fact about what the upstream window returned.
+
+    Page saturation is deliberately NOT evidence, on either side. A live page
+    at `limit` says our own presentation limit was reached, not that the
+    upstream window was; a saturated *snapshot* page says nothing whatever
+    about live. Treating either as evidence is the "the snapshot returned more,
+    so live must have truncated" assumption wearing a taxonomy label, which is
+    exactly what the Definition forbids. Saturation is still recorded, as
+    context an operator may weigh -- but it cannot classify anything.
 
     Class 2 (**later A/C/D revision**) cannot be evidenced from these two
     sources at all: confirming it needs the monthly change records published
@@ -674,7 +711,10 @@ def classify(*, only_live_months: dict[str, int], only_snapshot_months: dict[str
     `operator_confirmation_required`.
     """
     prov = provisional_from or ""
-    truncation = live_truncation_evidenced or live_saturated or snapshot_saturated
+    # Captured transport evidence, and nothing else. With no evidence the
+    # divergence stays unclassified and blocks exit -- which is the fail-closed
+    # direction: an unexplained difference is a question, not a pass.
+    truncation = live_truncation_evidenced
 
     provisional_tail_lag = 0
     unclassified = 0
@@ -711,9 +751,14 @@ def classify(*, only_live_months: dict[str, int], only_snapshot_months: dict[str
         "unclassified": unclassified,
         "operator_confirmation_required": later_acd,
         "truncation_evidence": {
-            "live_raw_bindings_equals_fetch_limit": live_truncation_evidenced,
-            "live_page_saturated": live_saturated,
-            "snapshot_page_saturated": snapshot_saturated,
+            # The only thing that may classify class 3.
+            "live_raw_bindings_reached_fetch_limit": live_truncation_evidenced,
+            # Context for an operator, explicitly not evidence. Recorded so a
+            # reader can see saturation was considered and rejected as a basis.
+            "context_not_evidence": {
+                "live_page_saturated": live_saturated,
+                "snapshot_page_saturated": snapshot_saturated,
+            },
         },
     }
 
@@ -835,34 +880,66 @@ class RunLimits:
     stop_on_unclassified: bool = True
 
 
-def _observe(service: Any, case: Case) -> tuple[Any, str, float]:
-    """One comps call, with the calendar date it was taken on and its latency.
+#: Bounded retry for an observation that straddles midnight. Three, matching
+#: the local rehearsal, so the two tools behave the same way at the same
+#: boundary. A crossing is possible once a day at most; three attempts either
+#: clear it or prove something else is wrong.
+MIDNIGHT_ATTEMPTS = 3
 
-    The date is captured either side and compared by the caller: `comps`
-    derives its window from `date.today()`, so an observation straddling
-    midnight describes a different window from the one recorded.
+
+def _observe(service: Any, case: Case, *,
+             attempts: int = 1) -> tuple[Any, str, int, float]:
+    """One comps call, guaranteed to lie inside a single calendar date.
+
+    `comps` derives its window from `date.today()`, so an observation that
+    straddles midnight silently describes a different window from the one
+    recorded. Such an observation is **never skipped**: skipping it would leave
+    a report claiming thirteen cases while holding twelve, and a latency sample
+    short of its declared size. It is retried where retrying is free, and
+    otherwise it aborts the run.
+
+    `attempts` is 1 by default -- the caller decides whether a retry is
+    affordable. The snapshot arm can retry for nothing; the live arm cannot,
+    because a retry there is another request to HM Land Registry and the
+    correctness pass is budgeted at one per case.
     """
-    before = date.today()
-    started = time.monotonic()
-    response = service.comps(
-        postcode=case.postcode,
-        search_level=case.search_level,
-        months=case.months,
-        property_type=case.property_type,
-        transaction_category=case.transaction_category,
-        filter_outliers=False,
-        limit=LIMIT,
-        auto_escalate=True,
-    )
-    elapsed_ms = (time.monotonic() - started) * 1000.0
-    after = date.today()
-    if before != after:
-        raise MidnightCrossed(f"{case.shape}: observation straddled midnight")
-    return response, before.isoformat(), elapsed_ms
+    retries = 0
+    for _ in range(max(1, attempts)):
+        before = date.today()
+        started = time.monotonic()
+        response = service.comps(
+            postcode=case.postcode,
+            search_level=case.search_level,
+            months=case.months,
+            property_type=case.property_type,
+            transaction_category=case.transaction_category,
+            filter_outliers=False,
+            limit=LIMIT,
+            auto_escalate=True,
+        )
+        elapsed_ms = (time.monotonic() - started) * 1000.0
+        after = date.today()
+        if before == after:
+            return response, before.isoformat(), retries, elapsed_ms
+        retries += 1
+    raise MidnightCrossed(
+        f"{case.shape}: no same-date observation in {attempts} attempt(s); the "
+        f"window recorded for this case would not describe the query that ran",
+        retries=retries)
 
 
-class MidnightCrossed(RuntimeError):
-    """An observation could not be taken within one calendar date."""
+class MidnightCrossed(RunAborted):
+    """An observation could not be taken within one calendar date.
+
+    A subclass of `RunAborted`, deliberately: a crossing that survives its
+    retries stops the run and writes a failed report. It is never absorbed as
+    an exclusion, because a report that quietly dropped an observation is a
+    report whose totals do not mean what they say.
+    """
+
+    def __init__(self, message: str, *, retries: int = 0) -> None:
+        super().__init__(message)
+        self.retries = retries
 
 
 def _provenance_source(response: Any) -> Optional[str]:
@@ -885,6 +962,8 @@ def _arm_record(response: Any, case: Case, observed: str,
         "sectors_returned": _sectors(response.transactions),
         "warning_classes": _warning_classes(tuple(response.warnings or ())),
         "saturated_at_limit": response.count == LIMIT,
+        "returned_date_from": returned_date_bounds(response.transactions)[0],
+        "returned_date_to": returned_date_bounds(response.transactions)[1],
         "source": _provenance_source(response),
         "observed_at": observed,
         "derived_from_date": derived_from_date(date.fromisoformat(observed),
@@ -933,7 +1012,8 @@ def run_compare(*, instance: Stage1Instance, materialized: Materialized,
     snapshot_errors: list[dict[str, Any]] = []
     live_errors: list[dict[str, Any]] = []
     contamination: list[dict[str, Any]] = []
-    excluded = {"midnight": 0, "health": 0, "memory": 0}
+    excluded = {"health": 0, "memory": 0}
+    midnight = {"retries": 0, "unrecoverable": False, "pair_date_mismatches": 0}
     aborted: Optional[str] = None
     live_calls = 0
 
@@ -963,40 +1043,65 @@ def run_compare(*, instance: Stage1Instance, materialized: Materialized,
                 "artifact": dict(identity),
             }
 
+            # The snapshot arm may retry a midnight crossing: it costs nothing
+            # but a local query. The live arm may not -- a retry there is
+            # another request to HM Land Registry, and the correctness pass is
+            # budgeted at one per case. Either way a surviving crossing aborts.
             snap_response = None
             try:
-                snap_response, snap_observed, snap_ms = _observe(snapshot_service, case)
+                snap_response, snap_observed, retries, snap_ms = _observe(
+                    snapshot_service, case, attempts=MIDNIGHT_ATTEMPTS)
+                midnight["retries"] += retries
                 record["snapshot"] = _arm_record(snap_response, case,
                                                  snap_observed, snap_ms)
+                record["snapshot_invariants"] = snapshot_invariants(
+                    case, snap_response, getattr(snap_response, "provenance", None),
+                    record["snapshot"]["warning_classes"])
             except MidnightCrossed as exc:
-                excluded["midnight"] += 1
-                record["excluded"] = str(exc)
+                midnight["retries"] += exc.retries
+                midnight["unrecoverable"] = True
+                results.append(record)
+                raise
             except Exception as exc:  # noqa: BLE001 -- recorded, never propagated
                 snapshot_errors.append({"shape": case.shape,
                                         "error": f"{type(exc).__name__}: {exc}"})
                 record["snapshot_error"] = f"{type(exc).__name__}: {exc}"
 
             live_response = None
-            if live_calls < limits.max_live_per_case * len(corpus):
-                with LiveEvidenceCapture() as capture:
-                    try:
-                        live_calls += 1
-                        live_response, live_observed, live_ms = _observe(
-                            live_service, case)
-                        record["live"] = _arm_record(live_response, case,
-                                                     live_observed, live_ms)
-                        record["live"]["transport_evidence"] = dict(capture.last)
-                        record["live_truncation_evidenced"] = capture.truncation_evidenced
-                    except MidnightCrossed as exc:
-                        excluded["midnight"] += 1
-                        record["excluded"] = str(exc)
-                    except Exception as exc:  # noqa: BLE001
-                        live_errors.append({"shape": case.shape,
-                                            "error": f"{type(exc).__name__}: {exc}"})
-                        record["live_error"] = f"{type(exc).__name__}: {exc}"
-                time.sleep(limits.live_delay_seconds)
+            with LiveEvidenceCapture() as capture:
+                try:
+                    live_calls += 1
+                    live_response, live_observed, _, live_ms = _observe(
+                        live_service, case)
+                    record["live"] = _arm_record(live_response, case,
+                                                 live_observed, live_ms)
+                    record["live"]["transport_evidence"] = dict(capture.last)
+                    record["live_truncation_evidenced"] = capture.truncation_evidenced
+                except MidnightCrossed:
+                    midnight["unrecoverable"] = True
+                    results.append(record)
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    live_errors.append({"shape": case.shape,
+                                        "error": f"{type(exc).__name__}: {exc}"})
+                    record["live_error"] = f"{type(exc).__name__}: {exc}"
+            time.sleep(limits.live_delay_seconds)
 
             if snap_response is not None and live_response is not None:
+                # Both arms must describe the same day. `comps` derives its
+                # window from `date.today()`, so a pair straddling midnight is
+                # two different questions being compared as though they were
+                # one -- which no amount of downstream analysis can detect.
+                if record["snapshot"]["observed_at"] != record["live"]["observed_at"]:
+                    midnight["pair_date_mismatches"] += 1
+                    midnight["unrecoverable"] = True
+                    results.append(record)
+                    raise RunAborted(
+                        f"{case.shape}: the snapshot arm was observed on "
+                        f"{record['snapshot']['observed_at']} and the live arm on "
+                        f"{record['live']['observed_at']}; the pair straddles "
+                        f"midnight and compares two different windows")
+
                 record.update(_compare_arms(
                     case=case, live=live_response, snap=snap_response,
                     provisional_from=materialized.provisional_from,
@@ -1024,16 +1129,25 @@ def run_compare(*, instance: Stage1Instance, materialized: Materialized,
             _guard(f"latency/{repeat + 1}")
             for case in corpus:
                 try:
-                    _, _, elapsed = _observe(snapshot_service, case)
-                except MidnightCrossed:
-                    excluded["midnight"] += 1
-                    continue
+                    _, _, retries, elapsed = _observe(
+                        snapshot_service, case, attempts=MIDNIGHT_ATTEMPTS)
+                    midnight["retries"] += retries
+                except MidnightCrossed as exc:
+                    midnight["retries"] += exc.retries
+                    midnight["unrecoverable"] = True
+                    raise
                 except Exception as exc:  # noqa: BLE001
                     snapshot_errors.append({"shape": case.shape,
                                             "error": f"{type(exc).__name__}: {exc}"})
                     continue
                 latency_ms.append(elapsed)
                 per_case.setdefault(case.shape, []).append(elapsed)
+
+        # One last guard AFTER the final observation. Without it the run could
+        # complete its last case on a Machine that had already gone unhealthy
+        # or run out of memory, and report a clean pass measured under
+        # conditions nobody checked.
+        _guard("final")
     except RunAborted as exc:
         aborted = str(exc)
         latency_ms = locals().get("latency_ms", [])  # type: ignore[assignment]
@@ -1043,7 +1157,7 @@ def run_compare(*, instance: Stage1Instance, materialized: Materialized,
         instance=instance, identity=identity, limits=limits, results=results,
         latency_ms=latency_ms, per_case=per_case, snapshot_errors=snapshot_errors,
         live_errors=live_errors, contamination=contamination, excluded=excluded,
-        aborted=aborted, live_calls=live_calls)
+        midnight=midnight, corpus=corpus, aborted=aborted, live_calls=live_calls)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=False))
     return report
@@ -1102,9 +1216,16 @@ def _build_report(*, instance: Stage1Instance, identity: dict[str, Any],
                   snapshot_errors: list[dict[str, Any]],
                   live_errors: list[dict[str, Any]],
                   contamination: list[dict[str, Any]],
-                  excluded: dict[str, int], aborted: Optional[str],
+                  excluded: dict[str, int], midnight: dict[str, Any],
+                  corpus: list[Case], aborted: Optional[str],
                   live_calls: int) -> dict[str, Any]:
-    """The Stage 1 report, and its verdict against each exit criterion."""
+    """The Stage 1 report, and its verdict against each exit criterion.
+
+    Every criterion here can only move the verdict towards failure. There is no
+    path by which a missing observation, an absent arm, a short latency sample
+    or an unconfirmed classification produces a pass -- absence is never
+    evidence of compliance.
+    """
     unclassified = sum(r.get("classification", {}).get("unclassified", 0)
                        for r in results)
     confirmation = sum(
@@ -1117,20 +1238,76 @@ def _build_report(*, instance: Stage1Instance, identity: dict[str, Any],
                         for r in results)
     compared = [r for r in results if "diff" in r]
 
+    # -- completeness ---------------------------------------------------
+    expected = [c.shape for c in corpus]
+    missing_snapshot = [r["shape"] for r in results if "snapshot" not in r]
+    missing_live = [r["shape"] for r in results if "live" not in r]
+    never_reached = sorted(set(expected) - {r["shape"] for r in results})
+    complete = (len(compared) == REQUIRED_CASES
+                and len(results) == REQUIRED_CASES
+                and not missing_snapshot and not missing_live
+                and not never_reached and not live_errors and not snapshot_errors
+                and not midnight["unrecoverable"]
+                and not midnight["pair_date_mismatches"])
+
+    # -- corpus invariants (Definition section 3 and the case intents) ---
+    invariant_failures = [
+        {"shape": r["shape"],
+         "failed": sorted(k for k, v in r["snapshot_invariants"].items() if not v)}
+        for r in results
+        if r.get("snapshot_invariants")
+        and not all(r["snapshot_invariants"].values())]
+    invariants_checked = sum(len(r.get("snapshot_invariants", {})) for r in results)
+
+    # -- latency --------------------------------------------------------
     latency = latency_summary(latency_ms)
     p95 = latency["p95_ms"]
+    short_cases = sorted(
+        {shape for shape in expected
+         if len(per_case.get(shape, [])) != REQUIRED_LATENCY_REPEATS})
+    sample_complete = (latency["n"] == REQUIRED_LATENCY_OBSERVATIONS
+                       and not short_cases)
+    if not sample_complete:
+        latency_verdict = "insufficient_evidence"
+    elif p95 is not None and p95 < 1000.0:
+        latency_verdict = "pass"
+    else:
+        latency_verdict = "fail"
 
     criteria = {
+        "all_thirteen_cases_compared": {
+            "passed": complete,
+            "cases_recorded": len(results),
+            "cases_compared": len(compared),
+            "required": REQUIRED_CASES,
+            "cases_missing_snapshot_arm": missing_snapshot,
+            "cases_missing_live_arm": missing_live,
+            "cases_never_reached": never_reached,
+            "live_errors": len(live_errors),
+            "snapshot_errors": len(snapshot_errors),
+            "note": ("the frozen corpus is thirteen cases with two arms each; a "
+                     "report covering fewer is not a smaller Stage 1 result, it "
+                     "is not a Stage 1 result"),
+        },
+        "corpus_invariants_hold": {
+            "passed": not invariant_failures and complete,
+            "assertions_checked": invariants_checked,
+            "failures": invariant_failures,
+            "note": ("Definition section 3's universal invariants and each "
+                     "shape's intent, asserted on the snapshot arm; a case "
+                     "reporting sample_complete true is a defect, not a "
+                     "divergence"),
+        },
         "zero_unexplained_false_empties": {
-            "passed": not false_empties or unclassified == 0,
+            "passed": (not false_empties or unclassified == 0) and complete,
             "false_empty_shapes": false_empties,
             "note": ("a false empty is only a failure when it is unexplained; "
                      "these are checked against the classification below"),
         },
         "zero_geography_contamination": {
-            "passed": not contamination, "findings": contamination},
+            "passed": not contamination and complete, "findings": contamination},
         "field_equality_on_shared_ids": {
-            "passed": mismatch_rows == 0 and not vacuous,
+            "passed": mismatch_rows == 0 and not vacuous and complete,
             "mismatch_rows": mismatch_rows,
             "vacuous_comparison_shapes": vacuous,
             "note": ("a shape listed under vacuous_comparison_shapes shared no "
@@ -1139,20 +1316,37 @@ def _build_report(*, instance: Stage1Instance, identity: dict[str, Any],
                      "reported as a failure, not a pass"),
         },
         "every_divergence_classified": {
-            "passed": unclassified == 0, "unclassified": unclassified,
+            "passed": unclassified == 0 and complete, "unclassified": unclassified,
+            "note": "an unclassified divergence blocks exit",
+        },
+        "no_unconfirmed_classifications": {
+            # Blocking, not advisory. "Later A/C/D revision" is a PROPOSED
+            # class: confirming one needs the monthly change records published
+            # after the build, which this comparison cannot see. A verdict that
+            # passed while carrying proposals would be recording a guess as a
+            # result.
+            "passed": confirmation == 0,
             "operator_confirmation_required": confirmation,
             "note": ("later A/C/D revision cannot be evidenced from these two "
-                     "sources; it is proposed, not asserted, and the count "
-                     "above is what an operator must confirm"),
+                     "sources; while any remain proposed, Stage 1 cannot exit "
+                     "on this report alone -- external confirmation is a "
+                     "separately authorised step"),
         },
         "zero_snapshot_errors": {
             "passed": not snapshot_errors, "errors": snapshot_errors},
         "p95_under_one_second": {
-            "passed": p95 is not None and p95 < 1000.0,
+            "passed": latency_verdict == "pass",
+            "verdict": latency_verdict,
             "p95_ms": p95, "n": latency["n"],
+            "required_observations": REQUIRED_LATENCY_OBSERVATIONS,
+            "required_repeats_per_case": REQUIRED_LATENCY_REPEATS,
+            "cases_short_of_the_required_repeats": short_cases,
             "criterion": ("p95 < 1 second on the deployed production Machine "
                           "and selected artifact, measured across the frozen "
                           "corpus request mix (governing spec rev 10)"),
+            "note": ("a partial sample is insufficient_evidence, never a pass: "
+                     "a percentile over fewer observations than the gate is "
+                     "defined over is a different measurement"),
         },
     }
 
@@ -1190,6 +1384,7 @@ def _build_report(*, instance: Stage1Instance, identity: dict[str, Any],
             "live_calls_made": live_calls,
         },
         "excluded": dict(excluded),
+        "midnight": dict(midnight),
         "aborted": aborted,
         "cases_total": len(results),
         "cases_compared": len(compared),
@@ -1256,12 +1451,20 @@ def main(argv: Optional[list[str]] = None) -> int:
             out = qualify(materialized)
             args.out.parent.mkdir(parents=True, exist_ok=True)
             args.out.write_text(json.dumps(out, indent=2, sort_keys=False))
-            unqualified = out["unqualified_placeholders"]
             print(f"candidate instance written to {args.out}")
-            if unqualified:
-                print(f"UNQUALIFIED placeholders: {unqualified}")
-                return 1
-            return 0
+            # Non-zero on an unusable candidate. Printing a warning and exiting
+            # 0 would let a scripted run treat "these baselines contradict the
+            # relation they exist to establish" as success, and the refusal
+            # would then surface much later, at load, after the Instance had
+            # been authored and reviewed.
+            failed = False
+            if out["unqualified_placeholders"]:
+                print(f"UNQUALIFIED placeholders: {out['unqualified_placeholders']}")
+                failed = True
+            if not out["baselines_satisfy_their_relations"]:
+                print(f"BASELINES UNUSABLE: {out['baselines_refusal']}")
+                failed = True
+            return 1 if failed else 0
 
         try:
             instance = load_instance(args.instance, materialized)

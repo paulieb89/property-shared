@@ -282,3 +282,63 @@ def validate_artifact_identity(version: Any, digest: Any) -> tuple[str, str]:
     if not isinstance(digest, str) or not SHA256_RE.match(digest):
         raise InstanceRefused("bundle_sha256 is not a 64-character hex digest")
     return version, digest
+
+
+# ---------------------------------------------------------------------------
+# Per-case assertions -- Definition sections 3 and 9
+# ---------------------------------------------------------------------------
+
+def snapshot_invariants(case: Case, response: Any, provenance: Any,
+                        classes: list[str]) -> dict[str, bool]:
+    """The Definition's per-case assertions over a SNAPSHOT-arm response.
+
+    Shared by the local rehearsal and the Stage 1 comparator so that the two
+    check the same things. The universal block (section 3) is structural, not
+    situational: `comps` never sends `to_date`, so routing takes the clamp
+    branch unconditionally on every case, whatever the artifact, date or row
+    count. A case reporting `sample_complete: true` is a defect, not a
+    divergence.
+
+    Booleans only -- no id, address or price is reachable from the result.
+    """
+    inv: dict[str, bool] = {
+        # Universal (Definition section 3): comps never sends to_date.
+        "coverage_clamp_warning_present": "coverage_clamp" in classes,
+        "sample_complete_is_false": bool(
+            provenance is not None and provenance.sample_complete is False),
+        "completeness_basis_is_null": bool(
+            provenance is not None and provenance.completeness_basis is None),
+        "answered_by_snapshot": bool(
+            provenance is not None and "snapshot" in str(provenance.source).lower()),
+        # Universal, not per-shape: the resolved upper bound is always
+        # `coverage_to` and `provisional_from` never exceeds it, so every comps
+        # window intersects the provisional period (Definition section 3).
+        "provisional_flagged": bool(
+            provenance is not None and provenance.recent_period_provisional is True),
+    }
+
+    found = outcodes(response.transactions)
+    requested_outcode = case.postcode.split()[0].upper()
+    if case.search_level in {"district", "sector", "postcode"}:
+        inv["geography_isolation"] = all(o == requested_outcode for o in found)
+
+    if case.shape in {"S5", "S12"}:
+        inv["truncated_at_limit"] = response.count == LIMIT
+    if case.shape == "S4":
+        inv["thin_market_flagged"] = response.thin_market is True
+    if case.shape == "S11":
+        inv["empty_result"] = response.count == 0
+    if case.shape in {"S13", "S14"}:
+        inv["expected_empty"] = response.count == 0
+    return inv
+
+
+def returned_date_bounds(transactions: Any) -> tuple[Optional[str], Optional[str]]:
+    """The earliest and latest transfer date in a result. Bounds, never rows.
+
+    Definition section 9 requires the date bounds of returned rows to be
+    recorded: they are what shows a window was honoured, and two dates are not
+    a transaction.
+    """
+    dates = sorted(t.date for t in transactions if getattr(t, "date", None))
+    return (dates[0], dates[-1]) if dates else (None, None)

@@ -34,7 +34,6 @@ from property_core.models.ppd import PPDTransaction  # noqa: E402
 from property_core.provenance import TransportEvidence  # noqa: E402
 from tools.ppd_snapshot import stage1_shadow as s1  # noqa: E402
 from tools.ppd_snapshot.corpus import InstanceRefused, cases  # noqa: E402
-from tests.snapshot.rehearsal_fixtures import FORBIDDEN_IN_REPORT  # noqa: E402
 from tests.snapshot.snapshot_fixtures import build_snapshot, row  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
@@ -210,6 +209,17 @@ def test_production_still_answers_from_live_while_the_comparator_runs(materializ
 # A controllable live arm
 # ---------------------------------------------------------------------------
 
+def _request_key(kwargs) -> tuple:
+    """What distinguishes one frozen case from another on the wire.
+
+    Keyed on the whole request, not the postcode: S6 and S13 share `B5 7AA` and
+    differ only by `property_type`, so a postcode-keyed stub silently answers
+    one case with the other's rows.
+    """
+    return (kwargs["postcode"], kwargs["search_level"], kwargs["months"],
+            kwargs.get("property_type"), kwargs.get("transaction_category"))
+
+
 class FakeLive:
     """A live arm whose answers, failures and latency the test chooses.
 
@@ -232,7 +242,7 @@ class FakeLive:
         self.calls.append(kwargs)
         if self.raises is not None:
             raise self.raises
-        rows = self.per_shape.get(kwargs["postcode"], self.transactions)
+        rows = self.per_shape.get(_request_key(kwargs), self.transactions)
         return PPDCompsResponse(
             query=PPDCompsQuery(postcode=kwargs["postcode"],
                                 months=kwargs["months"],
@@ -536,25 +546,199 @@ def test_a_shared_id_with_a_differing_field_fails_the_equality_criterion(
 # Nothing identifying is ever persisted
 # ---------------------------------------------------------------------------
 
-def test_no_id_address_or_price_reaches_the_report(materialized, instance,
-                                                   tmp_path, monkeypatch):
-    """Ids and field values exist for one comparison, then are discarded.
+#: Every key the report is allowed to emit. Dynamic key spaces -- month
+#: buckets, shape names and compared-field names -- are subtracted before the
+#: comparison; see `_static_keys`.
+#:
+#: This is the assertion that actually protects the payload. A substring search
+#: over the serialised JSON cannot: it fires on "400000" inside a latency float
+#: while missing a genuinely new `transaction_ids` field whose values happen not
+#: to collide with the fixture. A key that can carry a row cannot appear here
+#: without someone adding it to this list on purpose.
+ALLOWED_KEYS = {
+    # document
+    "kind", "stage_1_evidence", "latency_sample_kind", "not_organic_traffic",
+    "definition", "artifact", "instance", "isolation", "limits", "excluded",
+    "midnight", "aborted", "cases_total", "cases_compared", "live_errors",
+    "latency", "exit_criteria", "passed", "cases", "note", "criterion",
+    # artifact identity
+    "snapshot_version", "bundle_sha256", "coverage_from", "coverage_to",
+    "provisional_from", "comparator_version",
+    # instance
+    "instance_kind", "qualified_at", "governs_run", "staleness_bound_days",
+    "aggregate_baselines", "baselines_are", "S1_full", "S3_full", "S9_full",
+    # isolation / limits / counters
+    "installed_into_server_state", "snapshot_routing_enabled",
+    "artifacts_downloaded", "snapshot_written_to", "live_delay_seconds",
+    "latency_repeats", "max_live_per_case", "deadline_seconds",
+    "min_available_memory_bytes", "live_calls_made", "health", "memory",
+    "retries", "unrecoverable", "pair_date_mismatches",
+    # per case
+    "shape", "intent", "request", "wire", "effective", "snapshot", "live",
+    "snapshot_error", "live_error", "snapshot_invariants", "diff",
+    "classification", "snapshot_false_empty", "live_truncation_evidenced",
+    "empty_id_intersection_with_rows_on_both_sides",
+    # request echo -- the geography ASKED FOR, never one returned
+    "postcode", "search_level", "months", "limit", "transaction_category",
+    "filter_outliers", "auto_escalate", "enrich_epc", "property_type", "address",
+    # an arm: aggregates, geography membership and provenance only
+    "count", "latency_ms", "thin_market", "outcodes_returned",
+    "sectors_returned", "warning_classes", "saturated_at_limit",
+    "returned_date_from", "returned_date_to", "source", "observed_at",
+    "derived_from_date", "resolved_to_date", "recent_period_provisional",
+    "sample_complete", "transport_evidence", "raw_bindings_returned",
+    "fetch_limit", "source_exhausted",
+    # invariants
+    "coverage_clamp_warning_present", "sample_complete_is_false",
+    "completeness_basis_is_null", "answered_by_snapshot", "provisional_flagged",
+    "geography_isolation", "truncated_at_limit", "thin_market_flagged",
+    "empty_result", "expected_empty",
+    # diff -- cardinalities, histograms and tallies
+    "only_live", "only_snapshot", "shared", "by_month", "count_delta",
+    "field_mismatches", "field_mismatch_rows", "field_mismatch_by_month",
+    "compared_fields",
+    # classification
+    "provisional_tail_lag", "later_acd_revision", "live_truncation_or_ordering",
+    "unclassified", "operator_confirmation_required", "truncation_evidence",
+    "live_raw_bindings_reached_fetch_limit", "context_not_evidence",
+    "live_page_saturated", "snapshot_page_saturated",
+    # verdict
+    "all_thirteen_cases_compared", "corpus_invariants_hold",
+    "zero_unexplained_false_empties", "zero_geography_contamination",
+    "field_equality_on_shared_ids", "every_divergence_classified",
+    "no_unconfirmed_classifications", "zero_snapshot_errors",
+    "p95_under_one_second", "cases_recorded", "required",
+    "cases_missing_snapshot_arm", "cases_missing_live_arm",
+    "cases_never_reached", "snapshot_errors", "assertions_checked", "failures",
+    "failed", "false_empty_shapes", "findings", "errors", "mismatch_rows",
+    # a contamination finding: which arm, and the outcodes it strayed into.
+    # Outcode granularity only -- never a unit postcode, never a row.
+    "arm", "unexpected_outcodes",
+    "vacuous_comparison_shapes", "verdict", "n", "p95_ms",
+    "required_observations", "required_repeats_per_case",
+    "cases_short_of_the_required_repeats",
+    # latency
+    "snapshot_arm", "per_case_ms", "p50_ms", "p99_ms", "max_ms", "method",
+}
 
-    The report is a file that gets pasted into a review. It carries counts,
-    month histograms, field-mismatch tallies and geography -- enough to
-    classify a divergence, and nothing that names a household's sale.
-    """
+SHAPE_NAMES = {c.shape for c in cases(GEOGRAPHIES)}
+#: Field names may legitimately appear as KEYS of `field_mismatches` and as
+#: VALUES of `compared_fields`. Naming which field differed is not disclosing
+#: what it differed to.
+FIELD_NAMES = set(s1.COMPARED_FIELDS)
+MONTH = __import__("re").compile(r"^\d{4}-\d{2}$")
+
+
+def _scalars(node, path="$"):
+    """Every scalar in the document, with the path it was reached by."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from _scalars(value, f"{path}.{key}")
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from _scalars(value, f"{path}[{index}]")
+    else:
+        yield path, node
+
+
+def _static_keys(node):
+    """Keys, minus the dynamic key spaces (months, shapes, field names)."""
+    found = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if not (MONTH.match(str(key)) or key in SHAPE_NAMES
+                    or key in FIELD_NAMES):
+                found.add(key)
+            found |= _static_keys(value)
+    elif isinstance(node, list):
+        for value in node:
+            found |= _static_keys(value)
+    return found
+
+
+@pytest.fixture
+def report_with_leaky_fixture_data(materialized, instance, tmp_path, monkeypatch):
+    """A completed report over rows carrying ids, streets, towns and prices."""
     monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
     live = FakeLive(transactions=[
         PPDTransaction(transaction_id="T-B57-A", postcode="B5 7AA",
-                       date="2026-05-01", price=210_000, street="HIGH STREET")])
+                       date="2026-05-01", price=210_000, street="HIGH STREET",
+                       town="BIRMINGHAM", paon="1", saon="FLAT 2")])
     _run(materialized, instance, tmp_path, monkeypatch, live=live,
          latency_repeats=1, stop_on_unclassified=False)
-    body = (tmp_path / "report.json").read_text()
-    for forbidden in FORBIDDEN_IN_REPORT:
-        assert forbidden not in body, f"the report leaked {forbidden!r}"
-    for forbidden in ("T-B57-000", "HIGH STREET", "200000", "999000"):
-        assert forbidden not in body, f"the report leaked {forbidden!r}"
+    return json.loads((tmp_path / "report.json").read_text())
+
+
+def test_the_report_schema_admits_no_field_that_could_carry_a_row(
+        report_with_leaky_fixture_data):
+    """Structural, not textual: no unreviewed key may appear at all.
+
+    Mutation: add `"only_live_ids": sorted(only_live)` to the diff and this
+    fails on the new key -- whether or not its values happen to collide with
+    anything a substring search was looking for.
+    """
+    unexpected = _static_keys(report_with_leaky_fixture_data) - ALLOWED_KEYS
+    assert not unexpected, (
+        f"the report emits un-reviewed key(s) {sorted(unexpected)}; every field "
+        f"capable of carrying transaction data must be added deliberately")
+
+
+def test_no_report_value_equals_a_transaction_identifier(
+        report_with_leaky_fixture_data):
+    """Exact equality against the fixture's identifying values.
+
+    Equality, never substring -- that distinction is the whole point. A latency
+    of 1.400000 ms contains the digits of a 400000 price and leaks nothing; a
+    value that IS "T-B57-A" leaks a transaction.
+    """
+    identifying = {"T-B57-A", "T-B57-000", "T-B50-A", "T-B56-D",
+                   "HIGH STREET", "BIRMINGHAM", "WEST MIDLANDS", "FLAT 2"}
+    for path, value in _scalars(report_with_leaky_fixture_data):
+        if isinstance(value, str):
+            assert value not in identifying, f"{path} leaked {value!r}"
+
+
+def test_no_price_reaches_the_report_as_a_value(report_with_leaky_fixture_data):
+    """Prices are compared in memory and never recorded.
+
+    Restricted to values inside `cases`, and excluding measured timings, so a
+    latency or a byte count can never be mistaken for a sale price -- the
+    false positive that failed CI on the previous text-matching version.
+    """
+    prices = {210_000, 999_000, 400_000, 300_000, 310_000, 320_000, 330_000}
+    prices |= {200_000 + n for n in range(30)}
+    for path, value in _scalars(report_with_leaky_fixture_data["cases"], "$.cases"):
+        if path.endswith("latency_ms"):
+            continue
+        assert value not in prices, f"{path} leaked the price {value!r}"
+
+
+def test_a_latency_float_sharing_digits_with_a_price_is_not_treated_as_a_leak():
+    """Regression: the exact false positive that failed CI on PR #51.
+
+    `"latency_ms": 1.400000000000001` made a substring search for "400000"
+    fire, and the test passed or failed on timing noise. A structural check
+    cannot express that mistake.
+    """
+    document = {"cases": [{"snapshot": {"latency_ms": 1.400000000000001,
+                                        "count": 3}}]}
+    values = [v for path, v in _scalars(document["cases"], "$.cases")
+              if not path.endswith("latency_ms")]
+    assert 400_000 not in values
+    assert all(isinstance(v, (int, float, str, bool)) or v is None for v in values)
+
+
+def test_field_names_may_appear_but_only_as_names(report_with_leaky_fixture_data):
+    """`field_mismatches` names which field differed; that is not disclosure.
+
+    The distinction a key allowlist has to get right: "price" as a KEY of the
+    mismatch tally is a field name, while "price" carrying 210000 would be the
+    sale. The first is required evidence, the second is forbidden.
+    """
+    for case in report_with_leaky_fixture_data["cases"]:
+        tally = case.get("diff", {}).get("field_mismatches", {})
+        assert set(tally) <= set(s1.COMPARED_FIELDS)
+        assert all(isinstance(v, int) for v in tally.values())
 
 
 def test_a_month_histogram_is_the_finest_granularity_recorded():
@@ -622,7 +806,9 @@ def test_the_report_labels_its_latency_as_the_corpus_mix_not_organic_traffic(
     report = s1._build_report(
         instance=instance, identity={}, limits=s1.RunLimits(), results=[],
         latency_ms=[1.0], per_case={}, snapshot_errors=[], live_errors=[],
-        contamination=[], excluded={}, aborted=None, live_calls=0)
+        contamination=[], excluded={},
+        midnight={"retries": 0, "unrecoverable": False, "pair_date_mismatches": 0},
+        corpus=cases(GEOGRAPHIES), aborted=None, live_calls=0)
     assert report["latency_sample_kind"] == "deployed_machine_frozen_corpus"
     assert "not a sample of organic traffic" in report["not_organic_traffic"]
 
@@ -900,3 +1086,464 @@ def test_process_state_fails_closed_even_if_the_routing_layer_were_permissive(
     finally:
         # Hand back an empty state without closing an adapter we do not own.
         state.install(None, None)
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: every one of these must make the TOP-LEVEL verdict false
+# ---------------------------------------------------------------------------
+#
+# Asserting a helper returns the right number is not the same as asserting the
+# report says "failed". The wiring between the two is where a gate silently
+# goes green: a criterion computed correctly and then not consulted, or
+# consulted and then overridden. Each test below reads `report["passed"]`.
+
+def _full_run(materialized, instance, tmp_path, monkeypatch, *, live=None,
+              repeats=s1.REQUIRED_LATENCY_REPEATS, snapshot_service=None,
+              **limit_kwargs):
+    """A run sized as the real gate defines it: 13 cases x 30 repetitions."""
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    monkeypatch.setattr(s1.time, "sleep", lambda *_: None)
+    limits = s1.RunLimits(live_delay_seconds=0.0, latency_repeats=repeats,
+                          stop_on_unclassified=False, **limit_kwargs)
+    return s1.run_compare(
+        instance=instance, materialized=materialized, limits=limits,
+        report_path=tmp_path / "report.json",
+        live_service=live if live is not None else FakeLive(),
+        snapshot_service=snapshot_service)
+
+
+@pytest.fixture
+def agreeing_live(materialized):
+    """A live arm that returns exactly what the snapshot holds, per case.
+
+    The only configuration in which a pass is even reachable -- so it is the
+    baseline every negative test below perturbs by one thing.
+    """
+    from property_core.ppd_service import PPDService
+
+    snapshot = PPDService(adapter=materialized.adapter)
+    per_shape = {}
+    for case in cases(GEOGRAPHIES):
+        request = dict(postcode=case.postcode, search_level=case.search_level,
+                       months=case.months, property_type=case.property_type,
+                       transaction_category=case.transaction_category)
+        response = snapshot.comps(filter_outliers=False, limit=50,
+                                  auto_escalate=True, **request)
+        per_shape[_request_key(request)] = list(response.transactions)
+    return FakeLive(per_shape=per_shape)
+
+
+def test_a_live_arm_error_makes_the_verdict_false(materialized, instance,
+                                                  tmp_path, monkeypatch):
+    """Item 1. A report is not allowed to pass while an arm failed."""
+    live = FakeLive(raises=RuntimeError("upstream exploded"))
+    report = _full_run(materialized, instance, tmp_path, monkeypatch,
+                       live=live, repeats=s1.REQUIRED_LATENCY_REPEATS)
+    assert report["exit_criteria"]["all_thirteen_cases_compared"]["passed"] is False
+    assert report["exit_criteria"]["all_thirteen_cases_compared"]["live_errors"] == 13
+    assert report["passed"] is False
+
+
+def test_a_missing_arm_makes_the_verdict_false(materialized, instance, tmp_path,
+                                               monkeypatch, agreeing_live):
+    """Item 1. `cases_compared != 13` blocks passage on its own."""
+    class OneShort:
+        def __init__(self, real):
+            self._real = real
+        def comps(self, **kwargs):
+            if kwargs["postcode"] == "B50":
+                raise RuntimeError("no snapshot answer for this case")
+            return self._real.comps(**kwargs)
+
+    from property_core.ppd_service import PPDService
+
+    report = _full_run(materialized, instance, tmp_path, monkeypatch,
+                       live=agreeing_live, repeats=1,
+                       snapshot_service=OneShort(
+                           PPDService(adapter=materialized.adapter)))
+    criterion = report["exit_criteria"]["all_thirteen_cases_compared"]
+    assert criterion["cases_compared"] < s1.REQUIRED_CASES
+    assert criterion["cases_missing_snapshot_arm"] == ["S2"]
+    assert criterion["passed"] is False
+    assert report["passed"] is False
+
+
+def test_a_short_latency_sample_is_insufficient_evidence_never_a_pass(
+        materialized, instance, tmp_path, monkeypatch, agreeing_live):
+    """Item 3. Fewer than 13 x 30 observations cannot pass the latency gate.
+
+    Mutation: compute the verdict from `p95 < 1000` alone and this run -- whose
+    latencies are microseconds -- flips straight to a pass on 13 observations.
+    """
+    report = _full_run(materialized, instance, tmp_path, monkeypatch,
+                       live=agreeing_live, repeats=1)
+    criterion = report["exit_criteria"]["p95_under_one_second"]
+    assert criterion["n"] == 13
+    assert criterion["required_observations"] == 390
+    assert criterion["verdict"] == "insufficient_evidence"
+    assert criterion["passed"] is False
+    assert report["passed"] is False
+
+
+def test_the_full_sample_is_exactly_thirteen_by_thirty(
+        materialized, instance, tmp_path, monkeypatch, agreeing_live):
+    """Item 3, the positive half: 390 observations, 30 for every case."""
+    report = _full_run(materialized, instance, tmp_path, monkeypatch,
+                       live=agreeing_live)
+    criterion = report["exit_criteria"]["p95_under_one_second"]
+    assert criterion["n"] == 390
+    assert criterion["cases_short_of_the_required_repeats"] == []
+    assert criterion["verdict"] in {"pass", "fail"}
+    per_case = report["latency"]["per_case_ms"]
+    assert len(per_case) == 13
+    assert all(v["n"] == 30 for v in per_case.values())
+
+
+def test_an_unconfirmed_revision_makes_the_verdict_false(
+        materialized, instance, tmp_path, monkeypatch, agreeing_live):
+    """Item 5. A proposed A/C/D revision blocks the verdict, never annotates it.
+
+    Mutation: drop `no_unconfirmed_classifications` from the criteria and this
+    report passes while carrying a classification nothing has confirmed.
+    """
+    # One shared id whose price differs, dated well before the provisional
+    # period -- the A/C/D signature, which this comparison cannot evidence.
+    old = "2019-05-01"
+    rows = [row("T-OLD-001", "B5 7AA", old, 250_000, property_type="F")]
+    build_snapshot(tmp_path / "art", rows, version="v20260828T194003Z")
+    opened = s1.open_materialized(tmp_path / "art")
+    try:
+        path = tmp_path / "i.json"
+        raw = _instance_dict(opened)
+        raw["governs_run"] = "negative-test"
+        path.write_text(json.dumps(raw))
+        bound = s1.load_instance(path, opened)
+        live = FakeLive(transactions=[
+            PPDTransaction(transaction_id="T-OLD-001", postcode="B5 7AA",
+                           date=old, price=999_111, property_type="F",
+                           estate_type="L", transaction_category="A",
+                           new_build=False)])
+        report = _full_run(opened, bound, tmp_path, monkeypatch, live=live,
+                           repeats=1)
+    finally:
+        opened.adapter.close()
+    criterion = report["exit_criteria"]["no_unconfirmed_classifications"]
+    assert criterion["operator_confirmation_required"] >= 1
+    assert criterion["passed"] is False
+    assert report["passed"] is False
+
+
+def test_a_broken_corpus_invariant_makes_the_verdict_false(
+        materialized, instance, tmp_path, monkeypatch, agreeing_live):
+    """Item 9. Section 3's universal invariants are enforced, not just recorded.
+
+    `sample_complete: true` on a comps case is a defect, not a divergence.
+    Mutation: record the invariants without consulting them in the verdict and
+    this passes with a broken structural guarantee.
+    """
+    real = s1.snapshot_invariants
+
+    def broken(case, response, provenance, classes):
+        result = real(case, response, provenance, classes)
+        if case.shape == "S3":
+            result["sample_complete_is_false"] = False
+        return result
+
+    monkeypatch.setattr(s1, "snapshot_invariants", broken)
+    report = _full_run(materialized, instance, tmp_path, monkeypatch,
+                       live=agreeing_live, repeats=1)
+    criterion = report["exit_criteria"]["corpus_invariants_hold"]
+    assert criterion["passed"] is False
+    assert criterion["failures"], "a broken invariant was not reported"
+    assert criterion["failures"][0]["shape"] == "S3"
+    assert "sample_complete_is_false" in criterion["failures"][0]["failed"]
+    assert report["passed"] is False
+
+
+def test_the_report_records_returned_date_bounds_for_both_arms(
+        materialized, instance, tmp_path, monkeypatch, agreeing_live):
+    """Item 9. Definition section 9 requires the date bounds of returned rows.
+
+    Two dates are not a transaction, and they are what shows a window was
+    honoured.
+    """
+    report = _full_run(materialized, instance, tmp_path, monkeypatch,
+                       live=agreeing_live, repeats=1)
+    non_empty = [c for c in report["cases"] if c["snapshot"]["count"] > 0]
+    assert non_empty
+    for case in non_empty:
+        for arm in ("snapshot", "live"):
+            assert case[arm]["returned_date_from"] is not None, (case["shape"], arm)
+            assert case[arm]["returned_date_to"] is not None, (case["shape"], arm)
+            assert case[arm]["returned_date_from"] <= case[arm]["returned_date_to"]
+
+
+def test_a_midnight_crossing_aborts_with_a_written_failed_report(
+        materialized, instance, tmp_path, monkeypatch):
+    """Item 2. Never silently skipped.
+
+    An observation that straddles midnight describes a different window from
+    the one recorded. Skipping it would leave a report claiming thirteen cases
+    while holding twelve and a latency sample short of its declared size --
+    both of which the totals would conceal. Mutation: swallow `MidnightCrossed`
+    into an exclusion counter and this run reports a clean thirteen.
+    """
+    real_today = date.today
+    flips = iter([real_today(), real_today() + timedelta(days=1)] * 40)
+
+    class _AlwaysCrossing:
+        today = staticmethod(lambda: next(flips))
+        fromisoformat = staticmethod(date.fromisoformat)
+
+    monkeypatch.setattr(s1, "date", _AlwaysCrossing)
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    monkeypatch.setattr(s1.time, "sleep", lambda *_: None)
+    report = s1.run_compare(
+        instance=instance, materialized=materialized,
+        limits=s1.RunLimits(live_delay_seconds=0.0, latency_repeats=1,
+                            stop_on_unclassified=False),
+        report_path=tmp_path / "report.json",
+        live_service=FakeLive(), snapshot_service=None)
+    assert report["aborted"], "a surviving midnight crossing did not abort the run"
+    assert report["midnight"]["unrecoverable"] is True
+    assert report["midnight"]["retries"] >= 1, "the bounded retry never ran"
+    assert report["passed"] is False
+    assert (tmp_path / "report.json").is_file(), (
+        "the run aborted without writing the failed report")
+
+
+def test_the_snapshot_arm_retries_a_crossing_before_giving_up(materialized):
+    """Item 2. The documented bounded retry, on the arm where it is free."""
+    real_today = date.today
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        # Cross on the first observation's second read, then settle.
+        return real_today() + timedelta(days=1) if calls["n"] == 2 else real_today()
+
+    from property_core.ppd_service import PPDService
+    import tools.ppd_snapshot.stage1_shadow as module
+
+    original = module.date
+    try:
+        class _Date:
+            today = staticmethod(flaky)
+            fromisoformat = staticmethod(original.fromisoformat)
+        module.date = _Date
+        case = cases(GEOGRAPHIES)[0]
+        _, observed, retries, _ = module._observe(
+            PPDService(adapter=materialized.adapter), case,
+            attempts=module.MIDNIGHT_ATTEMPTS)
+    finally:
+        module.date = original
+    assert retries == 1, "the crossing was not retried"
+    assert observed
+
+
+def test_arms_observed_on_different_days_abort_rather_than_compare(
+        materialized, instance, tmp_path, monkeypatch):
+    """Item 2. A pair straddling midnight compares two different windows.
+
+    Nothing downstream can detect this: both arms look internally consistent,
+    and the diff between them is just wrong. Mutation: drop the pair-date check
+    and the run compares a snapshot window against a live window one day apart
+    and reports the difference as a divergence.
+    """
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    monkeypatch.setattr(s1.time, "sleep", lambda *_: None)
+    real = s1._arm_record
+
+    def shifted(response, case, observed, latency_ms):
+        record = real(response, case, observed, latency_ms)
+        # Only the live arm is moved, so the pair disagrees.
+        if getattr(response, "provenance", None) is not None and \
+                "snapshot" not in str(response.provenance.source).lower():
+            record["observed_at"] = (
+                date.fromisoformat(observed) + timedelta(days=1)).isoformat()
+        return record
+
+    monkeypatch.setattr(s1, "_arm_record", shifted)
+    report = s1.run_compare(
+        instance=instance, materialized=materialized,
+        limits=s1.RunLimits(live_delay_seconds=0.0, latency_repeats=1,
+                            stop_on_unclassified=False),
+        report_path=tmp_path / "report.json",
+        live_service=FakeLive(), snapshot_service=None)
+    assert report["aborted"] and "straddles midnight" in report["aborted"]
+    assert report["midnight"]["pair_date_mismatches"] == 1
+    assert report["passed"] is False
+
+
+# ---------------------------------------------------------------------------
+# Item 4: saturation is context, never evidence
+# ---------------------------------------------------------------------------
+
+def test_page_saturation_alone_cannot_classify_live_truncation():
+    """Item 4. Neither side's saturated page is evidence about the live window.
+
+    A live page at `limit` says our own presentation limit was reached, not
+    that the upstream window was. A saturated snapshot page says nothing about
+    live at all. Mutation: OR either flag back into the evidence test and these
+    divergences become "explained" without a single transport fact.
+    """
+    for live_saturated, snapshot_saturated in ((True, False), (False, True),
+                                               (True, True)):
+        result = s1.classify(
+            only_live_months={"2019-05": 2}, only_snapshot_months={"2019-06": 1},
+            mismatch_months={}, provisional_from="2026-04-01",
+            live_saturated=live_saturated, snapshot_saturated=snapshot_saturated,
+            live_truncation_evidenced=False)
+        assert result["live_truncation_or_ordering"] == 0, (
+            live_saturated, snapshot_saturated)
+        assert result["unclassified"] == 3
+
+
+def test_saturation_is_still_recorded_as_context(materialized):
+    """Considered and rejected as a basis -- visibly, so a reader can tell."""
+    result = s1.classify(
+        only_live_months={}, only_snapshot_months={}, mismatch_months={},
+        provisional_from="2026-04-01", live_saturated=True,
+        snapshot_saturated=True, live_truncation_evidenced=False)
+    context = result["truncation_evidence"]["context_not_evidence"]
+    assert context["live_page_saturated"] is True
+    assert context["snapshot_page_saturated"] is True
+    assert result["truncation_evidence"][
+        "live_raw_bindings_reached_fetch_limit"] is False
+
+
+def test_transport_evidence_comes_from_the_captured_live_call():
+    """Item 4. The evidence is `raw_bindings_returned` against `fetch_limit`."""
+    capture = s1.LiveEvidenceCapture()
+    capture.last = {"raw_bindings_returned": 50, "fetch_limit": 50}
+    assert capture.truncation_evidenced is True
+    capture.last = {"raw_bindings_returned": 12, "fetch_limit": 50}
+    assert capture.truncation_evidenced is False
+    capture.last = {"raw_bindings_returned": None, "fetch_limit": None}
+    assert capture.truncation_evidenced is False
+
+
+# ---------------------------------------------------------------------------
+# Item 6: qualify exit codes, and governs_run
+# ---------------------------------------------------------------------------
+
+def test_qualify_exits_non_zero_when_the_baselines_are_unusable(
+        tmp_path, monkeypatch):
+    """Item 6. Printing a warning and exiting 0 lets a script call it success."""
+    # No B5 4 rows at all, so S3_full == S9_full == 0 and the relation fails.
+    build_snapshot(tmp_path, [row("T-B57-1", "B5 7AA", "2026-05-04", 200_000)],
+                   version="v20260828T194003Z")
+    monkeypatch.setenv(s1.SHADOW_COMPARE_ENABLED_ENV, "1")
+    code = s1.main(["qualify", "--cache-dir", str(tmp_path),
+                    "--out", str(tmp_path / "candidate.json")])
+    assert code == 1
+    written = json.loads((tmp_path / "candidate.json").read_text())
+    assert written["baselines_satisfy_their_relations"] is False
+    assert written["baselines_refusal"]
+
+
+@pytest.mark.parametrize("governs", ["", "   ", s1.GOVERNS_RUN_PLACEHOLDER])
+def test_a_blank_or_unchanged_governs_run_is_refused(materialized, tmp_path,
+                                                     governs):
+    """Item 6. The field ties an Instance to one run; unfilled, it ties nothing.
+
+    A candidate still carrying the placeholder has not been through the review
+    the field exists to record.
+    """
+    path = _write(tmp_path, materialized, governs_run=governs)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "governs_run" in str(exc.value)
+
+
+def test_the_candidate_instance_carries_the_placeholder_qualify_writes(
+        materialized):
+    """The two halves of the same rule: what qualify writes is what load refuses."""
+    candidate = s1.qualify(materialized)["candidate_instance"]
+    assert candidate["governs_run"] == s1.GOVERNS_RUN_PLACEHOLDER
+
+
+# ---------------------------------------------------------------------------
+# Item 7: a guard after the final observation
+# ---------------------------------------------------------------------------
+
+def test_a_guard_runs_after_the_final_observation(materialized, instance,
+                                                  tmp_path, monkeypatch):
+    """Item 7. Otherwise a run can finish on a Machine nobody re-checked.
+
+    Health is fine for every observation and fails only afterwards. Without a
+    closing guard the report is a clean pass measured under conditions that had
+    already gone bad.
+    """
+    monkeypatch.setattr(s1.time, "sleep", lambda *_: None)
+    calls = {"n": 0}
+
+    def health(url, timeout=5.0):
+        calls["n"] += 1
+        # Healthy for every guard the observations need; unhealthy only for the
+        # extra one that can exist solely at the end.
+        return (True, "200") if calls["n"] <= 13 + 1 else (False, "503")
+
+    monkeypatch.setattr(s1, "health_ok", health)
+    report = s1.run_compare(
+        instance=instance, materialized=materialized,
+        limits=s1.RunLimits(live_delay_seconds=0.0, latency_repeats=1,
+                            stop_on_unclassified=False),
+        report_path=tmp_path / "report.json",
+        live_service=FakeLive(), snapshot_service=None)
+    assert report["aborted"] and "health" in report["aborted"]
+    assert report["passed"] is False
+
+
+def test_the_final_guard_is_reached_on_an_otherwise_clean_run(
+        materialized, instance, tmp_path, monkeypatch, agreeing_live):
+    """The closing guard exists and is called with its own stage name."""
+    seen: list[str] = []
+    monkeypatch.setattr(s1.time, "sleep", lambda *_: None)
+
+    def health(url, timeout=5.0):
+        seen.append(url)
+        return (True, "200")
+
+    monkeypatch.setattr(s1, "health_ok", health)
+    s1.run_compare(
+        instance=instance, materialized=materialized,
+        limits=s1.RunLimits(live_delay_seconds=0.0, latency_repeats=1,
+                            stop_on_unclassified=False),
+        report_path=tmp_path / "report.json",
+        live_service=agreeing_live, snapshot_service=None)
+    # 13 correctness guards + 1 latency-repeat guard + 1 final guard.
+    assert len(seen) == 15
+
+
+def test_a_correct_total_with_one_short_case_is_still_insufficient(instance):
+    """Item 3. 390 observations is not the same as 30 for every case.
+
+    A total that happens to come out right can hide a case measured 29 times
+    and another measured 31 -- and the p95 would then be weighted towards
+    whichever shapes were over-sampled, which is a different measurement from
+    the one the gate is defined over.
+
+    Mutation: check only `n == 390` and drop the per-case test, and this
+    skewed sample reports a pass.
+    """
+    shapes = [c.shape for c in cases(GEOGRAPHIES)]
+    per_case = {shape: [1.0] * s1.REQUIRED_LATENCY_REPEATS for shape in shapes}
+    per_case[shapes[0]] = [1.0] * (s1.REQUIRED_LATENCY_REPEATS - 1)
+    per_case[shapes[1]] = [1.0] * (s1.REQUIRED_LATENCY_REPEATS + 1)
+    latency_ms = [v for values in per_case.values() for v in values]
+    assert len(latency_ms) == s1.REQUIRED_LATENCY_OBSERVATIONS
+
+    report = s1._build_report(
+        instance=instance, identity={}, limits=s1.RunLimits(), results=[],
+        latency_ms=latency_ms, per_case=per_case, snapshot_errors=[],
+        live_errors=[], contamination=[], excluded={},
+        midnight={"retries": 0, "unrecoverable": False, "pair_date_mismatches": 0},
+        corpus=cases(GEOGRAPHIES), aborted=None, live_calls=0)
+    criterion = report["exit_criteria"]["p95_under_one_second"]
+    assert criterion["n"] == s1.REQUIRED_LATENCY_OBSERVATIONS
+    assert criterion["verdict"] == "insufficient_evidence"
+    assert criterion["passed"] is False
+    assert sorted(criterion["cases_short_of_the_required_repeats"]) == sorted(
+        [shapes[0], shapes[1]])
+    assert report["passed"] is False
