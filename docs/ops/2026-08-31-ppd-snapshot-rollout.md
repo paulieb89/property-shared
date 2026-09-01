@@ -506,6 +506,37 @@ which has not been measured — but no application-startup measurement can be
 faster than the materialization it contains. Any plan that assumes a 30 s cold
 boot needs to be revisited before enablement.
 
+**The measurement was taken on a depleted CPU burst balance, and that is the
+production-representative condition.** `fly_instance_cpu_balance` traces the
+Machine restart, not the verifier, as the consumer:
+
+```
+05:38:28   25,742
+05:38:58    4,544   (-21,198)   <- the restart itself
+05:39:28    4,708              <- verifier run starts
+05:40:28    4,551
+```
+
+The v136 restart burned 21,198 credits a full minute *before* the run began.
+The verifier then executed its entire 36.7 s materialization at a balance of
+roughly 4,500-4,900 against a pre-restart peak of ~25,700 — that is, at
+throttled baseline CPU on a `shared-cpu-1x` — consuming only ~490 credits
+itself. CPU busy peaked at 69.9% during the run. The balance recovers at
+~299/min, so ~60 minutes to regain the peak.
+
+This matters for how the figure is used. In production the snapshot boot runs
+inside the application lifespan, immediately after Machine start — precisely
+when the restart has just consumed the burst balance. **The throttled
+condition measured here is therefore the realistic one, and re-measuring on a
+credit-restored Machine would produce an optimistic number that does not
+correspond to a real cold boot.** No such re-measurement was taken, and the
+36.7 s figure stands as the production-representative sample.
+
+It also identifies an untested lever: if CPU credit rather than network
+bandwidth is the dominant constraint on the cold path, a larger or
+dedicated-CPU Machine could change these timings materially. That has not been
+measured and is not claimed here.
+
 **On `warnings: []`.** The artifact's `coverage_to` of 2026-06-30 was 63 days
 old on the measurement date, beyond the `FRESHNESS_WARNING_DAYS = 45`
 threshold. No warning appears here because that threshold is applied in
