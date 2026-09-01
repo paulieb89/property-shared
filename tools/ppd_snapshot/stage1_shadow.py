@@ -369,23 +369,33 @@ def _cross_check_measurements(qualification: dict[str, Any],
 
     # Derived, so recomputed rather than trusted. A ratio edited to clear the
     # literal rule while the counts stayed put is exactly what this catches.
-    expected_ratio = round((neighbour_rows / s1_rows) if s1_rows else 0.0, 4)
+    #
+    # Two ratios, deliberately. The EXACT one decides comparability; the
+    # rounded one exists only to validate the four-decimal field the candidate
+    # records for a human to read. Deciding from the rounded value puts a
+    # rounding boundary inside a deployment gate: 20,000 rows against 20,001 is
+    # 0.99995, which is not "comparable or greater" -- and rounds to 1.0. The
+    # gate would then disagree with `qualify`, refusing a candidate that
+    # correctly said `false` and accepting a hand-edited `true` that skips the
+    # owner decision entirely.
+    exact_ratio = (neighbour_rows / s1_rows) if s1_rows else 0.0
+    expected_display_ratio = round(exact_ratio, 4)
     recorded_ratio = round(
         _required_number(s1_entry, "measured_neighbour_ratio", "S1_district"), 4)
-    if recorded_ratio != expected_ratio:
+    if recorded_ratio != expected_display_ratio:
         raise InstanceRefused(
             f"qualification[S1_district].measured_neighbour_ratio is "
             f"{recorded_ratio}, but {neighbour_rows} / {s1_rows} is "
-            f"{expected_ratio}; a derived field must follow from the counts "
-            f"recorded beside it")
+            f"{expected_display_ratio}; a derived field must follow from the "
+            f"counts recorded beside it")
 
     expected_comparable = bool(s1_rows > 0
-                               and expected_ratio >= NEIGHBOUR_COMPARABLE_RATIO)
+                               and exact_ratio >= NEIGHBOUR_COMPARABLE_RATIO)
     if s1_entry.get("comparable_or_greater") is not expected_comparable:
         raise InstanceRefused(
             f"qualification[S1_district].comparable_or_greater is "
             f"{s1_entry.get('comparable_or_greater')!r}, but a ratio of "
-            f"{expected_ratio} against the literal rule "
+            f"{exact_ratio!r} against the literal rule "
             f"({NEIGHBOUR_COMPARABLE_RATIO}) gives {expected_comparable}. This "
             f"field decides whether an owner decision is required, so it may "
             f"not be asserted independently of the measurement")
@@ -929,11 +939,11 @@ def qualify(m: Materialized, *, today: Optional[date] = None,
         "baselines_satisfy_their_relations": baselines_refusal is None,
         "baselines_refusal": baselines_refusal,
         "baselines_note": (
-            "S1/S3/S9 are measured over the definitional B5 / B5 4 geographies. "
-            "If they do not satisfy the strict-subset and category-B relations, "
-            "the Definition allows a substituted geography with recorded "
-            "justification -- which is an authoring decision, not something "
-            "this tool may make."),
+            f"S1 is measured over {definitional['S1_district']}, and S3/S9 over "
+            f"{definitional['S3_sector']}. If they do not satisfy the "
+            f"strict-subset and category-B relations, the Definition allows a "
+            f"substituted geography with recorded justification -- which is an "
+            f"authoring decision, not something this tool may make."),
         # Definitional cases that failed their own qualification rule. Kept
         # separate from the placeholders because they cannot be substituted by
         # choosing a different geography -- B5/B50 IS the contamination

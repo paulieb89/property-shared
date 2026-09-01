@@ -913,6 +913,7 @@ def test_the_report_labels_its_latency_as_the_corpus_mix_not_organic_traffic(
 # ---------------------------------------------------------------------------
 
 def _write(tmp_path, materialized, **overrides):
+    """An Instance file with the given fields overridden."""
     raw = _instance_dict(materialized)
     raw.update(overrides)
     path = tmp_path / "instance.json"
@@ -3032,3 +3033,187 @@ def test_the_runbook_documents_the_measurement_cross_checks():
     assert "must agree with each other" in body
     assert "recomputed from the counts" in body
     assert "most consequential edit" in body
+
+
+# ---------------------------------------------------------------------------
+# The rounding boundary
+# ---------------------------------------------------------------------------
+
+def test_comparability_is_decided_on_the_exact_ratio_not_the_rounded_one(
+        materialized, tmp_path):
+    """20,000 against 20,001: the regression this boundary exists to catch.
+
+    The exact ratio is 0.99995 -- the neighbour is smaller, so it is NOT
+    "comparable or greater" -- and it rounds to 1.0 at four decimals. Deciding
+    from the rounded value put a rounding boundary inside a deployment gate:
+    the loader would compute `True` while `qualify` recorded `False`, refusing
+    a correct candidate, and would equally accept a hand-edited `True` that
+    skips the owner decision altogether.
+
+    Mutation: derive `expected_comparable` from the rounded ratio again and
+    this fails in both directions below.
+    """
+    block = _qualification_block()
+    block["S1_district"]["measured_rows"] = 20_001
+    block["S1_district"]["measured_neighbour_rows"] = 20_000
+    block["S1_district"]["measured_neighbour_ratio"] = round(20_000 / 20_001, 4)
+    block["S1_district"]["comparable_or_greater"] = False
+    block["S2_district"]["measured_rows"] = 20_000
+    baselines = {**BASELINES, "S1_full": 20_001}
+
+    # The recorded display field really does round to 1.0 -- the case is only
+    # interesting because those two values differ.
+    assert block["S1_district"]["measured_neighbour_ratio"] == 1.0
+    assert (20_000 / 20_001) < s1.NEIGHBOUR_COMPARABLE_RATIO
+
+    # `false` is correct here, and must load. Because the neighbour falls
+    # short, the Instance must also answer the referral.
+    block["S1_district"]["owner_decision"] = {
+        "decision": "accepted",
+        "justification": "one row short of parity; reviewed and accepted",
+    }
+    path = _write(tmp_path, materialized, qualification=block,
+                  aggregate_baselines=baselines)
+    assert s1.load_instance(path, materialized).governs_run
+
+    # `true` is wrong here, and must be refused -- it would skip the decision.
+    block["S1_district"]["comparable_or_greater"] = True
+    block["S1_district"].pop("owner_decision")
+    path = _write(tmp_path, materialized, qualification=block,
+                  aggregate_baselines=baselines)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "may not be asserted independently of the measurement" in str(exc.value)
+
+
+def test_the_other_side_of_the_boundary_is_comparable(materialized, tmp_path):
+    """20,001 against 20,000 exceeds parity, so no decision is required."""
+    block = _qualification_block()
+    block["S1_district"]["measured_rows"] = 20_000
+    block["S1_district"]["measured_neighbour_rows"] = 20_001
+    block["S1_district"]["measured_neighbour_ratio"] = round(20_001 / 20_000, 4)
+    block["S1_district"]["comparable_or_greater"] = True
+    block["S2_district"]["measured_rows"] = 20_001
+    path = _write(tmp_path, materialized, qualification=block,
+                  aggregate_baselines={**BASELINES, "S1_full": 20_000,
+                                       "S3_full": 40, "S9_full": 55})
+    assert s1.load_instance(path, materialized).governs_run
+
+
+def test_exact_parity_is_comparable(materialized, tmp_path):
+    """"comparable or GREATER" -- equal volume qualifies."""
+    block = _qualification_block()
+    block["S1_district"]["measured_rows"] = 20_000
+    block["S1_district"]["measured_neighbour_rows"] = 20_000
+    block["S1_district"]["measured_neighbour_ratio"] = 1.0
+    block["S1_district"]["comparable_or_greater"] = True
+    block["S2_district"]["measured_rows"] = 20_000
+    path = _write(tmp_path, materialized, qualification=block,
+                  aggregate_baselines={**BASELINES, "S1_full": 20_000})
+    assert s1.load_instance(path, materialized).governs_run
+
+
+def test_the_display_ratio_is_still_validated_at_four_decimals(materialized,
+                                                               tmp_path):
+    """Rounding keeps its one job: checking the human-readable field.
+
+    Dropping the exact ratio into that field instead would make the check
+    reject every candidate `qualify` writes.
+    """
+    block = _qualification_block()
+    block["S1_district"]["measured_rows"] = 20_001
+    block["S1_district"]["measured_neighbour_rows"] = 20_000
+    block["S1_district"]["measured_neighbour_ratio"] = 0.9999   # wrong rounding
+    block["S1_district"]["comparable_or_greater"] = False
+    block["S1_district"]["owner_decision"] = {"decision": "accepted",
+                                              "justification": "reviewed"}
+    block["S2_district"]["measured_rows"] = 20_000
+    path = _write(tmp_path, materialized, qualification=block,
+                  aggregate_baselines={**BASELINES, "S1_full": 20_001})
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "must follow from the counts" in str(exc.value)
+
+
+def test_the_baselines_note_names_the_effective_geographies(materialized):
+    """A substituted run's note must not claim B5 / B5 4.
+
+    The note tells a reviewer which geographies the three baselines were
+    counted over. Hard-coding the defaults made it wrong for exactly the runs
+    where getting it right matters most.
+    """
+    default = s1.qualify(materialized)
+    assert "B5" in default["baselines_note"]
+    assert "B5 4" in default["baselines_note"]
+
+
+def test_the_baselines_note_follows_a_substitution(tmp_path):
+    rows = [row(f"T-M37-{i:03d}", "M3 7AA", "2026-05-04", 200_000 + i,
+                town="MANCHESTER") for i in range(30)]
+    rows += [row(f"T-M30-{i:03d}", "M30 4AA", "2026-05-04", 300_000 + i,
+                 town="MANCHESTER") for i in range(40)]
+    build_snapshot(tmp_path, rows, version="v20260828T194003Z")
+    opened = s1.open_materialized(tmp_path)
+    try:
+        out = s1.qualify(opened, today=date(2026, 6, 15), substitutions={
+            "S1_district": {"geography": "M3", "justification": "r"},
+            "S2_neighbour_district": {"geography": "M30", "justification": "r"},
+            "S3_sector": {"geography": "M3 7", "justification": "r"}})
+    finally:
+        opened.adapter.close()
+    note = out["baselines_note"]
+    assert "M3 7" in note and "M3" in note
+    assert "B5" not in note, f"the note still claims a default geography: {note}"
+
+
+def test_qualify_decides_comparability_on_the_exact_ratio(materialized,
+                                                          monkeypatch):
+    """The same boundary, on the writing side rather than the reading side.
+
+    `qualify` and `load_instance` must agree at 20,000/20,001 or a correct
+    candidate is refused by the tool that produced it. Reaching this through a
+    real artifact would need 40,001 rows; the counts are substituted instead,
+    which isolates exactly the arithmetic under test.
+
+    Mutation: round the ratio before comparing it and `comparable_or_greater`
+    flips to true, the adjudication disappears, and the shortfall is never put
+    to anybody.
+    """
+    real = s1._aggregate
+
+    def counted(m, *, geography_sql, geo_params, **kwargs):
+        if geography_sql == "outcode = ?" and geo_params == ["B5"]:
+            return 20_001
+        if geography_sql == "outcode = ?" and geo_params == ["B50"]:
+            return 20_000
+        return real(m, geography_sql=geography_sql, geo_params=geo_params,
+                    **kwargs)
+
+    monkeypatch.setattr(s1, "_aggregate", counted)
+    out = s1.qualify(materialized, today=date(2026, 6, 15))
+    block = out["candidate_instance"]["qualification"]["S1_district"]
+    assert block["measured_rows"] == 20_001
+    assert block["measured_neighbour_rows"] == 20_000
+    # The display field rounds to parity; the decision does not.
+    assert block["measured_neighbour_ratio"] == 1.0
+    assert block["comparable_or_greater"] is False, (
+        "qualify treated a smaller neighbour as comparable because the ratio "
+        "rounded to 1.0")
+    assert "S1_district" in out["requires_owner_adjudication"]
+
+
+def test_qualify_treats_exact_parity_as_comparable(materialized, monkeypatch):
+    """The boundary is >=, so equal volume needs no adjudication."""
+    real = s1._aggregate
+
+    def counted(m, *, geography_sql, geo_params, **kwargs):
+        if geography_sql == "outcode = ?" and geo_params in (["B5"], ["B50"]):
+            return 20_000
+        return real(m, geography_sql=geography_sql, geo_params=geo_params,
+                    **kwargs)
+
+    monkeypatch.setattr(s1, "_aggregate", counted)
+    out = s1.qualify(materialized, today=date(2026, 6, 15))
+    block = out["candidate_instance"]["qualification"]["S1_district"]
+    assert block["comparable_or_greater"] is True
+    assert "S1_district" not in out["requires_owner_adjudication"]
