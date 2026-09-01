@@ -1,7 +1,33 @@
-# PPD source-routing and implementation specification (rev 8 — FROZEN)
+# PPD source-routing and implementation specification (rev 9 — FROZEN)
 
-**Status:** **FROZEN at rev 8.** Accepted. No further architecture work. Changes
+**Status:** **FROZEN at rev 9.** Accepted. No further architecture work. Changes
 to this document require a new decision round, not an edit in passing.
+
+**Revision 9** was authorised by the Phase D review round, after the partial-G1a
+measurement recorded in
+[`docs/ops/2026-08-31-ppd-snapshot-rollout.md`](../ops/2026-08-31-ppd-snapshot-rollout.md).
+That measurement showed 36.7 s of materialization plus 3.1 s of adapter-open
+validation on the real `property-shared` Machine — so on **the measured path**,
+a boot awaited inside the ASGI lifespan did not meet the 30 s readiness target.
+That is a statement about what was measured, not a proof about every possible
+path: the transfer ran at 63.6 Mbit/s on a depleted CPU burst balance, and a
+faster transfer could bring an awaited boot back under 30 s. Rev 9 removes the
+dependency on that question rather than answering it.
+
+Rev 9 changes **when the boot runs**, not what it produces or what may be
+served. §4.10 gains a non-blocking rule: the lifespan *starts* the boot and
+returns immediately, the application is ready serving live data, and the
+snapshot becomes eligible to route only once it has materialized and validated.
+It also adds the control-only `PPD_SNAPSHOT_SHADOW_ENABLED` flag, which performs
+that boot and deliberately never routes, so full G1a can be measured against the
+real application lifecycle without serving a single snapshot row.
+
+**No requirement is relaxed.** The 30 s readiness target is unchanged — rev 9
+makes it *measurable* rather than unreachable-by-construction, and does not
+claim it is met. The `bundle_bytes * 2.5` headroom rule, every Stage 1 exit
+criterion, and G1a, G1b, G2 and G3 are unchanged. `PPD_SNAPSHOT_ENABLED` remains
+the sole authority to route. Nothing is enabled, no image is deployed, and no
+artifact is replaced.
 
 **Revision 8** was authorised by the corpus-acceptance and artifact-distribution
 decision round, after PRs #30 and #31 merged. It is a **status** revision, not an
@@ -833,6 +859,31 @@ detail, so it is fixed here before PR 4 begins.
 * **A startup failure leaves the server available on the live fallback.** Boot
   returning `UNREADY` is a normal outcome, not a startup error: the process must
   come up and serve from the live source.
+* **The boot must not gate readiness (rev 9).** The lifespan *starts* the boot
+  and returns immediately; ASGI/FastMCP readiness never awaits materialization.
+  Phase D measured 36.7 s of materialization plus 3.1 s of validation on the
+  2 GB Machine, so on that path an awaited boot did not satisfy the 30 s
+  readiness target. A faster transfer might; the point of this rule is that
+  readiness no longer depends on the answer. The boot therefore runs
+  on its own thread, outside the event loop and outside any cancel scope: the
+  work it does is blocking I/O that no cancellation can interrupt, and a
+  task-group scope cancelled from a lifespan's `finally` deadlocks when the
+  lifespan runs in a portal task. Shutdown stops accepting installs, joins
+  briefly, and abandons anything still running; the thread is a daemon.
+  **Readiness reports live availability, never snapshot availability.**
+* **Shadow mode: `PPD_SNAPSHOT_SHADOW_ENABLED` (rev 9).** A control-only flag.
+  It starts exactly the same boot, and never makes the result routable —
+  `active_adapter()` continues to consult `PPD_SNAPSHOT_ENABLED` alone, on every
+  call. Its purpose is to let full G1a — application time-to-readiness against
+  the real lifespan, on the real image and Machine — be measured with a real
+  artifact while every user request is still answered from the live source.
+  Enabling it is not, and never becomes, permission to serve snapshot data.
+* **Boot lifecycle is reported, not inferred.** `snapshot_status()` (and
+  therefore `/v1/meta`) carries `state` — `not_started` / `warming` / `ready` /
+  `failed` — alongside `enabled`, `shadow_enabled`, `source_error` and the
+  artifact identity. `routable` tracks `active_adapter()` and so is true only
+  when serving is enabled *and* validation completed; a warming or failed boot
+  is visibly distinct from a routing one.
 
 ---
 
@@ -1141,15 +1192,25 @@ The two facts Phase 3 could not evidence are now **blocking gates**, not caveats
   app to one worker and record that as a deployment constraint. Verification is
   read-only; **pinning is a deployment mutation with its own authorisation.**
 
-  **Open, and blocking G2 if the deployed count exceeds one:** boot runs inside
-  the lifespan and therefore blocks startup, a worker waiting on the §4.6
-  single-flight lock can block for up to 420 s, and the Fly health-check grace
-  periods are 60 s (`property-shared`) and 30 s (`propertydata`). Those three
-  numbers are not reconciled anywhere. At one worker per Machine the lock never
-  contends and the question is moot; above one it must be answered before the
-  flag is enabled. **Rev 7 records this and deliberately does not resolve it** —
-  a resolution needs deployment evidence or a new operational policy, neither of
-  which a documentation correction may invent.
+  **Open, and blocking G2 if the deployed count exceeds one:** a worker waiting
+  on the §4.6 single-flight lock can block for up to 420 s, and the Fly
+  health-check grace periods are 60 s (`property-shared`) and 30 s
+  (`propertydata`). At one worker per Machine the lock never contends and the
+  question is moot; above one it must be answered before the flag is enabled.
+  **Rev 7 records this and deliberately does not resolve it** — a resolution
+  needs deployment evidence or a new operational policy, neither of which a
+  documentation correction may invent.
+
+  **Rev 9 narrows, but does not close, this concern.** Rev 7 stated the boot
+  "runs inside the lifespan and therefore blocks startup"; under §4.10's
+  non-blocking rule it no longer does, so a worker waiting out the 420 s lock no
+  longer holds up ASGI startup and no longer interacts with the health-check
+  grace periods at all. Those three numbers are reconciled to that extent. What
+  remains open is unchanged and still blocking above one worker: the deployed
+  worker count is not verified, and the per-worker RSS budget was derived for a
+  single uvicorn process. Phase D observed one worker in the checked-in
+  `Dockerfile` CMD (no `--workers`), which is configuration evidence, not the
+  deployment verification G2 asks for.
 
 * **G3 — the snapshot extra is installed in both production images, and proven
   to be.** The boot runtime imports `duckdb` and `zstandard`, which live only in

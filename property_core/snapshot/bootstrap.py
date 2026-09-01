@@ -15,22 +15,48 @@ discovered:
   normal outcome, not a startup error, so nothing here is allowed to raise into
   the ASGI startup sequence.
 
-Everything is off unless `PPD_SNAPSHOT_ENABLED` is set. With it unset this module
-imports nothing from DuckDB and touches no filesystem.
+Nothing happens unless `PPD_SNAPSHOT_ENABLED` or `PPD_SNAPSHOT_SHADOW_ENABLED`
+is set. With both unset this module imports nothing from DuckDB and touches no
+filesystem.
+
+The two flags are not interchangeable. `PPD_SNAPSHOT_ENABLED` is the sole
+authority to *route*: `state.active_adapter()` consults it alone, on every
+call. `PPD_SNAPSHOT_SHADOW_ENABLED` only causes the same materialization to
+happen, and never makes its result reachable from a request.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
-from property_core.config import ppd_snapshot_enabled
+from property_core.config import (
+    PPD_SNAPSHOT_ENABLED_ENV,
+    PPD_SNAPSHOT_SHADOW_ENABLED_ENV,
+    ppd_snapshot_enabled,
+    ppd_snapshot_shadow_enabled,
+)
 from property_core.snapshot import state
 
 log = logging.getLogger("property_core.snapshot.boot")
+
+#: Boot lifecycle, reported verbatim by `snapshot_status()`.
+#:
+#: * ``not_started`` -- neither flag is on, or the lifespan has not run.
+#: * ``warming``     -- the background boot is in flight. The application is
+#:                      already serving; requests go to the live source.
+#: * ``ready``       -- materialized and validated. Routable *only* if
+#:                      ``PPD_SNAPSHOT_ENABLED`` is also on.
+#: * ``failed``      -- the boot did not produce a usable snapshot. The live
+#:                      source keeps answering; this is not an outage.
+PHASE_NOT_STARTED = "not_started"
+PHASE_WARMING = "warming"
+PHASE_READY = "ready"
+PHASE_FAILED = "failed"
 
 #: Where the bundle is published. A local directory is supported so the whole
 #: path can be exercised without any network or cloud resource.
@@ -45,6 +71,97 @@ DEFAULT_CACHE_DIR = "/tmp/ppd-snapshot"
 #: attempt, not by success: a failed boot must not be retried by every worker
 #: thread that happens to call the lifespan again.
 _booted = False
+
+#: Lifecycle bookkeeping, read from the event loop while the boot runs in a
+#: worker thread, so every mutation is under this lock.
+_phase_lock = threading.Lock()
+_phase = PHASE_NOT_STARTED
+_boot_error: Optional[str] = None
+
+#: Cleared on shutdown. `anyio.to_thread.run_sync` cannot interrupt a thread
+#: blocked in a socket read or an flock wait, so an abandoned boot really does
+#: keep running after the lifespan has torn the snapshot down. Without this
+#: gate it would install an adapter into a process that has already closed
+#: everything, leaking an open DuckDB handle for the life of the process.
+_accepting_installs = False
+
+#: The in-flight boot, for a bounded join at shutdown.
+_boot_thread: Optional[threading.Thread] = None
+
+#: How long shutdown waits for a nearly-finished boot before abandoning it.
+#: Small on purpose: the alternative is waiting out a stalled transfer or the
+#: single-flight lock timeout, neither of which belongs in a shutdown path.
+SHUTDOWN_JOIN_SECONDS = 0.5
+
+
+def _set_phase(phase: str, error: Optional[str] = None) -> None:
+    global _phase, _boot_error
+    with _phase_lock:
+        _phase = phase
+        _boot_error = error
+
+
+def _install_if_wanted(adapter: Any, report: Any) -> bool:
+    """Install only while the lifespan is still up. Returns whether it did.
+
+    Taken under `_phase_lock`, the same lock shutdown uses to clear
+    `_accepting_installs`, so the two cannot interleave: a boot finishing at
+    the moment of shutdown is either installed (and then cleared normally) or
+    refused, never installed into a torn-down process.
+    """
+    with _phase_lock:
+        if not _accepting_installs:
+            return False
+        state.install(adapter, report)
+        return True
+
+
+def _claim_boot() -> bool:
+    """Claim the single per-process boot. True for exactly one caller.
+
+    Under `_phase_lock` because the check and the set must be one step. Reading
+    `_booted` and writing it as two statements is not atomic even with the GIL:
+    a thread switch between the LOAD and the STORE lets two callers both see
+    False and both boot, giving two concurrent downloads and two adapters, one
+    of which is then leaked. Both FastMCP servers and the FastAPI app can enter
+    the lifespan on one process, so that interleaving is reachable.
+    """
+    global _booted
+    with _phase_lock:
+        if _booted:
+            return False
+        _booted = True
+        return True
+
+
+def boot_phase() -> str:
+    """Where the snapshot boot has got to. One of the PHASE_* constants."""
+    with _phase_lock:
+        return _phase
+
+
+def boot_error() -> Optional[str]:
+    """Why the boot failed, or None."""
+    with _phase_lock:
+        return _boot_error
+
+
+def snapshot_boot_requested() -> bool:
+    """Whether either flag asks for a materialization this process.
+
+    Serving implies booting; shadow booting does not imply serving.
+    """
+    return ppd_snapshot_enabled() or ppd_snapshot_shadow_enabled()
+
+
+def _close_quietly(adapter: Any) -> None:
+    """Close an adapter that will never be installed. Shutdown must not raise."""
+    close = getattr(adapter, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _build_source() -> Any:
@@ -70,19 +187,29 @@ def _build_source() -> Any:
     if directory:
         return LocalDirectorySource(Path(directory))
     if not url:
+        # Names both flags: either one starts a boot, and saying only
+        # PPD_SNAPSHOT_ENABLED sends an operator debugging a shadow-mode boot
+        # to check a flag that is legitimately off.
         raise RuntimeError(
-            f"{SNAPSHOT_URL_ENV}, {SNAPSHOT_DIR_ENV} or {SNAPSHOT_BUCKET_ENV} must be set when "
-            f"PPD_SNAPSHOT_ENABLED is on"
+            f"{SNAPSHOT_URL_ENV}, {SNAPSHOT_DIR_ENV} or {SNAPSHOT_BUCKET_ENV} must be "
+            f"set when {PPD_SNAPSHOT_ENABLED_ENV} or {PPD_SNAPSHOT_SHADOW_ENABLED_ENV} "
+            f"is on"
         )
     return HttpObjectSource(url)
 
 
-def _materialize() -> None:
+def _materialize() -> Any:
     """Fetch, verify, validate and install. Raises; the caller degrades.
 
     Split out as its own function so the lifespan's failure policy is visible in
     one place, and so tests can substitute a materialization without standing up
     an object store.
+
+    Returns the runtime's `BootReport` when it produced one, so a boot that
+    fails without installing can still report *why*. The report is otherwise
+    only reachable through `state.install()`, which by definition does not run
+    on a failed boot -- so without this the status said merely "no snapshot
+    materialized" while the real cause sat in the logs.
     """
     from property_core.snapshot.adapter import SnapshotAdapter
     from property_core.snapshot.runtime import SnapshotRuntime
@@ -95,44 +222,80 @@ def _materialize() -> None:
     if not report.ready or not report.snapshot_dir or not report.version:
         log.warning("snapshot boot did not produce a snapshot; using the live "
                     "source (%s)", report.source_error)
-        return
+        return report
 
     record = store.verified_record(report.version)
     if record is None:
         log.warning("snapshot %s has no readable verification record; using the "
                     "live source", report.version)
-        return
+        return report
 
-    # READY is structural. This is where it becomes permission to route:
+    # READY is structural. This is where it becomes eligible to route:
     # schema, row count and an executed query, all before anything is served.
+    # Eligible, not routing -- `state.active_adapter()` still consults
+    # PPD_SNAPSHOT_ENABLED on every call, so under shadow alone this adapter is
+    # installed and never handed to a request.
     adapter = SnapshotAdapter.open(Path(report.snapshot_dir), record)
-    state.install(adapter, report)
-    log.info("snapshot %s validated and routable (coverage %s..%s)",
-             adapter.version, adapter.coverage_from, adapter.coverage_to)
+
+    if not _install_if_wanted(adapter, report):
+        # Shutdown abandoned this boot while it was in flight. Installing now
+        # would leak an open handle into a torn-down process.
+        _close_quietly(adapter)
+        log.info("snapshot boot completed after shutdown; discarded")
+        return report
+
+    log.info("snapshot %s validated (coverage %s..%s); routable=%s",
+             adapter.version, adapter.coverage_from, adapter.coverage_to,
+             ppd_snapshot_enabled())
+    return report
 
 
 def boot_once() -> None:
-    """Attempt the boot at most once per process. Never raises."""
-    global _booted
-    if _booted:
+    """Attempt the boot at most once per process. Never raises.
+
+    Runs in a worker thread, off the event loop. Nothing here is allowed to
+    propagate: a snapshot that cannot be materialized means the live source
+    answers, which is the documented steady state after every restart anyway.
+    """
+    if not _claim_boot():
         return
-    _booted = True
-    if not ppd_snapshot_enabled():
+    if not snapshot_boot_requested():
         return
+
+    _set_phase(PHASE_WARMING)
+    report = None
     try:
-        _materialize()
+        report = _materialize()
     except Exception as exc:  # noqa: BLE001
-        # The server must come up. A snapshot that cannot be materialized or
-        # validated means the live source answers, which is the documented
-        # steady state after every restart anyway.
+        _set_phase(PHASE_FAILED, f"{type(exc).__name__}: {exc}")
         log.warning("snapshot boot failed (%s: %s); serving from the live source",
                     type(exc).__name__, exc)
+        return
+
+    if state.installed_adapter() is None:
+        # `_materialize` returns without installing when the runtime could not
+        # produce a usable snapshot. That is a failed boot, not a ready one --
+        # and the returned report carries why, which `state.boot_report()`
+        # cannot, since nothing was installed.
+        detail = (getattr(report, "source_error", None)
+                  or getattr(state.boot_report(), "source_error", None)
+                  or "no snapshot materialized")
+        _set_phase(PHASE_FAILED, detail)
+        return
+
+    _set_phase(PHASE_READY)
+
+
+def _install_is_still_wanted() -> bool:
+    with _phase_lock:
+        return _accepting_installs
 
 
 def reset_for_tests() -> None:
     """Forget that a boot was attempted. Test-only."""
     global _booted
     _booted = False
+    _set_phase(PHASE_NOT_STARTED)
     state.clear()
 
 
@@ -143,16 +306,63 @@ async def snapshot_lifespan() -> AsyncIterator[None]:
     Installed on both FastMCP servers. `app/main.py` awaits the FastMCP lifespan
     from inside the FastAPI lifespan, so the mounted deployment boots exactly
     once too.
-    """
-    import anyio.to_thread
 
-    # The boot does blocking I/O -- network, disk, and a flock wait of up to
-    # lock.DEFAULT_TIMEOUT. Off the event loop so a co-hosted FastAPI app is not
-    # frozen while a sibling worker holds the single-flight lock.
-    await anyio.to_thread.run_sync(boot_once)
+    **The boot does not gate readiness.** Phase D measured 36.7 s of
+    materialization plus 3.1 s of validation on the real 2 GB Machine, so on
+    that path an awaited boot missed the 30 s readiness target. A faster
+    transfer might make it; the point here is that readiness no longer depends
+    on the answer. The boot is started in the background and the lifespan
+    yields immediately, so the application serves live data from the first
+    request while the snapshot warms behind it.
+
+    The single-flight `flock` is unchanged -- it still coordinates the worker
+    processes sharing a Machine, which lifespan wiring cannot.
+    """
+    global _accepting_installs, _boot_thread, _phase
+
+    if not snapshot_boot_requested():
+        # Neither flag: import nothing, touch nothing, start nothing.
+        try:
+            yield
+        finally:
+            state.clear()
+        return
+
+    # A plain daemon thread, not an anyio task group. The boot does blocking
+    # I/O -- a socket read and an flock wait of up to lock.DEFAULT_TIMEOUT --
+    # which no cancellation can interrupt, so a task group would only be able
+    # to stop *waiting* for it anyway. Worse, cancelling a task-group scope
+    # from the `finally` of an async context manager deadlocks when the
+    # lifespan runs in a portal task, which is exactly what Starlette's
+    # TestClient and uvicorn's startup do. A thread has none of that coupling
+    # and behaves identically under uvicorn, TestClient, FastMCP and the CLI.
+    with _phase_lock:
+        _accepting_installs = True
+        if _phase == PHASE_NOT_STARTED:
+            # Committed to booting, so say so before yielding: a status check
+            # between here and the thread's first instruction must not report
+            # `not_started` when a boot is already under way.
+            _phase = PHASE_WARMING
+
+    thread = threading.Thread(target=boot_once, name="ppd-snapshot-boot", daemon=True)
+    _boot_thread = thread
+    thread.start()
+
     try:
         yield
     finally:
+        # Refuse further installs *before* clearing, under the same lock the
+        # installing thread takes, so a boot landing at this instant is either
+        # installed-then-cleared or refused outright -- never installed into a
+        # process that has already torn the snapshot down.
+        with _phase_lock:
+            _accepting_installs = False
+        # A brief, bounded join reaps a nearly-finished boot tidily. It is
+        # deliberately not a full join: shutdown must never wait out a stalled
+        # transfer or the single-flight lock timeout. The thread is a daemon,
+        # so anything still running dies with the process.
+        thread.join(timeout=SHUTDOWN_JOIN_SECONDS)
+        _boot_thread = None
         state.clear()
 
 
@@ -183,18 +393,29 @@ def mark_installed(server: Any) -> Any:
 
 
 def snapshot_status() -> dict[str, Optional[object]]:
-    """A small, honest summary for health output and diagnostics."""
+    """A small, honest summary for health output and diagnostics.
+
+    `routable` tracks `state.active_adapter()`, never mere installation, so it
+    can only be true when `PPD_SNAPSHOT_ENABLED` is on *and* validation
+    completed. Under shadow alone the artifact identity is reported and
+    `routable` stays false -- that pairing is the whole point of the mode.
+    """
     adapter = state.installed_adapter()
     report = state.boot_report()
+    common: dict[str, Optional[object]] = {
+        "enabled": ppd_snapshot_enabled(),
+        "shadow_enabled": ppd_snapshot_shadow_enabled(),
+        "state": boot_phase(),
+        "routable": state.active_adapter() is not None,
+    }
     if adapter is None:
         return {
-            "enabled": ppd_snapshot_enabled(),
-            "routable": False,
-            "source_error": getattr(report, "source_error", None),
+            **common,
+            "source_error": boot_error() or getattr(report, "source_error", None),
         }
     return {
-        "enabled": ppd_snapshot_enabled(),
-        "routable": state.active_adapter() is not None,
+        **common,
+        "source_error": boot_error() or getattr(report, "source_error", None),
         "version": adapter.version,
         "coverage_from": adapter.coverage_from,
         "coverage_to": adapter.coverage_to,
