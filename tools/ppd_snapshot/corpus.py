@@ -197,6 +197,62 @@ def sectors(transactions: Iterable[Any]) -> list[str]:
     return sorted(seen)
 
 
+def geography_violations(case: "Case", transactions: Iterable[Any]) -> dict[str, Any]:
+    """Rows outside the geography a case asked for, **at the level it asked at**.
+
+    Outcode equality is the right test for a `district` case and far too weak
+    for the others. A `sector` case asking for `B5 4` and handed a `B5 6` row
+    has been contaminated exactly as surely as a `B5` case handed a `B50` row --
+    the Definition names sector isolation (`M3 7` returns only `M3 7`) as its
+    own trap -- and an outcode-only check calls both of those clean. The same
+    goes for a `postcode` case handed a different unit in the same sector.
+
+    **Reported at sector and outcode granularity only**, which is the hygiene
+    rule the local rehearsal already follows. A unit-level violation that stays
+    inside the requested sector is therefore recorded as a count rather than by
+    naming the postcode: the count is what proves contamination, and the unit
+    would be the most identifying thing in the report.
+    """
+    requested = case.postcode.strip().upper()
+    head, _, tail = requested.partition(" ")
+    requested_sector = f"{head} {tail[0]}" if tail else None
+
+    unexpected_outcodes: set[str] = set()
+    unexpected_sectors: set[str] = set()
+    same_sector_unit_violations = 0
+
+    for transaction in transactions:
+        pc = (getattr(transaction, "postcode", None) or "").strip().upper()
+        if not pc:
+            continue
+        row_head, _, row_tail = pc.partition(" ")
+        row_sector = f"{row_head} {row_tail[0]}" if row_tail else None
+
+        if row_head != head:
+            unexpected_outcodes.add(row_head)
+            continue
+        if case.search_level in {"sector", "postcode"} and requested_sector:
+            if row_sector != requested_sector:
+                # Same outcode, wrong sector -- invisible to an outcode check.
+                unexpected_sectors.add(row_sector or row_head)
+                continue
+        if case.search_level == "postcode" and pc != requested:
+            same_sector_unit_violations += 1
+
+    return {
+        "level": case.search_level,
+        "unexpected_outcodes": sorted(unexpected_outcodes),
+        "unexpected_sectors": sorted(unexpected_sectors),
+        "same_sector_unit_violations": same_sector_unit_violations,
+    }
+
+
+def is_contaminated(violations: dict[str, Any]) -> bool:
+    return bool(violations["unexpected_outcodes"]
+                or violations["unexpected_sectors"]
+                or violations["same_sector_unit_violations"])
+
+
 def ids(transactions: Iterable[Any]) -> set[str]:
     """In-memory only. Used for containment and diffing; never persisted."""
     return {t.transaction_id for t in transactions
@@ -317,10 +373,12 @@ def snapshot_invariants(case: Case, response: Any, provenance: Any,
             provenance is not None and provenance.recent_period_provisional is True),
     }
 
-    found = outcodes(response.transactions)
-    requested_outcode = case.postcode.split()[0].upper()
     if case.search_level in {"district", "sector", "postcode"}:
-        inv["geography_isolation"] = all(o == requested_outcode for o in found)
+        # Checked at the level the case asked at, not merely by outcode: a
+        # sector case handed a same-outcode neighbouring sector is contaminated,
+        # and an outcode-only test reports that as clean.
+        inv["geography_isolation"] = not is_contaminated(
+            geography_violations(case, response.transactions))
 
     if case.shape in {"S5", "S12"}:
         inv["truncated_at_limit"] = response.count == LIMIT

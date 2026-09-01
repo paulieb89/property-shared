@@ -36,7 +36,7 @@ no telemetry stream that would outlive the gate it was built for.
 | Artifact | `v20260828T194003Z` materialized and `state: ready` on the Machine |
 | `PPD_SNAPSHOT_ENABLED` | **absent** on both apps, and stays absent |
 | `PPD_SNAPSHOT_SHADOW_ENABLED` | set on `property-shared` only |
-| `propertydata` / G1b | out of scope, untouched |
+| `propertydata` / G1b | out of scope; redeployed by the shared release workflow, but unchanged in configuration and scope |
 
 Confirm the artifact before anything else:
 
@@ -60,18 +60,47 @@ uv run python scripts/fly_observability_snapshot.py \
 Existing tooling, reused deliberately. No new observability platform is
 introduced for this gate.
 
-## Step 1 — deploy (separately authorised)
+## Step 1 — release and deploy (separately authorised)
 
-The comparator reaches the Machine through the ordinary image. This is a
-dependency-and-tooling change only: no flag, no routing, no behaviour change.
+**Use the established release workflow, not a manual `fly deploy`.** Publishing
+a GitHub release runs `.github/workflows/release.yml`, which validates the
+released revision, publishes to PyPI, and deploys **both** Fly apps from that
+commit.
+
+```
+merge PR -> publish a GitHub release -> release.yml:
+    validate (_validate.yml)
+      -> publish to PyPI
+        -> flyctl deploy --remote-only --ha=false                 (property-shared)
+        -> flyctl deploy --config fly.app.toml --remote-only ...  (propertydata)
+```
+
+A local `fly deploy` ships **the working directory, not a commit**. Stage 1
+evidence has to be attributable to a revision — a measurement taken against an
+image built from whatever happened to be on a laptop cannot be tied to anything,
+and "which code produced this p95?" becomes unanswerable. That is the whole
+reason the release path exists; use it.
+
+**This redeploys `propertydata` too.** Say so plainly rather than claiming
+otherwise: `release.yml` deploys both apps on every release, so `propertydata`
+receives the new image. What does **not** change is its configuration or its
+scope — `Dockerfile.app` is untouched by this work, `propertydata` carries no
+`PPD_SNAPSHOT_*` secret, its snapshot state stays `not_started`, it does not
+carry the comparator, and G1b is neither attempted nor affected. "Untouched"
+means untouched in configuration and scope, not that no deploy reaches it.
+
+After the release completes, confirm what is actually running — from the app,
+never from git:
 
 ```bash
-fly deploy --ha=false            # property-shared only
+fly image show -a property-shared
+curl -s https://property-shared.fly.dev/v1/meta | jq .snapshot
 ```
 
 A deploy restarts the Machine, so the ephemeral rootfs is wiped and the snapshot
 re-materializes. Wait for `state: ready` again before continuing (Phase E
-measured ~44 s after readiness).
+measured ~44 s after readiness). Confirm `enabled: false` and `routable: false`
+have not changed.
 
 ## Step 2 — qualify the artifact
 
@@ -98,7 +127,22 @@ Check two fields before going further:
   substituted geography with recorded justification, which is an authoring
   decision, not one this tool may make.
 
-**`qualify` exits non-zero on either of those**, so a scripted invocation cannot
+* `unqualified_definitional_cases` — must be empty. `B5` and `B50` are named in
+  the Definition because the boundary is a definitional choice, but §4 is
+  explicit that an Instance must still qualify them: S2 must be non-empty under
+  frozen parameters, and S1 needs a neighbour carrying enough volume for
+  B50-in-B5 contamination to be visible at all. Against a near-empty `B50`, a
+  clean S1 result proves nothing — the contamination boundary becomes a test
+  that cannot fail. Unlike the seven placeholders these cannot be substituted:
+  `B5`/`B50` *is* the boundary the corpus is built around.
+
+  The Definition states S1's rule qualitatively ("comparable or greater
+  volume"). A tool needs a number, so the threshold is named in
+  `MIN_NEIGHBOUR_VOLUME_RATIO` and the **measured ratio is recorded beside it**
+  under `threshold_is_an_operationalisation` — judge the operationalisation
+  rather than trust it.
+
+**`qualify` exits non-zero on any of those**, so a scripted invocation cannot
 mistake an unusable candidate for success.
 
 ## Step 3 — review and commit the Instance
@@ -109,6 +153,13 @@ evidence/configuration change**:
 ```bash
 fly ssh sftp get /tmp/stage1-candidate-instance.json
 ```
+
+`staleness_bound_days` is **enforced at load, not merely recorded**: the
+comparator refuses an Instance older than its own bound. The artifact is fixed,
+but the frozen window moves forward every day, so counts qualified months ago
+describe a query nobody now runs. Re-run `qualify` rather than reusing them.
+`qualified_at` must be a canonical `YYYY-MM-DD` string and may not be in the
+future.
 
 Set `governs_run` to the Stage 1 run it governs. The comparator **refuses** an
 Instance whose `governs_run` is blank or still carries the placeholder `qualify`
@@ -145,7 +196,12 @@ Two passes:
 
 `--latency-repeats` is deliberately not a way to lower the bar: the gate is
 defined at 30 repetitions per case, and a run producing fewer reports
-`insufficient_evidence`, never a pass.
+`insufficient_evidence`, never a pass. `--max-live-per-case` below 1 and
+`--latency-repeats` below 1 are **refused before any work happens** — an option
+that silently does nothing is worse than no option, because it tells an operator
+they have a control they do not have. The live budget
+(`max_live_per_case x 13`) is checked before every live call, so the declared
+bound survives a code change rather than resting on the shape of the loop.
 
 The run stops, and still writes its report, on any of: a failed `/v1/health`, a
 Machine `MemAvailable` below the floor, the deadline, an unclassified
@@ -228,6 +284,28 @@ defined over. Computed by nearest rank (sorted ascending, 1-based rank
 `ceil(p/100 × N)`; for N=390 and p=95 that is rank 371) — an observed value,
 never an interpolation. `p50`, `p99` and `max` are reported for context;
 **only p95 < 1 s is the gate.**
+
+## Geography containment
+
+`zero_geography_contamination` is checked **at the level each case asked at**,
+on **both** arms — contamination is a defect in whichever source produced it, so
+neither arm is assumed clean because the other is:
+
+| `search_level` | a row is out of area when |
+|---|---|
+| `district` | its outcode differs (`B50` in a `B5` result) |
+| `sector` | its outcode differs, **or its sector does** (`B5 6` in a `B5 4` result) |
+| `postcode` | either of the above, **or it is a different unit in the same sector** |
+
+An outcode-only test passes a sector case handed a neighbouring sector in the
+same outcode — which is the sector-isolation trap the Definition names in its
+own right (`M3 7` returns only `M3 7`).
+
+Findings are reported at **sector and outcode granularity only**, the hygiene
+rule the local rehearsal already follows. A unit-level violation inside the
+requested sector is recorded as `same_sector_unit_violations: N` and the
+offending postcode is never named: the count is what proves the contamination,
+and the unit would be the most identifying value in the report.
 
 ## Corpus invariants
 

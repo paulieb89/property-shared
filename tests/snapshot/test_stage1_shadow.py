@@ -613,7 +613,12 @@ ALLOWED_KEYS = {
     "failed", "false_empty_shapes", "findings", "errors", "mismatch_rows",
     # a contamination finding: which arm, and the outcodes it strayed into.
     # Outcode granularity only -- never a unit postcode, never a row.
-    "arm", "unexpected_outcodes",
+    # a contamination finding: which arm, the level the case asked at, and the
+    # geographies it strayed into. Sector and outcode granularity only; a
+    # unit-level violation inside the requested sector is a COUNT, never a
+    # named postcode.
+    "arm", "level", "unexpected_outcodes", "unexpected_sectors",
+    "same_sector_unit_violations",
     "vacuous_comparison_shapes", "verdict", "n", "p95_ms",
     "required_observations", "required_repeats_per_case",
     "cases_short_of_the_required_repeats",
@@ -1562,3 +1567,338 @@ def test_the_default_repeat_count_is_the_count_the_gate_requires():
     assert parsed.latency_repeats == s1.REQUIRED_LATENCY_REPEATS
     assert (s1.REQUIRED_LATENCY_REPEATS * s1.REQUIRED_CASES
             == s1.REQUIRED_LATENCY_OBSERVATIONS == 390)
+
+
+# ---------------------------------------------------------------------------
+# Geography containment, judged at the level the case asked at
+# ---------------------------------------------------------------------------
+
+def _case(shape, postcode, level):
+    from tools.ppd_snapshot.corpus import Case
+    return Case(shape, "test", postcode, level)
+
+
+def test_a_same_outcode_neighbouring_sector_is_contamination():
+    """The trap an outcode-only check calls clean.
+
+    `B5 4` asked at sector level and handed a `B5 6` row shares the outcode, so
+    `all(o == "B5")` passes -- while the Definition names sector isolation
+    (`M3 7` returns only `M3 7`) as a trap in its own right.
+
+    Mutation: compare outcodes only and this row reads as in-area.
+    """
+    rows = [PPDTransaction(transaction_id="A", postcode="B5 4AA", date="2026-05-01"),
+            PPDTransaction(transaction_id="B", postcode="B5 6QQ", date="2026-05-01")]
+    violations = s1.geography_violations(_case("S3", "B5 4", "sector"), rows)
+    assert violations["unexpected_outcodes"] == []
+    assert violations["unexpected_sectors"] == ["B5 6"]
+    assert s1.is_contaminated(violations) is True
+
+
+def test_a_same_sector_neighbouring_unit_is_contamination():
+    """A `postcode` case handed a different unit in the same sector.
+
+    Both an outcode check and a sector check call this clean.
+    """
+    rows = [PPDTransaction(transaction_id="A", postcode="B5 7AA", date="2026-05-01"),
+            PPDTransaction(transaction_id="B", postcode="B5 7AB", date="2026-05-01")]
+    violations = s1.geography_violations(_case("S6", "B5 7AA", "postcode"), rows)
+    assert violations["unexpected_outcodes"] == []
+    assert violations["unexpected_sectors"] == []
+    assert violations["same_sector_unit_violations"] == 1
+    assert s1.is_contaminated(violations) is True
+
+
+def test_a_unit_violation_is_counted_never_named():
+    """Hygiene: sector and outcode granularity only.
+
+    The offending unit postcode would be the most identifying thing in the
+    report, and the count is what proves the contamination.
+    """
+    rows = [PPDTransaction(transaction_id="B", postcode="B5 7AB", date="2026-05-01")]
+    violations = s1.geography_violations(_case("S6", "B5 7AA", "postcode"), rows)
+    assert "B5 7AB" not in json.dumps(violations)
+    assert violations["same_sector_unit_violations"] == 1
+
+
+def test_a_district_case_is_still_judged_by_outcode():
+    """A district case legitimately spans every sector inside its outcode."""
+    rows = [PPDTransaction(transaction_id="A", postcode="B5 4AA", date="2026-05-01"),
+            PPDTransaction(transaction_id="B", postcode="B5 6QQ", date="2026-05-01")]
+    clean = s1.geography_violations(_case("S1", "B5", "district"), rows)
+    assert s1.is_contaminated(clean) is False
+    dirty = s1.geography_violations(
+        _case("S1", "B5", "district"),
+        rows + [PPDTransaction(transaction_id="C", postcode="B50 4AA",
+                               date="2026-05-01")])
+    assert dirty["unexpected_outcodes"] == ["B50"]
+    assert s1.is_contaminated(dirty) is True
+
+
+def test_sector_contamination_on_either_arm_fails_the_verdict(
+        materialized, instance, tmp_path, monkeypatch, agreeing_live):
+    """End to end, on the LIVE arm -- contamination is a defect in whichever
+    source produced it, so neither arm is assumed clean because the other is."""
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    monkeypatch.setattr(s1.time, "sleep", lambda *_: None)
+    real = s1._geography_contamination
+
+    def dirty(response, case):
+        if case.shape == "S3":
+            return {"level": "sector", "unexpected_outcodes": [],
+                    "unexpected_sectors": ["B5 6"],
+                    "same_sector_unit_violations": 0}
+        return real(response, case)
+
+    monkeypatch.setattr(s1, "_geography_contamination", dirty)
+    report = _full_run(materialized, instance, tmp_path, monkeypatch,
+                       live=agreeing_live, repeats=1)
+    criterion = report["exit_criteria"]["zero_geography_contamination"]
+    assert criterion["passed"] is False
+    assert {f["arm"] for f in criterion["findings"]} == {"live", "snapshot"}
+    assert report["passed"] is False
+
+
+# ---------------------------------------------------------------------------
+# B5 / B50 qualification
+# ---------------------------------------------------------------------------
+
+def test_qualification_fails_when_b50_is_empty(tmp_path, monkeypatch):
+    """S2 is "non-empty under frozen parameters", and B50 empty breaks S1 too.
+
+    Against a near-empty neighbour a clean S1 result proves nothing: the
+    contamination boundary is a test that cannot fail. Mutation: measure
+    `S1_full` and never look at the neighbour, and both cases qualify silently.
+    """
+    rows = [row(f"T-B57-{i:03d}", "B5 7AA", "2026-05-04", 200_000 + i)
+            for i in range(20)]
+    build_snapshot(tmp_path, rows, version="v20260828T194003Z")
+    monkeypatch.setenv(s1.SHADOW_COMPARE_ENABLED_ENV, "1")
+    code = s1.main(["qualify", "--cache-dir", str(tmp_path),
+                    "--out", str(tmp_path / "candidate.json")])
+    assert code == 1
+    out = json.loads((tmp_path / "candidate.json").read_text())
+    assert "S2_district" in out["unqualified_definitional_cases"]
+    assert "S1_district" in out["unqualified_definitional_cases"]
+    assert out["candidate_instance"]["qualification"]["S2_district"][
+        "measured_rows"] == 0
+
+
+def test_a_definitional_failure_alone_makes_qualify_exit_non_zero(
+        tmp_path, monkeypatch, materialized):
+    """Isolated from the placeholder branch, which would otherwise mask it.
+
+    On a small artifact several placeholders also fail to qualify, so a run
+    exits 1 either way and the definitional branch could be dead without any
+    test noticing. This drives the exit code from a definitional failure alone.
+    """
+    payload = s1.qualify(materialized)
+    payload["unqualified_placeholders"] = []
+    payload["baselines_satisfy_their_relations"] = True
+    payload["baselines_refusal"] = None
+    payload["unqualified_definitional_cases"] = ["S2_district"]
+    monkeypatch.setattr(s1, "qualify", lambda *a, **k: payload)
+    monkeypatch.setenv(s1.SHADOW_COMPARE_ENABLED_ENV, "1")
+    code = s1.main(["qualify", "--cache-dir", str(materialized.directory.parents[1]),
+                    "--out", str(tmp_path / "candidate.json")])
+    assert code == 1
+
+
+def test_qualification_records_the_neighbour_ratio_it_judged_on(tmp_path):
+    """The threshold is an operationalisation, so the measurement is recorded.
+
+    The Definition states "comparable or greater volume" qualitatively; a tool
+    needs a number, so the number is named and the measured ratio published
+    beside it for a reviewer to judge rather than trust.
+    """
+    rows = [row(f"T-B57-{i:03d}", "B5 7AA", "2026-05-04", 200_000 + i)
+            for i in range(20)]
+    rows += [row(f"T-B50-{i:03d}", "B50 4AA", "2026-05-04", 400_000 + i)
+             for i in range(20)]
+    build_snapshot(tmp_path, rows, version="v20260828T194003Z")
+    opened = s1.open_materialized(tmp_path)
+    try:
+        out = s1.qualify(opened, today=date(2026, 6, 15))
+    finally:
+        opened.adapter.close()
+    s1_block = out["candidate_instance"]["qualification"]["S1_district"]
+    assert s1_block["measured_neighbour_rows"] == 20
+    assert s1_block["measured_neighbour_ratio"] == 1.0
+    assert s1_block["threshold_is_an_operationalisation"] is True
+    assert "S1_district" not in out["unqualified_definitional_cases"]
+    assert "S2_district" not in out["unqualified_definitional_cases"]
+
+
+# ---------------------------------------------------------------------------
+# Instance staleness
+# ---------------------------------------------------------------------------
+
+def test_a_stale_instance_is_refused(materialized, tmp_path):
+    """The bound is enforced against the calendar, not merely type-checked.
+
+    The artifact is fixed, but the frozen window moves forward every day, so
+    counts qualified months ago describe a query nobody now runs. Mutation:
+    validate `staleness_bound_days` and never compare it to `qualified_at`, and
+    a months-old Instance qualifies a Stage 1 run while looking well-formed.
+    """
+    old = (date.today() - timedelta(days=90)).isoformat()
+    path = _write(tmp_path, materialized, qualified_at=old,
+                  staleness_bound_days=45)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "staleness_bound_days" in str(exc.value)
+    assert "90 days ago" in str(exc.value)
+
+
+def test_an_instance_inside_its_staleness_bound_is_accepted(materialized, tmp_path):
+    fresh = (date.today() - timedelta(days=10)).isoformat()
+    path = _write(tmp_path, materialized, qualified_at=fresh,
+                  staleness_bound_days=45)
+    assert s1.load_instance(path, materialized).qualified_at == fresh
+
+
+@pytest.mark.parametrize("qualified_at", [
+    "", "not-a-date", "2026-13-45", "01/09/2026", None, 20260901,
+    # Both of these PARSE. `fromisoformat` accepts basic format and ISO week
+    # dates, so "2026-W36-2" resolves silently to 2026-09-01 -- a real date,
+    # spelled in a way no operator reading the Instance would recognise. Only
+    # the canonical round-trip rejects them.
+    "20260901", "2026-W36-2",
+])
+def test_a_malformed_qualified_at_is_refused(materialized, tmp_path, qualified_at):
+    """An Instance whose age cannot be established cannot be checked at all."""
+    path = _write(tmp_path, materialized, qualified_at=qualified_at)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "qualified_at" in str(exc.value)
+
+
+def test_a_future_qualified_at_is_refused(materialized, tmp_path):
+    """It cannot have been qualified against this artifact yet."""
+    ahead = (date.today() + timedelta(days=3)).isoformat()
+    path = _write(tmp_path, materialized, qualified_at=ahead)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "future" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# The live-call bound is real
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_max_live_per_case_below_one_is_refused_before_any_work(
+        materialized, instance, tmp_path, value):
+    """An option that silently does nothing is worse than no option.
+
+    `max_live_per_case=0` previously left the run making thirteen live calls
+    anyway -- the field was recorded in the report and enforced nowhere, so it
+    told an operator they had a control they did not have.
+    """
+    with pytest.raises(s1.ComparisonRefused) as exc:
+        s1.run_compare(
+            instance=instance, materialized=materialized,
+            limits=s1.RunLimits(max_live_per_case=value, latency_repeats=1),
+            report_path=tmp_path / "report.json",
+            live_service=FakeLive(), snapshot_service=None)
+    assert "max_live_per_case" in str(exc.value)
+    assert not (tmp_path / "report.json").exists(), (
+        "a refused run still wrote a report")
+
+
+def test_zero_latency_repeats_is_refused(materialized, instance, tmp_path):
+    """A run taking no latency observation cannot produce the gate's sample."""
+    with pytest.raises(s1.ComparisonRefused) as exc:
+        s1.run_compare(
+            instance=instance, materialized=materialized,
+            limits=s1.RunLimits(latency_repeats=0),
+            report_path=tmp_path / "report.json",
+            live_service=FakeLive(), snapshot_service=None)
+    assert "latency_repeats" in str(exc.value)
+
+
+def test_the_live_budget_refuses_a_call_that_would_exceed_it():
+    """Checked before every live call, so the bound survives a code change.
+
+    The loop takes one observation per case today, so the budget is never
+    reached by the current path -- which is exactly why it is a separate,
+    directly tested guard rather than an assumption about the loop's shape. A
+    change that added a second live call would stop the run instead of quietly
+    making more requests to HM Land Registry than the run declared.
+    """
+    limits = s1.RunLimits(max_live_per_case=1)
+    # Inside budget: silent.
+    s1.check_live_budget(0, limits, 13, "S1")
+    s1.check_live_budget(12, limits, 13, "S13")
+    # At and beyond it: refused.
+    with pytest.raises(s1.RunAborted) as exc:
+        s1.check_live_budget(13, limits, 13, "S14")
+    assert "live-call budget of 13" in str(exc.value)
+    assert "separate authorisation" in str(exc.value)
+
+
+def test_the_budget_scales_with_an_authorised_retry_allowance():
+    """A higher allowance is the documented route for an authorised retry."""
+    s1.check_live_budget(13, s1.RunLimits(max_live_per_case=2), 13, "S1")
+    with pytest.raises(s1.RunAborted):
+        s1.check_live_budget(26, s1.RunLimits(max_live_per_case=2), 13, "S1")
+
+
+# ---------------------------------------------------------------------------
+# The runbook describes the deploy path that actually exists
+# ---------------------------------------------------------------------------
+
+RUNBOOK = REPO / "docs" / "ops" / "ppd-stage1-shadow-runbook.md"
+
+
+def test_the_runbook_uses_the_release_workflow_not_a_manual_deploy():
+    """A local `fly deploy` ships the working directory, not a commit.
+
+    Stage 1 evidence has to be attributable to a revision. An image built from
+    whatever was on a laptop makes "which code produced this p95?"
+    unanswerable, which is precisely what a deployment gate cannot afford.
+    """
+    body = RUNBOOK.read_text()
+    assert "release.yml" in body
+    assert "publish a GitHub release" in body
+    assert "ships **the working directory, not a commit**" in body
+    assert "fly deploy --ha=false" not in body, (
+        "the runbook still tells an operator to deploy from a working directory")
+
+
+def test_the_runbook_states_that_a_release_redeploys_propertydata():
+    """Honest about the shared workflow rather than repeating "untouched".
+
+    `release.yml` deploys both apps on every release. Claiming propertydata is
+    untouched full stop would be wrong; what is true is that its configuration
+    and scope do not change.
+    """
+    body = RUNBOOK.read_text()
+    assert "redeploys `propertydata` too" in body
+    assert "untouched in configuration and scope" in body
+
+
+def test_the_release_workflow_still_deploys_both_apps():
+    """Pins the fact the runbook's honesty depends on.
+
+    If release.yml ever stopped deploying propertydata, the runbook's warning
+    would become misleading in the other direction.
+    """
+    workflow = (REPO / ".github" / "workflows" / "release.yml").read_text()
+    assert "flyctl deploy --remote-only --ha=false" in workflow
+    assert "--config fly.app.toml" in workflow
+    assert "release:" in workflow and "published" in workflow
+
+
+def test_the_runbook_documents_the_search_level_containment_rule():
+    body = RUNBOOK.read_text()
+    assert "at the level each case asked at" in body
+    assert "same_sector_unit_violations" in body
+    assert "never named" in body
+
+
+def test_the_runbook_documents_enforced_staleness_and_b50_qualification():
+    body = RUNBOOK.read_text()
+    assert "enforced at load, not merely recorded" in body
+    assert "unqualified_definitional_cases" in body
+    assert "MIN_NEIGHBOUR_VOLUME_RATIO" in body

@@ -64,7 +64,9 @@ from tools.ppd_snapshot.corpus import (
     InstanceRefused,
     cases,
     derived_from_date,
+    geography_violations,
     ids as _ids,
+    is_contaminated,
     outcodes as _outcodes,
     returned_date_bounds,
     snapshot_invariants,
@@ -119,6 +121,16 @@ REQUIRED_CASES = 13
 #: it is measured against by passing a smaller number.
 REQUIRED_LATENCY_REPEATS = 30
 REQUIRED_LATENCY_OBSERVATIONS = REQUIRED_CASES * REQUIRED_LATENCY_REPEATS
+
+#: How "the longer neighbouring outcode holds comparable or greater volume"
+#: (Definition section 4, S1) is made executable. The Definition states the rule
+#: qualitatively; some threshold has to exist for a tool to check it, so this
+#: one is named here rather than buried, and the measured ratio is recorded
+#: alongside it so a reviewer can judge the operationalisation rather than
+#: trust it. The point of the rule is that B50 must carry enough volume for
+#: B50-in-B5 contamination to be visible at all: against a near-empty
+#: neighbour, a clean S1 result would prove nothing.
+MIN_NEIGHBOUR_VOLUME_RATIO = 0.10
 
 #: The placeholder `qualify` writes into a candidate Instance. An Instance still
 #: carrying it has not been through the review the field exists to record.
@@ -301,6 +313,41 @@ def load_instance(path: Path, materialized: Materialized) -> Stage1Instance:
     if isinstance(bound, bool) or not isinstance(bound, int) or bound <= 0:
         raise InstanceRefused(
             f"staleness_bound_days is {bound!r}, not a positive number of days")
+
+    # The bound is enforced, not merely recorded. An Instance carries measured
+    # aggregate counts and selected geographies; the artifact is fixed, but the
+    # frozen window moves forward every day, so counts qualified months ago
+    # describe a query nobody now runs. Validating the field and never checking
+    # it against the calendar would let a stale Instance qualify a Stage 1 run
+    # while looking entirely well-formed.
+    raw_qualified_at = raw["qualified_at"]
+    # The round-trip is the load-bearing check, and it is the same rule
+    # `validate_date_range` applies on the routing path. `fromisoformat` already
+    # rejects a non-string, but it ACCEPTS spellings that are not the one the
+    # Instance claims to carry: "20260901" parses, and so does the ISO week date
+    # "2026-W36-2", which resolves silently to a real and quite different-looking
+    # day. Requiring the value to round-trip is what keeps one spelling in the
+    # field an operator reads.
+    try:
+        qualified_on = date.fromisoformat(raw_qualified_at)
+        if qualified_on.isoformat() != raw_qualified_at:
+            raise ValueError("not canonical")
+    except (TypeError, ValueError) as exc:
+        raise InstanceRefused(
+            f"qualified_at {raw_qualified_at!r} is not a canonical ISO date "
+            f"(YYYY-MM-DD); an Instance whose age cannot be established cannot "
+            f"be checked against its own staleness bound") from exc
+    age_days = (date.today() - qualified_on).days
+    if age_days < 0:
+        raise InstanceRefused(
+            f"qualified_at {qualified_on.isoformat()} is in the future; the "
+            f"Instance cannot have been qualified against this artifact yet")
+    if age_days > bound:
+        raise InstanceRefused(
+            f"the Instance was qualified {age_days} days ago, beyond its own "
+            f"staleness_bound_days of {bound}. Its aggregate counts and selected "
+            f"geographies were measured over a window that has since moved; "
+            f"re-run qualify against the artifact rather than reusing them")
     if not isinstance(raw["qualification"], dict) or not raw["qualification"]:
         raise InstanceRefused(
             "qualification must record, per placeholder, the rule it satisfied; "
@@ -470,6 +517,34 @@ def qualify(m: Materialized, *, today: Optional[date] = None) -> dict[str, Any]:
                     months=24, today=today, category=None)
     baselines = {"S1_full": s1, "S3_full": s3, "S9_full": s9}
 
+    # -- S1 and S2: definitional, but still qualified ------------------------
+    # `B5` and `B50` are named in the Definition because the boundary is a
+    # definitional choice rather than an artifact property -- but section 4 is
+    # explicit that "an Instance must still qualify them". Measuring S1_full and
+    # never checking the neighbour was qualifying neither: a B50 with no rows
+    # makes S1 a test that cannot fail and S2 a case with nothing in it.
+    unqualified_definitional: list[str] = []
+    s2_full = _aggregate(m, geography_sql="outcode = ?", geo_params=["B50"],
+                         months=24, today=today)
+    ratio = (s2_full / s1) if s1 else 0.0
+    qualification["S1_district"] = {
+        "rule": ("the longer neighbouring outcode holds comparable or greater "
+                 f"volume, operationalised as at least "
+                 f"{MIN_NEIGHBOUR_VOLUME_RATIO:.0%} of this district's rows"),
+        "measured_rows": s1,
+        "measured_neighbour_rows": s2_full,
+        "measured_neighbour_ratio": round(ratio, 4),
+        "threshold_is_an_operationalisation": True,
+    }
+    if s1 <= 0 or ratio < MIN_NEIGHBOUR_VOLUME_RATIO:
+        unqualified_definitional.append("S1_district")
+    qualification["S2_district"] = {
+        "rule": "non-empty under frozen parameters",
+        "measured_rows": s2_full,
+    }
+    if s2_full <= 0:
+        unqualified_definitional.append("S2_district")
+
     # -- S4: thin market, strictly below the threshold ----------------------
     sectors_ranked = _rank(m, "sector", months=24, today=today)
     thin = [(s, n) for s, n in sectors_ranked if 0 < n < THIN_MARKET_THRESHOLD]
@@ -595,6 +670,11 @@ def qualify(m: Materialized, *, today: Optional[date] = None) -> dict[str, Any]:
             "the Definition allows a substituted geography with recorded "
             "justification -- which is an authoring decision, not something "
             "this tool may make."),
+        # Definitional cases that failed their own qualification rule. Kept
+        # separate from the placeholders because they cannot be substituted by
+        # choosing a different geography -- B5/B50 IS the contamination
+        # boundary the corpus is built around.
+        "unqualified_definitional_cases": sorted(unqualified_definitional),
         "unqualified_placeholders": sorted(
             {"S4_thin", "S5_dense", "S6_unit", "S7_type_weak", "S8_type_strong",
              "S11_provisional_empty", "S13_empty_unit"} - set(geo)),
@@ -873,6 +953,11 @@ class RunLimits:
 
     live_delay_seconds: float = 2.0
     latency_repeats: int = REQUIRED_LATENCY_REPEATS
+    #: Enforced, not advisory. The correctness pass takes one live observation
+    #: per case; a value below 1 is refused outright, because a comparison with
+    #: no live arm is not a comparison, and the budget is checked before every
+    #: live call so the bound cannot be exceeded by a later code change without
+    #: the run stopping.
     max_live_per_case: int = 1
     deadline_seconds: float = 3600.0
     min_available_memory_bytes: int = 256 * 1024 * 1024
@@ -885,6 +970,23 @@ class RunLimits:
 #: boundary. A crossing is possible once a day at most; three attempts either
 #: clear it or prove something else is wrong.
 MIDNIGHT_ATTEMPTS = 3
+
+
+def check_live_budget(live_calls: int, limits: "RunLimits", corpus_size: int,
+                      shape: str) -> None:
+    """Refuse a live call that would exceed the run's declared budget.
+
+    Checked before every live observation rather than assumed from the shape of
+    the loop. The loop takes one per case today; this is what makes the bound
+    survive a change that adds another, instead of quietly making more requests
+    to HM Land Registry than the run declared.
+    """
+    budget = limits.max_live_per_case * corpus_size
+    if live_calls >= budget:
+        raise RunAborted(
+            f"the live-call budget of {budget} ({limits.max_live_per_case} per "
+            f"case x {corpus_size} cases) is exhausted at {shape}; a further "
+            f"live observation needs separate authorisation")
 
 
 def _observe(service: Any, case: Case, *,
@@ -975,10 +1077,15 @@ def _arm_record(response: Any, case: Case, observed: str,
     }
 
 
-def _geography_contamination(response: Any, case: Case) -> list[str]:
-    """Outcodes returned that are not the one the case asked for."""
-    requested = case.postcode.split()[0].upper()
-    return [o for o in _outcodes(response.transactions) if o != requested]
+def _geography_contamination(response: Any, case: Case) -> Optional[dict[str, Any]]:
+    """Rows outside the requested geography, judged at the requested level.
+
+    Returns `None` when clean. An outcode-only test would pass a `sector` case
+    handed a neighbouring sector in the same outcode -- which is the sector
+    isolation trap the Definition names in its own right.
+    """
+    violations = geography_violations(case, response.transactions)
+    return violations if is_contaminated(violations) else None
 
 
 def run_compare(*, instance: Stage1Instance, materialized: Materialized,
@@ -1000,6 +1107,20 @@ def run_compare(*, instance: Stage1Instance, materialized: Materialized,
     anomaly, and the partial report is still written.
     """
     from property_core.ppd_service import PPDService
+
+    # Fail fast, before an adapter is used or a single request is made. An
+    # option that silently does nothing is worse than no option: it tells an
+    # operator they have a control they do not have.
+    if limits.max_live_per_case < 1:
+        raise ComparisonRefused(
+            f"max_live_per_case is {limits.max_live_per_case}; the correctness "
+            f"pass needs one live observation per case, and a comparison with "
+            f"no live arm is not a comparison")
+    if limits.latency_repeats < 1:
+        raise ComparisonRefused(
+            f"latency_repeats is {limits.latency_repeats}; a run that takes no "
+            f"latency observation cannot produce the sample the gate is "
+            f"defined over")
 
     live_service = live_service or PPDService()
     snapshot_service = snapshot_service or PPDService(adapter=materialized.adapter)
@@ -1068,6 +1189,7 @@ def run_compare(*, instance: Stage1Instance, materialized: Materialized,
                 record["snapshot_error"] = f"{type(exc).__name__}: {exc}"
 
             live_response = None
+            check_live_budget(live_calls, limits, len(corpus), case.shape)
             with LiveEvidenceCapture() as capture:
                 try:
                     live_calls += 1
@@ -1107,12 +1229,15 @@ def run_compare(*, instance: Stage1Instance, materialized: Materialized,
                     provisional_from=materialized.provisional_from,
                     live_truncation_evidenced=bool(
                         record.get("live_truncation_evidenced"))))
+                # Both arms. Contamination is a defect in whichever source
+                # produced it (Definition section 7), so neither arm is assumed
+                # clean because the other is.
                 for arm, response in (("live", live_response),
                                       ("snapshot", snap_response)):
                     stray = _geography_contamination(response, case)
                     if stray:
                         contamination.append({"shape": case.shape, "arm": arm,
-                                              "unexpected_outcodes": stray})
+                                              **stray})
                 if (limits.stop_on_unclassified
                         and record.get("classification", {}).get("unclassified")):
                     results.append(record)
@@ -1461,6 +1586,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             failed = False
             if out["unqualified_placeholders"]:
                 print(f"UNQUALIFIED placeholders: {out['unqualified_placeholders']}")
+                failed = True
+            if out["unqualified_definitional_cases"]:
+                print("UNQUALIFIED definitional cases: "
+                      f"{out['unqualified_definitional_cases']}")
                 failed = True
             if not out["baselines_satisfy_their_relations"]:
                 print(f"BASELINES UNUSABLE: {out['baselines_refusal']}")
