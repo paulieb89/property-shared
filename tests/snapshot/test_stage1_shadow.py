@@ -1547,3 +1547,18 @@ def test_a_correct_total_with_one_short_case_is_still_insufficient(instance):
     assert sorted(criterion["cases_short_of_the_required_repeats"]) == sorted(
         [shapes[0], shapes[1]])
     assert report["passed"] is False
+
+
+def test_the_default_repeat_count_is_the_count_the_gate_requires():
+    """A default run must be able to satisfy the gate it is measured against.
+
+    Three independent literals -- the dataclass default, the CLI default and
+    the gate constant -- would drift, and the symptom would be a full run that
+    reports `insufficient_evidence` for no reason an operator could see.
+    """
+    assert s1.RunLimits().latency_repeats == s1.REQUIRED_LATENCY_REPEATS
+    parsed = s1.build_parser().parse_args(
+        ["compare", "--instance", "i.json", "--report", "r.json"])
+    assert parsed.latency_repeats == s1.REQUIRED_LATENCY_REPEATS
+    assert (s1.REQUIRED_LATENCY_REPEATS * s1.REQUIRED_CASES
+            == s1.REQUIRED_LATENCY_OBSERVATIONS == 390)

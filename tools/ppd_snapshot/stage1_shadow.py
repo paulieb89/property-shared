@@ -872,7 +872,7 @@ class RunLimits:
     """
 
     live_delay_seconds: float = 2.0
-    latency_repeats: int = 30
+    latency_repeats: int = REQUIRED_LATENCY_REPEATS
     max_live_per_case: int = 1
     deadline_seconds: float = 3600.0
     min_available_memory_bytes: int = 256 * 1024 * 1024
@@ -1428,7 +1428,8 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--cache-dir", default=None)
     c.add_argument("--instance", required=True, type=Path)
     c.add_argument("--report", required=True, type=Path)
-    c.add_argument("--latency-repeats", type=int, default=30)
+    c.add_argument("--latency-repeats", type=int,
+                   default=REQUIRED_LATENCY_REPEATS)
     c.add_argument("--max-live-per-case", type=int, default=1)
     c.add_argument("--live-delay-seconds", type=float, default=2.0)
     c.add_argument("--deadline-seconds", type=float, default=3600.0)
