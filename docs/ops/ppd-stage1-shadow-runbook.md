@@ -194,22 +194,70 @@ fly ssh sftp get /tmp/stage1-candidate-instance.json
 
 ### Substituting a definitional geography
 
-§4 permits replacing `B5` / `B50` / `B5 4` **with recorded justification**. The
-Instance carries an optional `substitutions` block, and all three move together
-— S3 is a sector inside S1's district and S2 is its neighbouring outcode, so
-substituting one alone would leave the containment relation the baselines exist
-to establish silently false:
+§4 permits replacing `B5` / `B50` / `B5 4` **with recorded justification**.
 
-```json
-"substitutions": {
+**A substitution is a re-qualification, not an annotation.** Adding a
+`substitutions` block to an Instance qualified over `B5`/`B50`/`B5 4` produces a
+document where every required key is present and every rule is stated, and whose
+baselines and measurements describe geographies the run will never touch. The
+comparator refuses that: each definitional qualification entry names the
+geography it was measured over, and all three must match the Instance's
+effective geographies.
+
+The supported route is to **re-run `qualify` against the substitution**, so
+every count is taken over the geographies that will actually execute:
+
+```bash
+cat > /tmp/subs.json <<'JSON'
+{"substitutions": {
   "S1_district":           {"geography": "M3",   "justification": "..."},
   "S2_neighbour_district": {"geography": "M30",  "justification": "..."},
   "S3_sector":             {"geography": "M3 7", "justification": "..."}
-}
+}}
+JSON
+
+PPD_SHADOW_COMPARE_ENABLED=1 python -m tools.ppd_snapshot.stage1_shadow \
+    qualify --substitutions /tmp/subs.json \
+            --out /tmp/stage1-candidate-instance.json
 ```
+
+The three move together, and their **geometry is validated**: substituting is
+permitted, substituting into a shape that tests nothing is not.
+
+| Rule | Why |
+|---|---|
+| S1 and S2 are outward codes; S3 is a sector | a `search_level` and a geography that disagree describe a query the corpus never specified |
+| S2 **extends** S1 and is longer (`B5` → `B50`) | that *is* the contamination boundary — a district search for the shorter outcode wrongly prefix-matching the longer one. Two unrelated outcodes are merely two districts and test nothing |
+| S3 lies **inside** S1's district | S3's count is qualified as a strict subset of S1's and S9's as exceeding S3's on identical geography; a sector outside the district makes both relations meaningless while the baselines still look like numbers |
 
 A substitution with no justification is refused: the Definition permits the
 route only *with* one.
+
+### When the neighbour falls short of the literal rule
+
+`qualify` refers this judgement rather than settling it, and **the Instance must
+answer the referral**. An Instance whose `S1_district` entry records
+`comparable_or_greater: false` and nothing else is refused — a pending judgement
+is not a qualification. Record the owner's decision in that entry:
+
+```json
+"S1_district": {
+  "rule": "the longer neighbouring outcode holds comparable or greater volume",
+  "geography": "B5",
+  "measured_neighbour_ratio": 0.31,
+  "comparable_or_greater": false,
+  "owner_decision": {
+    "decision": "accepted",
+    "justification": "B50 is a small rural outcode; 31% still returns hundreds
+                      of rows, enough for contamination to show. Reviewed <date>."
+  }
+}
+```
+
+Only `"accepted"` qualifies the case, and only with a non-empty justification:
+an accepted shortfall with no stated reason is a decision nobody can review, and
+anything other than acceptance leaves the Definition's other route —
+substitute — untaken.
 
 `staleness_bound_days` is **enforced at load, not merely recorded**: the
 comparator refuses an Instance older than its own bound. The artifact is fixed,
@@ -263,6 +311,12 @@ bound survives a code change rather than resting on the shape of the loop.
 The run stops, and still writes its report, on any of: **the first error on
 either arm**, a failed `/v1/health`, a Machine `MemAvailable` below the floor,
 the deadline, an unclassified divergence, or a midnight crossing.
+
+**This applies to the latency pass too.** A snapshot error there stops the run
+rather than skipping the repetition: continuing would leave that case short of
+its thirty observations, and the gate would then report `insufficient_evidence`
+for a reason buried in an error list rather than the snapshot error that
+actually caused it.
 
 **A snapshot-arm failure stops the run before that case makes its live call.**
 Once the snapshot arm has failed, `zero_snapshot_errors` is unreachable, so

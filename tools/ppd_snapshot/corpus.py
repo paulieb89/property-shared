@@ -483,4 +483,61 @@ def validate_substitutions(raw: Any) -> dict[str, str]:
                 f"substitutions[{key}] records no justification; the Definition "
                 f"permits substitution only WITH recorded justification")
         resolved[key] = geography.strip().upper()
+
+    validate_definitional_geometry(resolved)
     return resolved
+
+
+#: An outward code: no space, no sector digit.
+_OUTCODE_RE = re.compile(r"^[A-Z]{1,2}\d[A-Z\d]?$")
+#: An outward code plus one sector digit.
+_SECTOR_RE = re.compile(r"^[A-Z]{1,2}\d[A-Z\d]? \d$")
+
+
+def validate_definitional_geometry(geographies: dict[str, str]) -> None:
+    """The three definitional geographies must stand in the same relation.
+
+    Substituting them is permitted; substituting them into a shape that no
+    longer tests anything is not. The corpus is built on one specific geometry
+    and every case below depends on it:
+
+    * **S1 is a district**, S2 a district, S3 a sector -- a `search_level` and
+      a geography that disagree describe a query the corpus never specified.
+    * **S2 extends S1** and is longer (`B5` -> `B50`). That IS the contamination
+      boundary: a district search for the shorter outcode can wrongly prefix-
+      match the longer one, and S1/S2 exist to catch exactly that. Two
+      unrelated outcodes are merely two districts, and the pair tests nothing.
+    * **S3 lies inside S1**, because S3's aggregate count is qualified as a
+      strict subset of S1's and S9's as exceeding S3's on identical geography.
+      A sector outside S1's district makes both relations meaningless while the
+      baselines still look like numbers.
+    """
+    district = geographies["S1_district"]
+    neighbour = geographies["S2_neighbour_district"]
+    sector = geographies["S3_sector"]
+
+    if not _OUTCODE_RE.match(district):
+        raise InstanceRefused(
+            f"S1_district {district!r} is not an outward code; S1 is a district "
+            f"case and its geography must be one")
+    if not _OUTCODE_RE.match(neighbour):
+        raise InstanceRefused(
+            f"S2_neighbour_district {neighbour!r} is not an outward code")
+    if not _SECTOR_RE.match(sector):
+        raise InstanceRefused(
+            f"S3_sector {sector!r} is not a sector (outward code plus one "
+            f"sector digit); S3 and S9 are sector cases")
+
+    if not (neighbour.startswith(district) and len(neighbour) > len(district)):
+        raise InstanceRefused(
+            f"S2_neighbour_district {neighbour!r} does not extend "
+            f"{district!r}. The contamination boundary is a district search for "
+            f"the shorter outcode wrongly prefix-matching the longer one; two "
+            f"unrelated outcodes are merely two districts and test nothing.")
+    if sector.split()[0] != district:
+        raise InstanceRefused(
+            f"S3_sector {sector!r} does not lie inside S1_district {district!r}. "
+            f"S3's count is qualified as a strict subset of S1's and S9's as "
+            f"exceeding S3's on identical geography; a sector outside the "
+            f"district makes both relations meaningless while the baselines "
+            f"still look like numbers.")

@@ -78,6 +78,32 @@ def materialized(tmp_path):
     opened.adapter.close()
 
 
+def _qualification_block(definitional=None, **overrides) -> dict:
+    """A complete qualification block bound to the effective geographies."""
+    from tools.ppd_snapshot.corpus import DEFINITIONAL_GEOGRAPHIES
+
+    geo = {**DEFINITIONAL_GEOGRAPHIES, **(definitional or {})}
+    block = {key: {"rule": "qualified for the test fixture"}
+             for key in sorted(s1.REQUIRED_QUALIFICATION_KEYS)}
+    block["S1_district"] = {
+        "rule": "the neighbour holds comparable or greater volume",
+        "geography": geo["S1_district"],
+        "measured_neighbour_ratio": 1.2,
+        "comparable_or_greater": True,
+    }
+    block["S2_district"] = {
+        "rule": "non-empty under frozen parameters",
+        "geography": geo["S2_neighbour_district"],
+    }
+    block["S3_sector"] = {
+        "rule": "a strict subset of S1's district",
+        "geography": geo["S3_sector"],
+    }
+    for key, value in overrides.items():
+        block[key] = value
+    return block
+
+
 def _instance_dict(m) -> dict:
     return {
         "instance_kind": "stage1",
@@ -86,11 +112,9 @@ def _instance_dict(m) -> dict:
         "geographies": dict(GEOGRAPHIES),
         "aggregate_baselines": {"S1_full": 100, "S3_full": 40, "S9_full": 55},
         "qualified_at": "2026-09-01",
-        # Complete: every case whose geography the Instance fixes.
-        "qualification": {
-            key: {"rule": "qualified for the test fixture"}
-            for key in sorted(s1.REQUIRED_QUALIFICATION_KEYS)
-        },
+        # Complete: every case whose geography the Instance fixes, with the
+        # three definitional entries bound to the geographies they measured.
+        "qualification": _qualification_block(),
         "staleness_bound_days": 45,
         "governs_run": "stage-1-2026-09",
     }
@@ -2012,7 +2036,7 @@ def test_a_partial_qualification_block_is_refused(materialized, tmp_path):
 
 def test_an_unknown_qualification_key_is_refused(materialized, tmp_path):
     """A typo leaves the case it meant to qualify unqualified, block complete."""
-    block = {key: {"rule": "ok"} for key in s1.REQUIRED_QUALIFICATION_KEYS}
+    block = _qualification_block()
     block["S5_dnese"] = {"rule": "typo"}
     path = _write(tmp_path, materialized, qualification=block)
     with pytest.raises(InstanceRefused) as exc:
@@ -2023,7 +2047,7 @@ def test_an_unknown_qualification_key_is_refused(materialized, tmp_path):
 
 def test_a_qualification_entry_with_no_rule_is_refused(materialized, tmp_path):
     """Naming a geography is not qualifying it."""
-    block = {key: {"rule": "ok"} for key in s1.REQUIRED_QUALIFICATION_KEYS}
+    block = _qualification_block()
     block["S4_thin"] = {"measured_rows": 3}
     path = _write(tmp_path, materialized, qualification=block)
     with pytest.raises(InstanceRefused) as exc:
@@ -2036,7 +2060,8 @@ def test_the_required_qualification_keys_cover_every_fixed_geography():
     from tools.ppd_snapshot.corpus import REQUIRED_GEOGRAPHIES
 
     assert s1.REQUIRED_QUALIFICATION_KEYS == (
-        set(REQUIRED_GEOGRAPHIES) | {"S1_district", "S2_district"})
+        set(REQUIRED_GEOGRAPHIES)
+        | {"S1_district", "S2_district", "S3_sector"})
 
 
 def test_a_qualify_candidate_satisfies_the_loader_it_will_be_checked_by(
@@ -2193,11 +2218,15 @@ def test_an_instance_carrying_a_substitution_drives_the_corpus(
     """End to end: the Instance's substitution reaches the executed cases."""
     raw = _instance_dict(materialized)
     raw["governs_run"] = "substituted-run"
+    substituted = {"S1_district": "M3", "S2_neighbour_district": "M30",
+                   "S3_sector": "M3 7"}
     raw["substitutions"] = {
         "S1_district": {"geography": "M3", "justification": "B50 too thin"},
         "S2_neighbour_district": {"geography": "M30", "justification": "ditto"},
         "S3_sector": {"geography": "M3 7", "justification": "inside M3"},
     }
+    # Re-qualified: the evidence names the geographies the run will execute.
+    raw["qualification"] = _qualification_block(substituted)
     path = tmp_path / "substituted.json"
     path.write_text(json.dumps(raw))
     loaded = s1.load_instance(path, materialized)
@@ -2243,3 +2272,377 @@ def test_the_runbook_documents_adjudication_and_substitution():
     assert "NEIGHBOUR_COMPARABLE_RATIO = 1.0" in body
     assert "auto-qualified at a 10% ratio" in body
     assert '"substitutions"' in body
+
+
+# ---------------------------------------------------------------------------
+# Evidence binding: falsification tests
+# ---------------------------------------------------------------------------
+
+def test_a_latency_pass_snapshot_error_aborts_and_writes_the_partial_report(
+        materialized, instance, tmp_path, monkeypatch, agreeing_live):
+    """The latency pass stops on the first error, exactly as the first pass does.
+
+    Continuing would leave that case short of its thirty repetitions, and the
+    gate would then report `insufficient_evidence` for a reason buried in an
+    error list rather than the snapshot error that actually caused it.
+
+    Mutation: `continue` past the error and this run finishes with a short
+    sample and no abort.
+    """
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    monkeypatch.setattr(s1.time, "sleep", lambda *_: None)
+    from property_core.ppd_service import PPDService
+
+    real = PPDService(adapter=materialized.adapter)
+    state = {"correctness_done": False, "calls": 0}
+
+    class FailsInLatencyPass:
+        def comps(self, **kwargs):
+            state["calls"] += 1
+            if state["correctness_done"] and state["calls"] > 13:
+                raise RuntimeError("snapshot query failed mid-sample")
+            if state["calls"] == 13:
+                state["correctness_done"] = True
+            return real.comps(**kwargs)
+
+    report = s1.run_compare(
+        instance=instance, materialized=materialized,
+        limits=s1.RunLimits(live_delay_seconds=0.0, latency_repeats=5,
+                            stop_on_unclassified=False),
+        report_path=tmp_path / "report.json",
+        live_service=agreeing_live, snapshot_service=FailsInLatencyPass())
+    assert report["aborted"], "a latency-pass snapshot error did not abort"
+    assert "during the latency pass" in report["aborted"]
+    assert report["exit_criteria"]["zero_snapshot_errors"]["passed"] is False
+    assert report["exit_criteria"]["p95_under_one_second"][
+        "verdict"] == "insufficient_evidence"
+    assert report["passed"] is False
+    assert (tmp_path / "report.json").is_file(), (
+        "the run aborted without writing the partial report")
+
+
+def test_a_pending_adjudication_is_refused_not_carried(materialized, tmp_path):
+    """An Instance recording the shortfall and nothing else leaves it pending.
+
+    `qualify` deliberately refers the judgement rather than settling it. If the
+    Instance may then carry the referral unanswered, the referral achieves
+    nothing. Mutation: accept a False `comparable_or_greater` with no
+    `owner_decision` and a pending judgement qualifies a Stage 1 run.
+    """
+    block = _qualification_block()
+    block["S1_district"] = {
+        "rule": "the neighbour holds comparable or greater volume",
+        "geography": "B5",
+        "measured_neighbour_ratio": 0.31,
+        "comparable_or_greater": False,
+    }
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "records no owner_decision" in str(exc.value)
+    assert "pending judgement is not a qualification" in str(exc.value)
+
+
+def test_an_accepted_shortfall_needs_a_justification(materialized, tmp_path):
+    """A decision nobody can review is not a decision that was recorded."""
+    block = _qualification_block()
+    block["S1_district"] = {
+        "rule": "neighbour volume", "geography": "B5",
+        "measured_neighbour_ratio": 0.31, "comparable_or_greater": False,
+        "owner_decision": {"decision": "accepted", "justification": "   "},
+    }
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "records no justification" in str(exc.value)
+
+
+def test_a_recorded_acceptance_with_a_reason_qualifies_the_case(materialized,
+                                                                tmp_path):
+    """The route the Definition offers, taken properly, is accepted."""
+    block = _qualification_block()
+    block["S1_district"] = {
+        "rule": "neighbour volume", "geography": "B5",
+        "measured_neighbour_ratio": 0.31, "comparable_or_greater": False,
+        "owner_decision": {
+            "decision": "accepted",
+            "justification": ("B50 is a small rural outcode; 31% still returns "
+                              "hundreds of rows, enough for contamination to "
+                              "show. Reviewed 2026-09-01."),
+        },
+    }
+    path = _write(tmp_path, materialized, qualification=block)
+    assert s1.load_instance(path, materialized).governs_run
+
+
+@pytest.mark.parametrize("decision", ["pending", "rejected", "deferred", ""])
+def test_only_an_explicit_acceptance_qualifies(materialized, tmp_path, decision):
+    block = _qualification_block()
+    block["S1_district"] = {
+        "rule": "neighbour volume", "geography": "B5",
+        "measured_neighbour_ratio": 0.31, "comparable_or_greater": False,
+        "owner_decision": {"decision": decision, "justification": "a reason"},
+    }
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "only 'accepted' qualifies" in str(exc.value)
+
+
+def test_an_instance_that_does_not_record_comparability_is_refused(
+        materialized, tmp_path):
+    """It is the fact an adjudication would be answering."""
+    block = _qualification_block()
+    block["S1_district"] = {"rule": "neighbour volume", "geography": "B5"}
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "comparable_or_greater" in str(exc.value)
+
+
+def test_a_substitution_bolted_onto_unchanged_evidence_is_refused(
+        materialized, tmp_path):
+    """The exact shortcut the runbook must not invite.
+
+    An Instance qualified over `B5`/`B50`/`B5 4` with a `substitutions` block
+    added afterwards looks complete: every required key is present and every
+    rule is stated. It is evidence about one set of geographies attached to a
+    run that will execute another.
+
+    Mutation: drop the geography binding and this Instance is accepted, and
+    Stage 1 runs `M3` while its baselines describe `B5`.
+    """
+    raw = _instance_dict(materialized)
+    raw["governs_run"] = "bolted-on"
+    raw["substitutions"] = {
+        "S1_district": {"geography": "M3", "justification": "why"},
+        "S2_neighbour_district": {"geography": "M30", "justification": "why"},
+        "S3_sector": {"geography": "M3 7", "justification": "why"},
+    }
+    # qualification left as generated for B5/B50/B5 4 -- deliberately unchanged.
+    path = tmp_path / "bolted.json"
+    path.write_text(json.dumps(raw))
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "must be re-qualified against the artifact" in str(exc.value)
+    assert "cannot be attached to a run over another" in str(exc.value)
+
+
+def test_a_partially_requalified_substitution_is_refused(materialized, tmp_path):
+    """Re-qualifying S1 and forgetting S3 leaves the baselines misattributed."""
+    substituted = {"S1_district": "M3", "S2_neighbour_district": "M30",
+                   "S3_sector": "M3 7"}
+    raw = _instance_dict(materialized)
+    raw["governs_run"] = "partial"
+    raw["substitutions"] = {
+        "S1_district": {"geography": "M3", "justification": "why"},
+        "S2_neighbour_district": {"geography": "M30", "justification": "why"},
+        "S3_sector": {"geography": "M3 7", "justification": "why"},
+    }
+    block = _qualification_block(substituted)
+    block["S3_sector"]["geography"] = "B5 4"   # forgotten
+    raw["qualification"] = block
+    path = tmp_path / "partial.json"
+    path.write_text(json.dumps(raw))
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "S3_sector" in str(exc.value)
+    assert "re-qualified" in str(exc.value)
+
+
+def test_a_qualification_entry_that_names_no_geography_is_refused(
+        materialized, tmp_path):
+    block = _qualification_block()
+    block["S2_district"] = {"rule": "non-empty"}
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "does not record the geography it was measured over" in str(exc.value)
+
+
+# --- structural geometry of a substitution ---------------------------------
+
+@pytest.mark.parametrize("geographies,expected", [
+    # S2 does not extend S1: two unrelated districts test nothing.
+    ({"S1_district": "M3", "S2_neighbour_district": "B50", "S3_sector": "M3 7"},
+     "does not extend"),
+    # S2 equal to S1 is not longer.
+    ({"S1_district": "M3", "S2_neighbour_district": "M3", "S3_sector": "M3 7"},
+     "does not extend"),
+    # S3 outside S1's district breaks both baseline relations.
+    ({"S1_district": "M3", "S2_neighbour_district": "M30", "S3_sector": "B5 4"},
+     "does not lie inside"),
+    # S1 given as a sector: a district case needs a district.
+    ({"S1_district": "M3 7", "S2_neighbour_district": "M30", "S3_sector": "M3 7"},
+     "is not an outward code"),
+    # S3 given as an outcode: S3 and S9 are sector cases.
+    ({"S1_district": "M3", "S2_neighbour_district": "M30", "S3_sector": "M3"},
+     "is not a sector"),
+])
+def test_a_substitution_breaking_the_corpus_geometry_is_refused(
+        geographies, expected):
+    """Substituting is permitted; substituting into a shape that tests nothing
+    is not. Each of these is structurally well-formed and semantically empty.
+    """
+    from tools.ppd_snapshot.corpus import validate_definitional_geometry
+
+    with pytest.raises(InstanceRefused) as exc:
+        validate_definitional_geometry(geographies)
+    assert expected in str(exc.value)
+
+
+def test_the_default_definitional_geometry_satisfies_its_own_rules():
+    """B5 / B50 / B5 4 -- the geometry every substitution is measured against."""
+    from tools.ppd_snapshot.corpus import (
+        DEFINITIONAL_GEOGRAPHIES, validate_definitional_geometry)
+
+    validate_definitional_geometry(DEFINITIONAL_GEOGRAPHIES)
+
+
+def test_a_geometrically_valid_substitution_is_accepted():
+    from tools.ppd_snapshot.corpus import validate_substitutions
+
+    resolved = validate_substitutions({
+        "S1_district": {"geography": "M3", "justification": "r"},
+        "S2_neighbour_district": {"geography": "M30", "justification": "r"},
+        "S3_sector": {"geography": "M3 7", "justification": "r"},
+    })
+    assert resolved == {"S1_district": "M3", "S2_neighbour_district": "M30",
+                        "S3_sector": "M3 7"}
+
+
+def test_geometry_is_enforced_through_the_instance_loader(materialized, tmp_path):
+    """End to end: a broken geometry is refused at load, not at run time."""
+    raw = _instance_dict(materialized)
+    raw["governs_run"] = "broken-geometry"
+    raw["substitutions"] = {
+        "S1_district": {"geography": "M3", "justification": "why"},
+        "S2_neighbour_district": {"geography": "M30", "justification": "why"},
+        "S3_sector": {"geography": "B5 4", "justification": "why"},
+    }
+    path = tmp_path / "geometry.json"
+    path.write_text(json.dumps(raw))
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "does not lie inside" in str(exc.value)
+
+
+def test_qualify_re_measures_against_a_substitution(tmp_path):
+    """The supported route: re-qualify, do not re-label.
+
+    Every measurement in the candidate is taken over the substituted
+    geographies, which is what makes a substituted Instance carry evidence
+    about the run it governs.
+    """
+    rows = [row(f"T-M37-{i:03d}", "M3 7AA", "2026-05-04", 200_000 + i,
+                town="MANCHESTER") for i in range(30)]
+    rows += [row(f"T-M30-{i:03d}", "M30 4AA", "2026-05-04", 300_000 + i,
+                 town="MANCHESTER") for i in range(40)]
+    rows += [row("T-M37-CATB", "M3 7AB", "2026-05-04", 900_000,
+                 ppd_category="B", town="MANCHESTER")]
+    build_snapshot(tmp_path, rows, version="v20260828T194003Z")
+    opened = s1.open_materialized(tmp_path)
+    try:
+        out = s1.qualify(opened, today=date(2026, 6, 15), definitional={
+            "S1_district": "M3", "S2_neighbour_district": "M30",
+            "S3_sector": "M3 7"})
+    finally:
+        opened.adapter.close()
+    assert out["substituted"] is True
+    assert out["definitional_geographies"]["S1_district"] == "M3"
+    block = out["candidate_instance"]["qualification"]
+    assert block["S1_district"]["geography"] == "M3"
+    assert block["S2_district"]["geography"] == "M30"
+    assert block["S3_sector"]["geography"] == "M3 7"
+    assert block["S3_sector"]["inside_s1_district"] is True
+    # Measured over M3, not B5: the baselines describe the substituted run.
+    assert out["candidate_instance"]["aggregate_baselines"]["S1_full"] == 30
+    assert block["S1_district"]["measured_neighbour_rows"] == 40
+
+
+def test_the_runbook_does_not_invite_bolting_a_substitution_onto_old_evidence():
+    """The shortcut the runbook must actively steer away from.
+
+    Telling an operator to "add a substitutions block" would produce exactly
+    the Instance the loader refuses -- complete-looking, and describing
+    geographies the run will never touch.
+    """
+    body = RUNBOOK.read_text()
+    assert "A substitution is a re-qualification, not an annotation" in body
+    assert "qualify --substitutions" in body
+    assert "geographies the run will never touch" in body
+
+
+def test_the_runbook_documents_the_substitution_geometry_rules():
+    body = RUNBOOK.read_text()
+    for rule in ("extends", "lies **inside**", "test nothing",
+                 "still look like numbers"):
+        assert rule in body, f"the runbook omits the geometry rule: {rule}"
+
+
+def test_the_runbook_documents_the_owner_decision_requirement():
+    body = RUNBOOK.read_text()
+    assert "the Instance must\nanswer the referral" in body or \
+        "answer the referral" in body
+    assert "owner_decision" in body
+    assert 'Only `"accepted"` qualifies' in body
+
+
+def test_the_runbook_documents_the_latency_pass_abort():
+    body = RUNBOOK.read_text()
+    assert "This applies to the latency pass too" in body
+    assert "short of\nits thirty observations" in body or \
+        "short of" in body
+
+
+def test_the_qualify_cli_re_measures_against_the_substitutions_file(
+        tmp_path, monkeypatch):
+    """End to end through `main`, not just the function it calls.
+
+    Testing `qualify(definitional=...)` directly leaves the CLI wiring
+    unexercised: the flag could be parsed and then dropped, and the candidate
+    would silently describe `B5` while the operator believed they had
+    re-qualified against `M3`.
+    """
+    rows = [row(f"T-M37-{i:03d}", "M3 7AA", "2026-05-04", 200_000 + i,
+                town="MANCHESTER") for i in range(30)]
+    rows += [row(f"T-M30-{i:03d}", "M30 4AA", "2026-05-04", 300_000 + i,
+                 town="MANCHESTER") for i in range(40)]
+    rows += [row("T-M37-CATB", "M3 7AB", "2026-05-04", 900_000,
+                 ppd_category="B", town="MANCHESTER")]
+    build_snapshot(tmp_path, rows, version="v20260828T194003Z")
+    subs = tmp_path / "subs.json"
+    subs.write_text(json.dumps({"substitutions": {
+        "S1_district": {"geography": "M3", "justification": "B50 too thin"},
+        "S2_neighbour_district": {"geography": "M30", "justification": "ditto"},
+        "S3_sector": {"geography": "M3 7", "justification": "inside M3"},
+    }}))
+    monkeypatch.setenv(s1.SHADOW_COMPARE_ENABLED_ENV, "1")
+    out_path = tmp_path / "candidate.json"
+    s1.main(["qualify", "--cache-dir", str(tmp_path),
+             "--substitutions", str(subs), "--out", str(out_path)])
+    out = json.loads(out_path.read_text())
+    assert out["substituted"] is True
+    assert out["definitional_geographies"]["S1_district"] == "M3"
+    block = out["candidate_instance"]["qualification"]
+    assert block["S1_district"]["geography"] == "M3"
+    assert block["S2_district"]["geography"] == "M30"
+    assert block["S3_sector"]["geography"] == "M3 7"
+
+
+def test_the_qualify_cli_refuses_a_geometrically_broken_substitutions_file(
+        tmp_path, monkeypatch):
+    """Refused before anything is measured, with exit 2."""
+    build_snapshot(tmp_path, _rows(), version="v20260828T194003Z")
+    subs = tmp_path / "subs.json"
+    subs.write_text(json.dumps({"substitutions": {
+        "S1_district": {"geography": "M3", "justification": "r"},
+        "S2_neighbour_district": {"geography": "M30", "justification": "r"},
+        "S3_sector": {"geography": "B5 4", "justification": "r"},
+    }}))
+    monkeypatch.setenv(s1.SHADOW_COMPARE_ENABLED_ENV, "1")
+    out_path = tmp_path / "candidate.json"
+    code = s1.main(["qualify", "--cache-dir", str(tmp_path),
+                    "--substitutions", str(subs), "--out", str(out_path)])
+    assert code == 2
+    assert not out_path.exists(), "a refused qualification still wrote output"

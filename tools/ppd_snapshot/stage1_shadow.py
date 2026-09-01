@@ -276,7 +276,18 @@ OPTIONAL_INSTANCE_KEYS = frozenset({"substitutions"})
 #: the seven placeholders plus the two definitional cases. A block covering
 #: some of them is silent about the rest while looking complete.
 REQUIRED_QUALIFICATION_KEYS = frozenset(
-    REQUIRED_GEOGRAPHIES | {"S1_district", "S2_district"})
+    REQUIRED_GEOGRAPHIES | {"S1_district", "S2_district", "S3_sector"})
+
+#: Qualification entries that must name the geography they were measured over,
+#: and be checked against the Instance's EFFECTIVE geographies. These three fix
+#: the definitional cases and the S1/S3/S9 baselines, so a substitution that
+#: left them describing `B5`/`B50`/`B5 4` would be evidence about one set of
+#: geographies attached to a run executing another.
+GEOGRAPHY_BOUND_QUALIFICATIONS = {
+    "S1_district": "S1_district",
+    "S2_district": "S2_neighbour_district",
+    "S3_sector": "S3_sector",
+}
 
 
 @dataclass(frozen=True)
@@ -389,6 +400,70 @@ def load_instance(path: Path, materialized: Materialized) -> Stage1Instance:
             raise InstanceRefused(
                 f"qualification[{key}] records no rule; naming a geography is "
                 f"not qualifying it")
+
+    # -- the qualification must describe the geographies actually executed ---
+    #
+    # A substitution changes which geographies the thirteen cases run against.
+    # Evidence measured over `B5`/`B50`/`B5 4` says nothing about a run over
+    # `M3`/`M30`/`M3 7`, and a `substitutions` block bolted onto an otherwise
+    # unchanged Instance would look complete while binding measurements to the
+    # wrong places. Re-qualify against the artifact instead: `qualify
+    # --substitutions` re-measures everything, and this refuses anything else.
+    effective = {**DEFINITIONAL_GEOGRAPHIES, **substitutions}
+    for entry_key, geography_key in sorted(GEOGRAPHY_BOUND_QUALIFICATIONS.items()):
+        measured_over = qualification[entry_key].get("geography")
+        expected = effective[geography_key]
+        if not isinstance(measured_over, str) or not measured_over.strip():
+            raise InstanceRefused(
+                f"qualification[{entry_key}] does not record the geography it "
+                f"was measured over; without it there is no way to tell whether "
+                f"the measurement describes the run this Instance governs")
+        if measured_over.strip().upper() != expected:
+            raise InstanceRefused(
+                f"qualification[{entry_key}] was measured over "
+                f"{measured_over.strip().upper()!r}, but this Instance runs "
+                f"{expected!r}. A substitution must be re-qualified against the "
+                f"artifact -- evidence for one geography cannot be attached to "
+                f"a run over another.")
+
+    # The S1/S3/S9 baselines are counts over exactly those three geographies,
+    # so binding the qualification entries above binds the baselines with them.
+
+    # -- the neighbour rule: an explicit decision, or a refusal --------------
+    #
+    # Where the measurement meets the literal rule there is nothing to decide.
+    # Where it does not, the Definition offers accept-with-recorded-decision or
+    # substitute-with-recorded-justification, and `qualify` deliberately refers
+    # rather than settles it. An Instance that simply carries the shortfall and
+    # says nothing about it is that referral going unanswered.
+    s1_entry = qualification["S1_district"]
+    comparable = s1_entry.get("comparable_or_greater")
+    if not isinstance(comparable, bool):
+        raise InstanceRefused(
+            "qualification[S1_district] does not record comparable_or_greater; "
+            "whether the neighbour satisfied the literal rule is the fact an "
+            "adjudication would be answering")
+    if comparable is False:
+        decision = s1_entry.get("owner_decision")
+        if not isinstance(decision, dict):
+            raise InstanceRefused(
+                f"the neighbour holds "
+                f"{s1_entry.get('measured_neighbour_ratio')!r} of the "
+                f"district's rows, below the literal 'comparable or greater', "
+                f"and qualification[S1_district] records no owner_decision. "
+                f"Adjudication is still pending, and a pending judgement is "
+                f"not a qualification.")
+        if str(decision.get("decision", "")).strip().lower() != "accepted":
+            raise InstanceRefused(
+                f"qualification[S1_district].owner_decision.decision is "
+                f"{decision.get('decision')!r}; only 'accepted' qualifies the "
+                f"case. Anything else leaves the Definition's other route -- "
+                f"substitute with recorded justification -- untaken.")
+        if not str(decision.get("justification", "")).strip():
+            raise InstanceRefused(
+                "qualification[S1_district].owner_decision records no "
+                "justification; an accepted shortfall with no stated reason is "
+                "a decision nobody can review")
 
     # `governs_run` is what ties this Instance to one Stage 1 run. Left blank or
     # left as the placeholder `qualify` wrote, it ties it to nothing -- and an
@@ -604,6 +679,20 @@ def qualify(m: Materialized, *, today: Optional[date] = None,
     }
     if s2_full <= 0:
         unqualified_definitional.append("S2_district")
+    # S3's sector carries the S3/S9 baselines, so it names the geography they
+    # were counted over. Without this the baselines are three numbers with no
+    # geography attached, and a substitution could not be checked against them.
+    qualification["S3_sector"] = {
+        "rule": ("a strict subset of S1's district, carrying the S3 and S9 "
+                 "aggregate baselines"),
+        "geography": definitional["S3_sector"],
+        "measured_rows": s3,
+        "measured_rows_category_all": s9,
+        "inside_s1_district": definitional["S3_sector"].split()[0] == (
+            definitional["S1_district"]),
+    }
+    if s3 <= 0:
+        unqualified_definitional.append("S3_sector")
 
     # -- S4: thin market, strictly below the threshold ----------------------
     sectors_ranked = _rank(m, "sector", months=24, today=today)
@@ -718,6 +807,8 @@ def qualify(m: Materialized, *, today: Optional[date] = None,
             "A CANDIDATE Instance. It is reviewed and committed as its own "
             "change before Stage 1 runs; it is never read as runtime "
             "configuration and nothing here is hard-coded into the tool."),
+        "definitional_geographies": dict(definitional),
+        "substituted": definitional != DEFINITIONAL_GEOGRAPHIES,
         "coverage": {"coverage_from": m.coverage_from,
                      "coverage_to": m.coverage_to,
                      "provisional_from": m.provisional_from},
@@ -1346,10 +1437,20 @@ def run_compare(*, instance: Stage1Instance, materialized: Materialized,
                     midnight["retries"] += exc.retries
                     midnight["unrecoverable"] = True
                     raise
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 -- recorded, then stops
+                    # Same rule as the correctness pass. Continuing would leave
+                    # this case short of its thirty repetitions, and the gate
+                    # would then report `insufficient_evidence` for a reason
+                    # buried in an error list rather than the snapshot error
+                    # that actually caused it. `zero_snapshot_errors` is
+                    # unreachable from here in any case.
                     snapshot_errors.append({"shape": case.shape,
                                             "error": f"{type(exc).__name__}: {exc}"})
-                    continue
+                    raise RunAborted(
+                        f"{case.shape}: the snapshot arm failed during the "
+                        f"latency pass ({type(exc).__name__}: {exc}); the "
+                        f"sample cannot be completed and no later repetition "
+                        f"runs")
                 latency_ms.append(elapsed)
                 per_case.setdefault(case.shape, []).append(elapsed)
 
@@ -1632,6 +1733,13 @@ def build_parser() -> argparse.ArgumentParser:
                                        "candidate Stage 1 Instance")
     q.add_argument("--cache-dir", default=None)
     q.add_argument("--out", required=True, type=Path)
+    q.add_argument(
+        "--substitutions", type=Path, default=None,
+        help=("JSON file carrying a `substitutions` block, to RE-QUALIFY the "
+              "artifact against substituted definitional geographies. Every "
+              "measurement is then taken over those geographies, which is the "
+              "only way a substituted Instance can carry evidence about the "
+              "run it governs."))
 
     c = sub.add_parser("compare", help="execute the frozen corpus against both "
                                        "arms and write the Stage 1 report")
@@ -1659,7 +1767,20 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     try:
         if args.mode == "qualify":
-            out = qualify(materialized)
+            substitutions: dict[str, str] = {}
+            if args.substitutions is not None:
+                try:
+                    raw = json.loads(args.substitutions.read_text())
+                except (OSError, ValueError) as exc:
+                    print(f"refused: substitutions file unreadable: {exc}")
+                    return 2
+                try:
+                    substitutions = validate_substitutions(
+                        raw.get("substitutions", raw))
+                except InstanceRefused as exc:
+                    print(f"refused: {exc}")
+                    return 2
+            out = qualify(materialized, definitional=substitutions or None)
             args.out.parent.mkdir(parents=True, exist_ok=True)
             args.out.write_text(json.dumps(out, indent=2, sort_keys=False))
             print(f"candidate instance written to {args.out}")
