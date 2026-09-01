@@ -599,3 +599,135 @@ What it explicitly does **not** establish, and must not be cited as:
 
 Credentials remain installed on `property-shared` only. The verifier defect
 fix is open as a separate PR and is not merged, released or deployed.
+
+## Phase E — v1.17.0 released with both flags off, then shadow mode enabled; application readiness measured
+
+**Date**: 2026-09-01. **Goal**: release the non-blocking snapshot lifecycle,
+deploy it with both flags off, observe both applications, then enable
+`PPD_SNAPSHOT_SHADOW_ENABLED` on `property-shared` only and measure the half of
+G1a that Phase D structurally could not produce — **application
+time-to-readiness against the real lifespan**. `PPD_SNAPSHOT_ENABLED` was not
+enabled, Stage 1 was not begun, and `propertydata` configuration was not
+touched.
+
+### Release
+
+`v1.17.0`, tag target `eda3a84ac6fe17488778946978c2a0d6801ae436`. Preconditions
+checked against that exact revision before publishing: `HEAD` matched
+`origin/main`, working tree clean and identical to it, versions consistent at
+1.17.0 (`pyproject.toml`, `server.json` ×2, `uv.lock`), `CHANGELOG.md` headed
+`## v1.17.0`, `Dockerfile` carrying both `--extra snapshot` and the verifier
+`COPY`, `Dockerfile.app` unchanged against `v1.16.0`, and no `.env*` tracked or
+present. `./scripts/validate.sh` at that revision: **1767 passed, 27 skipped**.
+
+`release.yml` run `33488039568` — all four jobs succeeded: Validate release
+revision, Publish to PyPI, Deploy property-shared, Deploy propertydata.
+
+| App | Machine | Version | Digest | `GH_SHA` |
+|---|---|---|---|---|
+| `property-shared` | `7849207a412608` | 136 → 137 | `sha256:863733618cc80d35cb2a2f2f8999c17baa74e35e1ce9dc837069e2866d0f0818` | `eda3a84…` |
+| `propertydata` | `d897115a995d48` | 56 → 57 | `sha256:c30eacbdb855a9ba0ec4c987acf69d059119e6ca5ac4012050aa71909b802aae` | `eda3a84…` |
+
+### Flag-off observation
+
+Both Machines `started`, 1 total / 1 passing. `property-shared`
+`GET /v1/health` 200 in 108 ms; `propertydata` `GET /health` 200 in 133 ms.
+
+`property-shared` `GET /v1/meta` →
+`{"enabled": false, "shadow_enabled": false, "state": "not_started",
+"routable": false, "source_error": null}`. Nothing was imported and nothing
+touched the filesystem, which is what `not_started` asserts.
+
+No `PPD_SNAPSHOT_*` secret existed on `propertydata` before or after.
+
+### Enabling shadow mode on `property-shared` only
+
+`fly secrets set PPD_SNAPSHOT_SHADOW_ENABLED=1 -a property-shared`, initiated
+08:43:51 UTC, returned 08:44:10 UTC. Machine event log shows exactly one
+`start`, at 08:43:59 UTC — no restart loop, no second start. Machine version
+137 → 138; Machine ID, image digest and `GH_SHA` unchanged.
+
+A poller sampled `GET /v1/health` and `GET /v1/meta` every 0.25 s from before
+the restart through to steady state (194 samples over 80.3 s).
+
+### The measurement
+
+| Observation | Value |
+|---|---|
+| First non-200 (restart begins) | 08:43:55.059 |
+| Last non-200 | 08:44:01.658 |
+| **First 200 — application ready** | **08:44:04.950** |
+| **Application unavailable → ready** | **9.89 s** |
+| Snapshot state at first 200 | **`warming`** |
+| `warming` → `ready` | **44.37 s** (08:44:04.950 → 08:44:49.320) |
+| Artifact | `v20260828T194003Z`, coverage `2016-01-01`..`2026-06-30` |
+| `routable` true in any sample | **false** (150 samples with `shadow_enabled: true`) |
+| `enabled` true in any sample | **false** |
+| Non-200 HTTP codes | none |
+| Connection errors | 3, all inside the restart window |
+| `/v1/health` latency | p50 54 ms, p95 90 ms, max 1423 ms |
+
+**The application was ready in 9.89 s, and it was ready 44.4 s before the
+snapshot was.** That is the property the non-blocking lifecycle exists to
+produce: readiness is now decoupled from materialization. Under the previous
+design the same boot would have held startup for the whole 44.4 s.
+
+Note what the 9.89 s does *not* include: it is measured from the client, so it
+spans Fly's Machine stop, guest boot, uvicorn startup and the first successful
+health response. It is an upper bound on application readiness as a user
+experiences it, not a lower bound on the process alone.
+
+### Resources
+
+| Metric | Before | After |
+|---|---|---|
+| Machine memory total | 2,064,257,024 | 2,064,257,024 |
+| Machine memory available | 1,786,740,736 | 1,766,899,712 |
+| Machine memory available, min over window | 1,736,843,264 | 1,736,843,264 |
+| Process RSS | 108,531,712 | 157,216,768 |
+| Rootfs free | 8,319,373,312 | 8,040,230,912 |
+| OOM exits | 0 | 0 |
+
+Process RSS rose **46.4 MiB** — the open DuckDB adapter, retained because this
+is the application's own materialization, not a discarded verification. Rootfs
+consumed and **retained** 279,142,400 B (266.2 MiB): `du -sh /tmp/ppd-snapshot`
+reports 269M, and `find /tmp/ppd-snapshot -name '*.zst'` returns nothing, so the
+transient bundle was removed after extraction and only the extracted payload
+persists. That is the designed steady state — one ephemeral materialization per
+Machine, wiped on restart.
+
+The collector's own transient-disk delta was 281,022,464 B over 61 samples.
+Consistent with the retained figure, but at Fly's 15 s resolution it cannot see
+the simultaneous bundle-plus-extraction peak — Phase D showed that same
+comparison understating the verifier's 0.2 s peak by a factor of ~1.9.
+
+### What this does and does not complete
+
+**Completed here — the readiness limb of G1a.** Application time-to-readiness
+was measured on the real image and Machine, through the real ASGI/FastMCP
+lifespan, against the real private artifact, with a real materialization
+running concurrently. Phase D's boot-only verifier structurally could not
+produce this figure.
+
+**Not measured here.** Peak transient disk and the bundle/extraction overlap
+window were not captured during this boot: the application boot carries no
+0.2 s sampler, and the collector's 15 s resolution is corroborating only. Those
+two quantities have measurements only from the Phase D verifier run —
+279,109,872 bytes downloaded, 539,565,056 B sampled peak (itself a lower
+bound), 919.3 ms overlap window.
+
+**Therefore G1a's four quantities now all have measurements, but not from one
+run.** Transfer time, peak transient disk and overlap window come from the
+Phase D verifier on the v1.16.0 image as a standalone process; time-to-readiness
+comes from this run on the v1.17.0 image through the application lifespan. The
+Machine and the artifact are the same in both. Whether that combination
+satisfies G1a, or whether a single instrumented application boot is required,
+is a gate decision and is **not** claimed here.
+
+**Explicitly not done.** `PPD_SNAPSHOT_ENABLED` was not enabled and remains
+absent — confirmed after the change, alongside `PPD_SNAPSHOT_SHADOW_ENABLED`
+and the four `PPD_SNAPSHOT_S3_*` credentials. No Stage 1 corpus was run; the
+frozen corpus remains `comps` only. `propertydata` received the v1.17.0 image
+through the normal two-app release and **no configuration change of any kind**:
+it carries no `PPD_SNAPSHOT_*` secret, and with both flags absent its snapshot
+state is `not_started`. G1b was not attempted.
