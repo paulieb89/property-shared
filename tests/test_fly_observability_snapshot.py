@@ -429,6 +429,7 @@ def test_report_has_a_stable_top_level_schema() -> None:
 
     assert set(report) == {
         "schema_version", "target", "query", "series", "commands", "logs", "notes",
+        "transient_disk",
     }
 
 
@@ -763,6 +764,143 @@ def test_no_derivation_claims_peak_disk_is_total_minus_minimum() -> None:
         blob = f"{spec.derivation} {spec.note}".lower()
         assert "total minus this" not in blob
         assert "total minus" not in blob
+
+
+# --------------------------------------------------------------------------
+# Transient disk reaches the report, not just the helper
+# --------------------------------------------------------------------------
+
+# Regression guard: summarise_transient_disk() once existed with a correct
+# formula that no caller invoked, so the generated report carried only the raw
+# rootfs readings and no delta at all. These tests drive Collector.run()
+# end-to-end rather than calling the helper directly.
+
+_BASELINE_FREE = 8_319_373_312.0
+_MIN_FREE = 8_040_263_440.0
+_TOTAL = 8_350_298_112.0
+_MOUNT_LABELS = {
+    "app": "property-shared",
+    "instance": "7849207a412608",
+    "mount": "/.fly-upper-layer",
+    "region": "lhr",
+}
+
+
+class RootfsFetch:
+    """Serves a realistic rootfs matrix on query_range and totals on query."""
+
+    def __init__(self, *, with_range: bool = True) -> None:
+        self.with_range = with_range
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(self, url: str, headers: dict[str, str], timeout: float) -> tuple[int, bytes]:
+        self.calls.append({"url": url, "headers": dict(headers), "timeout": timeout})
+        is_range = "query_range" in url
+
+        if is_range and "filesystem_blocks_free" in url:
+            if not self.with_range:
+                return 200, json.dumps(_EMPTY_VECTOR).encode()
+            payload = {
+                "status": "success",
+                "data": {
+                    "resultType": "matrix",
+                    "result": [
+                        {
+                            "metric": dict(_MOUNT_LABELS),
+                            "values": [
+                                [1, str(_BASELINE_FREE)],
+                                [2, str(_MIN_FREE)],
+                                [3, "8300000000"],
+                            ],
+                        }
+                    ],
+                },
+            }
+            return 200, json.dumps(payload).encode()
+
+        if is_range:
+            return 200, json.dumps(_EMPTY_VECTOR).encode()
+
+        if "fly_instance_filesystem_blocks{" in url:
+            return 200, json.dumps(_vector((dict(_MOUNT_LABELS), str(_TOTAL)))).encode()
+
+        return 200, json.dumps(_vector((dict(_MOUNT_LABELS), "1"))).encode()
+
+
+def test_run_reports_a_transient_disk_summary(tmp_path: Path) -> None:
+    collector = _collector(fetch=RootfsFetch())
+
+    report = collector.run()
+
+    assert report["transient_disk"], "the collector computed no transient-disk summary"
+    entry = report["transient_disk"][0]
+    assert entry["status"] == "ok"
+    assert entry["delta_bytes"] == pytest.approx(_BASELINE_FREE - _MIN_FREE)
+
+
+def test_reported_delta_is_first_minus_min_not_total_minus_min() -> None:
+    collector = _collector(fetch=RootfsFetch())
+
+    entry = collector.run()["transient_disk"][0]
+
+    assert entry["delta_bytes"] == pytest.approx(279_109_872.0)
+    # total - min would be 310,034,672 — total occupancy, including the image.
+    assert entry["delta_bytes"] != pytest.approx(_TOTAL - _MIN_FREE)
+
+
+def test_transient_disk_entry_preserves_instance_and_mount_labels() -> None:
+    collector = _collector(fetch=RootfsFetch())
+
+    entry = collector.run()["transient_disk"][0]
+
+    assert entry["labels"]["mount"] == "/.fly-upper-layer"
+    assert entry["labels"]["instance"] == "7849207a412608"
+
+
+def test_transient_disk_summary_is_rendered_in_the_markdown() -> None:
+    collector = _collector(fetch=RootfsFetch())
+
+    rendered = fos.render_markdown(collector.run())
+    lines = rendered.splitlines()
+
+    # Exact heading: "Transient disk" alone also matches a heading that has
+    # dropped the crucial "not authoritative" qualifier.
+    assert "## Transient disk (corroborating, not authoritative)" in lines
+    assert "/.fly-upper-layer" in rendered
+    assert "279,109,872" in rendered
+
+    # The authoritative source must be labelled *in this section*. Asserting
+    # only that "boot_only_verify" appears somewhere is satisfied by the
+    # report-wide notes, so it would not notice this line disappearing.
+    source_lines = [ln for ln in lines if ln.startswith("- Authoritative source:")]
+    assert len(source_lines) == 1
+    assert "boot_only_verify" in source_lines[0]
+    assert any(ln.startswith("- Method:") for ln in lines)
+    assert any(ln.startswith("- Resolution:") for ln in lines)
+
+
+def test_transient_disk_is_no_data_when_the_rootfs_range_is_absent() -> None:
+    """Absent input must say so, not vanish from the report."""
+    collector = _collector(fetch=RootfsFetch(with_range=False))
+
+    report = collector.run()
+
+    assert report["transient_disk"], "an absent series must still produce an entry"
+    entry = report["transient_disk"][0]
+    assert entry["status"] == "no_data"
+    assert entry["delta_bytes"] is None
+    # The caveats are the point; they must survive the no_data path.
+    assert "boot_only_verify" in entry["authoritative_source"]
+
+
+def test_transient_disk_carries_its_caveats_through_run() -> None:
+    collector = _collector(fetch=RootfsFetch())
+
+    entry = collector.run()["transient_disk"][0]
+
+    assert "baseline_free" in entry["method"]
+    assert str(fos.FLY_SCRAPE_INTERVAL_SECONDS) in entry["resolution_caveat"]
+    assert "authoritative" in entry["authoritative_source"].lower()
 
 
 # --------------------------------------------------------------------------

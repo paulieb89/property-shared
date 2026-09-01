@@ -32,10 +32,12 @@ without them:
      an `Authorization` header, and scrubbed out of every string — including
      exception text — before anything is written or printed.
 
-What this collector does *not* measure: transient disk during a short
-operation. See `TRANSIENT_DISK_NOTE` — Fly stores one sample every 15 s, so
-these figures corroborate the verifier's own 0.2 s sampling rather than
-standing in for it.
+The report's `transient_disk` block states the free-space delta per mount as
+`baseline_free - minimum_free`, alongside the method, the resolution limit and
+the authoritative source. It is corroborating evidence only: Fly stores one
+sample every 15 s, so a short materialisation can hide almost entirely between
+samples. `/app/boot_only_verify.py`'s 0.2 s directory sampling is the real
+measurement. See `TRANSIENT_DISK_NOTE`.
 
 Usage:
     uv run python scripts/fly_observability_snapshot.py \\
@@ -70,7 +72,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
-SCHEMA_VERSION = "1"
+# 2: adds the top-level `transient_disk` block and `series[].no_data_reason`.
+# Nothing has consumed schema 1 — the collector has not shipped — so this is a
+# single bump rather than a compatibility shim.
+SCHEMA_VERSION = "2"
 PROMETHEUS_BASE = "https://api.fly.io/prometheus"
 REDACTION_PLACEHOLDER = "<redacted>"
 DEFAULT_TIMEOUT = 30.0
@@ -775,6 +780,55 @@ def summarise_transient_disk(
     }
 
 
+def derive_transient_disk(series: Sequence["SeriesResult"]) -> list[dict[str, Any]]:
+    """Build the corroborating free-space delta for each root-filesystem mount.
+
+    Reads the `range_rootfs_free` matrix — whose per-series `first` is the
+    free space at the start of the window and whose `min` is the low-water
+    mark — and pairs each mount with its total size purely for context.
+
+    Always returns at least one entry. An absent range series yields a
+    `no_data` entry rather than nothing, so the caveats travel with the report
+    even when there is no delta to state.
+    """
+    by_key = {result.key: result for result in series}
+
+    totals: dict[tuple[str, str], float] = {}
+    total_series = by_key.get("rootfs_total_bytes")
+    if total_series is not None and total_series.status == "ok":
+        for sample in total_series.samples:
+            labels = sample.get("labels", {})
+            key = (labels.get("instance", ""), labels.get("mount", ""))
+            totals[key] = sample["value"]
+
+    ranged = by_key.get("range_rootfs_free")
+    entries: list[dict[str, Any]] = []
+    if ranged is not None and ranged.status == "ok":
+        for sample in ranged.samples:
+            labels = sample.get("labels", {})
+            key = (labels.get("instance", ""), labels.get("mount", ""))
+            entry = summarise_transient_disk(
+                baseline_free_bytes=sample.get("first"),
+                minimum_free_bytes=sample.get("min"),
+                total_bytes=totals.get(key),
+            )
+            entry["labels"] = labels
+            entry["points"] = sample.get("points")
+            entries.append(entry)
+
+    if not entries:
+        entry = summarise_transient_disk(None, None, None)
+        entry["labels"] = {}
+        entry["points"] = 0
+        entry["detail"] = (
+            "no root-filesystem range samples in the window, so no delta could be "
+            "derived; see the range_rootfs_free series for why"
+        )
+        entries.append(entry)
+
+    return entries
+
+
 def summarise_http_errors(error_count: float, total_count: float) -> dict[str, Any]:
     """Pair an error percentage with the absolute counts behind it.
 
@@ -1271,6 +1325,7 @@ def build_report(
     notes: list[str],
     metrics_prefix: str | None = None,
     auth_scheme: str | None = None,
+    transient_disk: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Assemble the stable-schema report."""
     return {
@@ -1291,6 +1346,11 @@ def build_report(
             "scrape_interval_seconds": FLY_SCRAPE_INTERVAL_SECONDS,
         },
         "series": [s.to_dict() for s in series],
+        # Corroborating only — see TRANSIENT_DISK_NOTE and each entry's
+        # authoritative_source.
+        "transient_disk": (
+            transient_disk if transient_disk is not None else derive_transient_disk(series)
+        ),
         "commands": commands,
         "logs": logs,
         "notes": notes,
@@ -1387,6 +1447,34 @@ def render_markdown(report: dict[str, Any]) -> str:
             )
             out.append(_render_samples(result))
             out.append("")
+
+    transient = report.get("transient_disk") or []
+    if transient:
+        out.append("## Transient disk (corroborating, not authoritative)")
+        out.append("")
+        out.append("| Mount | Instance | Baseline free | Minimum free | Delta | Status |")
+        out.append("|---|---|---|---|---|---|")
+        for entry in transient:
+            labels = entry.get("labels") or {}
+            out.append(
+                "| {mount} | {instance} | {base} | {low} | {delta} | `{status}` |".format(
+                    mount=labels.get("mount", "—"),
+                    instance=labels.get("instance", "—"),
+                    base=_format_value(entry.get("baseline_free_bytes"), "bytes"),
+                    low=_format_value(entry.get("minimum_free_bytes"), "bytes"),
+                    delta=_format_value(entry.get("delta_bytes"), "bytes"),
+                    status=entry.get("status", "unknown"),
+                )
+            )
+        out.append("")
+        first = transient[0]
+        out.append(f"- Method: {first['method']}")
+        out.append(f"- Resolution: {first['resolution_caveat']}")
+        out.append(f"- Authoritative source: {first['authoritative_source']}")
+        for entry in transient:
+            if entry.get("detail"):
+                out.append(f"- {entry['detail']}")
+        out.append("")
 
     problems = [e for e in report["series"] if e["status"] != "ok"]
     if problems:
