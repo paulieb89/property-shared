@@ -59,7 +59,9 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from tools.ppd_snapshot.corpus import (
+    DEFINITIONAL_GEOGRAPHIES,
     LIMIT,
+    REQUIRED_GEOGRAPHIES,
     Case,
     InstanceRefused,
     cases,
@@ -74,6 +76,7 @@ from tools.ppd_snapshot.corpus import (
     validate_artifact_identity,
     validate_baselines,
     validate_geographies,
+    validate_substitutions,
     warning_classes as _warning_classes,
 )
 
@@ -122,15 +125,19 @@ REQUIRED_CASES = 13
 REQUIRED_LATENCY_REPEATS = 30
 REQUIRED_LATENCY_OBSERVATIONS = REQUIRED_CASES * REQUIRED_LATENCY_REPEATS
 
-#: How "the longer neighbouring outcode holds comparable or greater volume"
-#: (Definition section 4, S1) is made executable. The Definition states the rule
-#: qualitatively; some threshold has to exist for a tool to check it, so this
-#: one is named here rather than buried, and the measured ratio is recorded
-#: alongside it so a reviewer can judge the operationalisation rather than
-#: trust it. The point of the rule is that B50 must carry enough volume for
-#: B50-in-B5 contamination to be visible at all: against a near-empty
-#: neighbour, a clean S1 result would prove nothing.
-MIN_NEIGHBOUR_VOLUME_RATIO = 0.10
+#: The literal reading of the Definition's S1 rule: "the longer neighbouring
+#: outcode holds **comparable or greater** volume".
+#:
+#: An earlier version of this tool operationalised that as "at least 10% of the
+#: district's rows" and auto-qualified on it. That was wrong: a tenth is not
+#: comparable, and quietly redefining a frozen qualification rule downwards is
+#: exactly the kind of change that must not happen inside an implementation.
+#: The threshold here is the one the words say. Anything below it is **not
+#: refused and not passed** -- it is referred to the owner, with the measurement
+#: attached, because "is 0.6 comparable for this artifact?" is a judgement about
+#: the corpus, and the Definition already provides the two ways to settle it:
+#: accept it, or substitute a geography with recorded justification.
+NEIGHBOUR_COMPARABLE_RATIO = 1.0
 
 #: The placeholder `qualify` writes into a candidate Instance. An Instance still
 #: carrying it has not been through the review the field exists to record.
@@ -261,6 +268,16 @@ REQUIRED_INSTANCE_KEYS = frozenset({
     "governs_run",
 })
 
+#: Optional, and absent in the normal case: the Definition's substitution route
+#: for the section 4 geographies.
+OPTIONAL_INSTANCE_KEYS = frozenset({"substitutions"})
+
+#: Every case whose geography an Instance fixes must say how it qualified --
+#: the seven placeholders plus the two definitional cases. A block covering
+#: some of them is silent about the rest while looking complete.
+REQUIRED_QUALIFICATION_KEYS = frozenset(
+    REQUIRED_GEOGRAPHIES | {"S1_district", "S2_district"})
+
 
 @dataclass(frozen=True)
 class Stage1Instance:
@@ -273,6 +290,8 @@ class Stage1Instance:
     qualification: dict[str, Any]
     staleness_bound_days: int
     governs_run: str
+    #: Empty in the normal case. The Definition's section 4 substitution route.
+    substitutions: dict[str, str]
 
 
 def load_instance(path: Path, materialized: Materialized) -> Stage1Instance:
@@ -294,7 +313,7 @@ def load_instance(path: Path, materialized: Materialized) -> Stage1Instance:
     keys = set(raw)
     if missing := REQUIRED_INSTANCE_KEYS - keys:
         raise InstanceRefused(f"instance is missing required key(s): {sorted(missing)}")
-    if unknown := keys - REQUIRED_INSTANCE_KEYS:
+    if unknown := keys - REQUIRED_INSTANCE_KEYS - OPTIONAL_INSTANCE_KEYS:
         raise InstanceRefused(f"instance carries unknown key(s): {sorted(unknown)}")
 
     if raw["instance_kind"] != INSTANCE_KIND:
@@ -308,6 +327,7 @@ def load_instance(path: Path, materialized: Materialized) -> Stage1Instance:
         raw["snapshot_version"], raw["bundle_sha256"])
     geographies = validate_geographies(raw["geographies"])
     baselines = validate_baselines(raw["aggregate_baselines"])
+    substitutions = validate_substitutions(raw.get("substitutions"))
 
     bound = raw["staleness_bound_days"]
     if isinstance(bound, bool) or not isinstance(bound, int) or bound <= 0:
@@ -348,10 +368,27 @@ def load_instance(path: Path, materialized: Materialized) -> Stage1Instance:
             f"staleness_bound_days of {bound}. Its aggregate counts and selected "
             f"geographies were measured over a window that has since moved; "
             f"re-run qualify against the artifact rather than reusing them")
-    if not isinstance(raw["qualification"], dict) or not raw["qualification"]:
+    qualification = raw["qualification"]
+    if not isinstance(qualification, dict):
+        raise InstanceRefused("qualification must be a JSON object")
+    supplied = set(qualification)
+    if missing := REQUIRED_QUALIFICATION_KEYS - supplied:
         raise InstanceRefused(
-            "qualification must record, per placeholder, the rule it satisfied; "
-            "an Instance that does not say how it qualified qualifies nothing")
+            f"qualification is missing {sorted(missing)}; an Instance must "
+            f"record, for EVERY case whose geography it fixes, the rule that "
+            f"geography satisfied. A partial block says some cases qualified "
+            f"and is silent about the rest, which qualifies nothing")
+    if unknown := supplied - REQUIRED_QUALIFICATION_KEYS:
+        raise InstanceRefused(
+            f"qualification carries unknown key(s): {sorted(unknown)}; a typo "
+            f"here would leave the case it was meant to qualify unqualified "
+            f"while the block looked complete")
+    for key in sorted(REQUIRED_QUALIFICATION_KEYS):
+        entry = qualification[key]
+        if not isinstance(entry, dict) or not str(entry.get("rule", "")).strip():
+            raise InstanceRefused(
+                f"qualification[{key}] records no rule; naming a geography is "
+                f"not qualifying it")
 
     # `governs_run` is what ties this Instance to one Stage 1 run. Left blank or
     # left as the placeholder `qualify` wrote, it ties it to nothing -- and an
@@ -389,6 +426,7 @@ def load_instance(path: Path, materialized: Materialized) -> Stage1Instance:
         qualification=dict(raw["qualification"]),
         staleness_bound_days=int(bound),
         governs_run=str(raw["governs_run"]),
+        substitutions=dict(substitutions),
     )
 
 
@@ -497,7 +535,8 @@ def _type_mix(m: Materialized, sector: str, *, months: int,
     return {str(r[0]): int(r[1]) for r in rows}
 
 
-def qualify(m: Materialized, *, today: Optional[date] = None) -> dict[str, Any]:
+def qualify(m: Materialized, *, today: Optional[date] = None,
+            definitional: Optional[dict[str, str]] = None) -> dict[str, Any]:
     """Select the seven placeholders and measure the three baselines.
 
     Read-only throughout: aggregate COUNT and GROUP BY only, no download, no
@@ -505,15 +544,19 @@ def qualify(m: Materialized, *, today: Optional[date] = None) -> dict[str, Any]:
     **candidate** Instance for review, never a runtime input.
     """
     today = today or date.today()
+    definitional = {**DEFINITIONAL_GEOGRAPHIES, **(definitional or {})}
     qualification: dict[str, Any] = {}
     geo: dict[str, str] = {}
 
     # -- the three declared baselines, over the whole artifact ---------------
-    s1 = _aggregate(m, geography_sql="outcode = ?", geo_params=["B5"],
+    s1 = _aggregate(m, geography_sql="outcode = ?",
+                    geo_params=[definitional["S1_district"]],
                     months=24, today=today)
-    s3 = _aggregate(m, geography_sql="sector = ?", geo_params=["B5 4"],
+    s3 = _aggregate(m, geography_sql="sector = ?",
+                    geo_params=[definitional["S3_sector"]],
                     months=24, today=today)
-    s9 = _aggregate(m, geography_sql="sector = ?", geo_params=["B5 4"],
+    s9 = _aggregate(m, geography_sql="sector = ?",
+                    geo_params=[definitional["S3_sector"]],
                     months=24, today=today, category=None)
     baselines = {"S1_full": s1, "S3_full": s3, "S9_full": s9}
 
@@ -524,22 +567,39 @@ def qualify(m: Materialized, *, today: Optional[date] = None) -> dict[str, Any]:
     # never checking the neighbour was qualifying neither: a B50 with no rows
     # makes S1 a test that cannot fail and S2 a case with nothing in it.
     unqualified_definitional: list[str] = []
-    s2_full = _aggregate(m, geography_sql="outcode = ?", geo_params=["B50"],
+    requires_adjudication: list[str] = []
+    s2_full = _aggregate(m, geography_sql="outcode = ?",
+                         geo_params=[definitional["S2_neighbour_district"]],
                          months=24, today=today)
     ratio = (s2_full / s1) if s1 else 0.0
     qualification["S1_district"] = {
         "rule": ("the longer neighbouring outcode holds comparable or greater "
-                 f"volume, operationalised as at least "
-                 f"{MIN_NEIGHBOUR_VOLUME_RATIO:.0%} of this district's rows"),
+                 "volume (Definition section 4)"),
+        "geography": definitional["S1_district"],
         "measured_rows": s1,
+        "neighbour_geography": definitional["S2_neighbour_district"],
         "measured_neighbour_rows": s2_full,
         "measured_neighbour_ratio": round(ratio, 4),
-        "threshold_is_an_operationalisation": True,
+        "comparable_or_greater": bool(s1 > 0 and ratio >= NEIGHBOUR_COMPARABLE_RATIO),
     }
-    if s1 <= 0 or ratio < MIN_NEIGHBOUR_VOLUME_RATIO:
+    if s1 <= 0:
+        # No rows in the district at all: nothing to qualify, and no judgement
+        # to refer.
         unqualified_definitional.append("S1_district")
+    elif ratio < NEIGHBOUR_COMPARABLE_RATIO:
+        # Below the literal rule. NOT auto-failed and NOT auto-passed: whether
+        # this artifact's neighbour volume is "comparable" is the owner's
+        # judgement, and the Definition offers accept-or-substitute. This tool
+        # supplies the measurement and stops there.
+        requires_adjudication.append("S1_district")
+        qualification["S1_district"]["adjudication"] = (
+            f"the neighbour holds {ratio:.1%} of the district's rows, which is "
+            f"below the literal 'comparable or greater'. Accept it for this "
+            f"artifact, or substitute a geography with recorded justification "
+            f"(Definition section 4). This tool does not decide.")
     qualification["S2_district"] = {
         "rule": "non-empty under frozen parameters",
+        "geography": definitional["S2_neighbour_district"],
         "measured_rows": s2_full,
     }
     if s2_full <= 0:
@@ -675,6 +735,14 @@ def qualify(m: Materialized, *, today: Optional[date] = None) -> dict[str, Any]:
         # choosing a different geography -- B5/B50 IS the contamination
         # boundary the corpus is built around.
         "unqualified_definitional_cases": sorted(unqualified_definitional),
+        # Measured, not decided. A judgement the Definition reserves to the
+        # owner, with the figures needed to make it.
+        "requires_owner_adjudication": sorted(requires_adjudication),
+        "substitution_route": (
+            "Definition section 4 permits substituting a definitional geography "
+            "with recorded justification. Supply all of "
+            f"{sorted(DEFINITIONAL_GEOGRAPHIES)} under the Instance's "
+            "`substitutions` key, each with a `geography` and a `justification`."),
         "unqualified_placeholders": sorted(
             {"S4_thin", "S5_dense", "S6_unit", "S7_type_weak", "S8_type_strong",
              "S11_provisional_empty", "S13_empty_unit"} - set(geo)),
@@ -1127,7 +1195,7 @@ def run_compare(*, instance: Stage1Instance, materialized: Materialized,
 
     identity = materialized.identity()
     started_at = time.monotonic()
-    corpus = cases(instance.geographies)
+    corpus = cases(instance.geographies, instance.substitutions)
 
     results: list[dict[str, Any]] = []
     snapshot_errors: list[dict[str, Any]] = []
@@ -1183,10 +1251,22 @@ def run_compare(*, instance: Stage1Instance, materialized: Materialized,
                 midnight["unrecoverable"] = True
                 results.append(record)
                 raise
-            except Exception as exc:  # noqa: BLE001 -- recorded, never propagated
+            except Exception as exc:  # noqa: BLE001 -- recorded, then stops the run
+                # Recorded and then fatal. "Zero snapshot errors on the frozen
+                # corpus" is already unreachable at this point, so every later
+                # case is work whose result cannot change the verdict -- and
+                # the live call this case would otherwise make is a request to
+                # HM Land Registry for a comparison that can no longer happen.
+                # The partial report is still written; a run that stopped for a
+                # reason is evidence about that reason.
                 snapshot_errors.append({"shape": case.shape,
                                         "error": f"{type(exc).__name__}: {exc}"})
                 record["snapshot_error"] = f"{type(exc).__name__}: {exc}"
+                results.append(record)
+                raise RunAborted(
+                    f"{case.shape}: the snapshot arm failed "
+                    f"({type(exc).__name__}: {exc}); no live call is made for "
+                    f"this case and no later case runs")
 
             live_response = None
             check_live_budget(live_calls, limits, len(corpus), case.shape)
@@ -1203,10 +1283,15 @@ def run_compare(*, instance: Stage1Instance, materialized: Materialized,
                     midnight["unrecoverable"] = True
                     results.append(record)
                     raise
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 -- recorded, then stops
                     live_errors.append({"shape": case.shape,
                                         "error": f"{type(exc).__name__}: {exc}"})
                     record["live_error"] = f"{type(exc).__name__}: {exc}"
+                    results.append(record)
+                    raise RunAborted(
+                        f"{case.shape}: the live arm failed "
+                        f"({type(exc).__name__}: {exc}); completeness is already "
+                        f"lost, so no later case runs")
             time.sleep(limits.live_delay_seconds)
 
             if snap_response is not None and live_response is not None:
@@ -1593,6 +1678,13 @@ def main(argv: Optional[list[str]] = None) -> int:
                 failed = True
             if not out["baselines_satisfy_their_relations"]:
                 print(f"BASELINES UNUSABLE: {out['baselines_refusal']}")
+                failed = True
+            if out["requires_owner_adjudication"]:
+                # Not a failure of the artifact, and not something this tool may
+                # settle. Non-zero all the same: a candidate awaiting a
+                # judgement is not a candidate ready to run.
+                print("REQUIRES OWNER ADJUDICATION: "
+                      f"{out['requires_owner_adjudication']}")
                 failed = True
             return 1 if failed else 0
 

@@ -311,3 +311,31 @@ def test_the_definition_excludes_non_machine_latency_from_the_percentile():
     body = _normalised(DEFINITION)
     assert "controlled_synthetic" in body
     assert "excluded from this percentile" in body
+
+
+def test_the_definition_decides_the_postcode_less_row_question():
+    """§11 left it undecided; leaving it so in code would settle it silently.
+
+    Skipping a returned row that carries no postcode means a source could
+    return arbitrary rows with the geography blanked and every containment
+    check would pass. The decision is recorded here, before Stage 1, rather
+    than living only in an implementation.
+    """
+    body = _normalised(DEFINITION)
+    assert "Decided before Stage 1 began" in body
+    assert "containment failure" in body
+    assert "rows_without_postcode" in body
+
+
+def test_the_definition_forbids_weakening_the_neighbour_volume_rule():
+    """The rule stays qualitative, and tooling refers rather than redefines."""
+    body = _normalised(DEFINITION)
+    assert "refers the judgement rather than deciding it" in body
+    assert "is forbidden" in body
+    assert "substitute with recorded justification" in body
+
+
+def test_the_definition_keeps_the_substitution_route_and_links_the_three():
+    body = _normalised(DEFINITION)
+    assert "may substitute with recorded justification" in body
+    assert "silently false" in body

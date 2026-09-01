@@ -142,6 +142,18 @@ because that boundary is a definitional choice rather than an artifact property,
 though an Instance must still qualify them and may substitute with recorded
 justification.
 
+**On S1's rule.** "Comparable or greater volume" is qualitative, and it stays
+qualitative: tooling checks it literally and, where an artifact falls below it,
+**refers the judgement rather than deciding it**. A threshold weaker than the
+words — an implementation quietly reading "comparable" as, say, a tenth — would
+be a downward revision of a frozen qualification rule made inside code, and is
+forbidden. The two ways to settle a below-threshold artifact are the ones this
+section already gives: accept it for that artifact with the decision recorded,
+or substitute with recorded justification. Substitution moves `B5`, `B50` and
+`B5 4` **together**: S3 and S9 are a sector inside S1's district and S2 is its
+neighbouring outcode, so moving one alone leaves the containment relation the
+baselines establish silently false.
+
 | # | Request shape | Intent | Instance qualifies by verifying |
 |---|---|---|---|
 | S1 | `postcode=B5`, `search_level=district` | contamination boundary | the longer neighbouring outcode holds comparable or greater volume |
@@ -407,7 +419,17 @@ and the Stage 1 run it governs.
   S13 and S14 use geographies with confirmed activity and an empty *filter*.
 * **Rows with no geography** — a small share of PPD rows carry no postcode, and
   so can never be returned by a geography-filtered query while still counting
-  toward snapshot totals. Whether any case should assert this is undecided.
+  toward snapshot totals. **Decided before Stage 1 began:** a row *returned* by
+  a geography-filtered query while carrying no usable postcode is a
+  **containment failure**, on whichever arm produced it, and blocks exit. This
+  is about what a query returns, not about rows sitting un-returnable in the
+  artifact — the limit above is unchanged.
+
+  Leaving it open in the implementation would have settled it in the weakest
+  direction: skipping such rows means a source could return arbitrary rows with
+  the postcode blanked and every containment check would still pass. Only the
+  count reaches a report (`rows_without_postcode`); the row is by definition the
+  one whose geography cannot be stated, so there is nothing else safe to record.
 * **All shape expectations are snapshot-side.** Live counts are unknown by
   construction; establishing them would require live queries, which are
   separately authorised.

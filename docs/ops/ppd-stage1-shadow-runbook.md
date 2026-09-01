@@ -89,8 +89,9 @@ scope — `Dockerfile.app` is untouched by this work, `propertydata` carries no
 carry the comparator, and G1b is neither attempted nor affected. "Untouched"
 means untouched in configuration and scope, not that no deploy reaches it.
 
-After the release completes, confirm what is actually running — from the app,
-never from git:
+### Post-release checks — `property-shared`
+
+Confirm what is actually running, from the app and never from git:
 
 ```bash
 fly image show -a property-shared
@@ -101,6 +102,34 @@ A deploy restarts the Machine, so the ephemeral rootfs is wiped and the snapshot
 re-materializes. Wait for `state: ready` again before continuing (Phase E
 measured ~44 s after readiness). Confirm `enabled: false` and `routable: false`
 have not changed.
+
+### Post-release checks — `propertydata`
+
+**This app is redeployed by the same release and must be checked, not assumed.**
+It is out of Stage 1 scope, which is a statement about what changes — not a
+reason to skip verifying that nothing did. Its `/health` carries no snapshot
+block, so the checks are external:
+
+```bash
+# 1. It is serving.
+curl -s -o /dev/null -w '%{http_code}\n' https://propertydata.fly.dev/health   # 200
+fly status -a propertydata                                                     # machine started, checks passing
+
+# 2. No snapshot configuration reached it. Expect NO PPD_SNAPSHOT_* entries.
+fly secrets list -a propertydata
+
+# 3. It did not gain the comparator or the boot verifier.
+fly ssh console -a propertydata -C "ls /app/tools/ppd_snapshot/stage1_shadow.py"  # expect: no such file
+fly ssh console -a propertydata -C "ls /app/boot_only_verify.py"                  # expect: no such file
+
+# 4. The MCP surface still answers.
+fly image show -a propertydata
+```
+
+If any of these differ from the expectation, **stop**: `propertydata` has
+changed in a way this work did not intend, and that is a finding in its own
+right rather than something to note and continue past. G1b remains unattempted
+either way — passing G1a authorises neither `propertydata` nor Stage 3.
 
 ## Step 2 — qualify the artifact
 
@@ -133,14 +162,23 @@ Check two fields before going further:
   frozen parameters, and S1 needs a neighbour carrying enough volume for
   B50-in-B5 contamination to be visible at all. Against a near-empty `B50`, a
   clean S1 result proves nothing — the contamination boundary becomes a test
-  that cannot fail. Unlike the seven placeholders these cannot be substituted:
-  `B5`/`B50` *is* the boundary the corpus is built around.
+  that cannot fail.
+* `requires_owner_adjudication` — must be empty **before Stage 1 runs**, and it
+  is not a failure. §4 states S1's rule qualitatively: *the longer neighbouring
+  outcode holds comparable or greater volume*. The tool checks that literally
+  (`NEIGHBOUR_COMPARABLE_RATIO = 1.0`) and, where the artifact falls below it,
+  **neither passes nor fails the case** — it records the measured ratio and
+  refers the judgement. "Is 0.6 comparable for this artifact?" is a decision
+  about the corpus, and §4 already gives the two ways to settle it:
 
-  The Definition states S1's rule qualitatively ("comparable or greater
-  volume"). A tool needs a number, so the threshold is named in
-  `MIN_NEIGHBOUR_VOLUME_RATIO` and the **measured ratio is recorded beside it**
-  under `threshold_is_an_operationalisation` — judge the operationalisation
-  rather than trust it.
+  1. **accept it** for this artifact, recording that decision; or
+  2. **substitute** the definitional geographies with recorded justification.
+
+  An earlier revision of this tool auto-qualified at a 10% ratio. That was
+  wrong twice over — a tenth is not "comparable or greater", and redefining a
+  frozen qualification rule downwards is not something an implementation may
+  do. It is recorded here so the mistake is not repeated by someone who thinks
+  a threshold is missing.
 
 **`qualify` exits non-zero on any of those**, so a scripted invocation cannot
 mistake an unusable candidate for success.
@@ -153,6 +191,25 @@ evidence/configuration change**:
 ```bash
 fly ssh sftp get /tmp/stage1-candidate-instance.json
 ```
+
+### Substituting a definitional geography
+
+§4 permits replacing `B5` / `B50` / `B5 4` **with recorded justification**. The
+Instance carries an optional `substitutions` block, and all three move together
+— S3 is a sector inside S1's district and S2 is its neighbouring outcode, so
+substituting one alone would leave the containment relation the baselines exist
+to establish silently false:
+
+```json
+"substitutions": {
+  "S1_district":           {"geography": "M3",   "justification": "..."},
+  "S2_neighbour_district": {"geography": "M30",  "justification": "..."},
+  "S3_sector":             {"geography": "M3 7", "justification": "..."}
+}
+```
+
+A substitution with no justification is refused: the Definition permits the
+route only *with* one.
 
 `staleness_bound_days` is **enforced at load, not merely recorded**: the
 comparator refuses an Instance older than its own bound. The artifact is fixed,
@@ -203,9 +260,16 @@ they have a control they do not have. The live budget
 (`max_live_per_case x 13`) is checked before every live call, so the declared
 bound survives a code change rather than resting on the shape of the loop.
 
-The run stops, and still writes its report, on any of: a failed `/v1/health`, a
-Machine `MemAvailable` below the floor, the deadline, an unclassified
-divergence, or a midnight crossing. A health, memory and deadline check also
+The run stops, and still writes its report, on any of: **the first error on
+either arm**, a failed `/v1/health`, a Machine `MemAvailable` below the floor,
+the deadline, an unclassified divergence, or a midnight crossing.
+
+**A snapshot-arm failure stops the run before that case makes its live call.**
+Once the snapshot arm has failed, `zero_snapshot_errors` is unreachable, so
+every later case is work whose result cannot change the verdict — and the live
+call would be a request to HM Land Registry for a comparison that can no longer
+take place. A live-arm failure stops the run for the same reason:
+`all_thirteen_cases_compared` is already lost. A health, memory and deadline check also
 runs **after the final observation**, so a run cannot finish on a Machine that
 went bad during its last case and report a pass measured under conditions
 nobody checked.
@@ -296,6 +360,14 @@ neither arm is assumed clean because the other is:
 | `district` | its outcode differs (`B50` in a `B5` result) |
 | `sector` | its outcode differs, **or its sector does** (`B5 6` in a `B5 4` result) |
 | `postcode` | either of the above, **or it is a different unit in the same sector** |
+
+A returned row carrying **no usable postcode** is a containment failure at every
+level, on either arm. §11 lists such rows as a known limit and leaves the
+question open; skipping them would settle it in the weakest possible direction,
+since a source could then return arbitrary rows with the postcode blanked and
+every containment check would pass. Only `rows_without_postcode: N` is
+persisted — the row is by definition the one whose geography cannot be stated,
+so there is nothing else safe to record about it.
 
 An outcode-only test passes a sector case handed a neighbouring sector in the
 same outcode — which is the sector-isolation trap the Definition names in its

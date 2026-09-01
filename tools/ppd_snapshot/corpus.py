@@ -42,6 +42,26 @@ REQUIRED_GEOGRAPHIES = frozenset({
 #: declared, and checked for consistency with what they claim to establish.
 REQUIRED_BASELINES = frozenset({"S1_full", "S3_full", "S9_full"})
 
+#: The definitional geographies of section 4, and the route by which an
+#: Instance may replace them.
+#:
+#: `B5` / `B50` / `B5 4` are named in the Definition because the contamination
+#: boundary is a definitional choice rather than an artifact property -- but
+#: section 4 is equally explicit that an Instance "must still qualify them and
+#: may substitute with recorded justification". The substitution route is part
+#: of the frozen contract, not a convenience, so it is implemented rather than
+#: asserted away.
+#:
+#: The three move together. S3 and S9 are a sector *inside* S1's district and
+#: S2 is its neighbouring outcode; substituting S1 alone would leave S3 outside
+#: it and quietly invalidate the containment relation the baselines exist to
+#: establish. So an Instance supplies all three or none.
+DEFINITIONAL_GEOGRAPHIES: dict[str, str] = {
+    "S1_district": "B5",
+    "S2_neighbour_district": "B50",
+    "S3_sector": "B5 4",
+}
+
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 VERSION_RE = re.compile(r"^v\d{8}T\d{6}Z$")
 #: Outward code, optional sector digit, optional unit. Deliberately narrow: a
@@ -107,12 +127,21 @@ class Case:
         }
 
 
-def cases(geo: dict[str, str]) -> list[Case]:
-    """The Definition's thirteen shapes, with placeholders resolved."""
+def cases(geo: dict[str, str],
+          definitional: Optional[dict[str, str]] = None) -> list[Case]:
+    """The Definition's thirteen shapes, with placeholders resolved.
+
+    `definitional` overrides the section 4 geographies for an Instance that
+    recorded a substitution and its justification; omitted, the defaults apply.
+    """
+    fixed = {**DEFINITIONAL_GEOGRAPHIES, **(definitional or {})}
+    district = fixed["S1_district"]
+    neighbour = fixed["S2_neighbour_district"]
+    sector = fixed["S3_sector"]
     return [
-        Case("S1", "contamination boundary", "B5", "district"),
-        Case("S2", "reverse boundary", "B50", "district"),
-        Case("S3", "sector isolation", "B5 4", "sector"),
+        Case("S1", "contamination boundary", district, "district"),
+        Case("S2", "reverse boundary", neighbour, "district"),
+        Case("S3", "sector isolation", sector, "sector"),
         Case("S4", "thin market", geo["S4_thin"], "sector"),
         Case("S5", "dense market and truncation", geo["S5_dense"], "sector"),
         Case("S6", "exact-postcode geography", geo["S6_unit"], "postcode"),
@@ -120,16 +149,17 @@ def cases(geo: dict[str, str]) -> list[Case]:
              property_type="F"),
         Case("S8", "type filter genuinely bites", geo["S8_type_strong"], "sector",
              property_type="F"),
-        Case("S9", "category filtering", "B5 4", "sector",
+        Case("S9", "category filtering", sector, "sector",
              transaction_category=None),
         # S10 removed: "provisional tail, non-empty" discriminates nothing now
         # that every comps case is provisional (Definition section 3).
         Case("S11", "provisional flag is a window property",
              geo["S11_provisional_empty"], "sector", months=6),
-        Case("S12", "widest window, deepest history", "B5", "district", months=120),
+        Case("S12", "widest window, deepest history", district, "district",
+             months=120),
         Case("S13", "expected empty", geo["S13_empty_unit"], "postcode",
              property_type="D"),
-        Case("S14", "expected empty, sector shape", "B5 4", "sector",
+        Case("S14", "expected empty, sector shape", sector, "sector",
              property_type="T"),
     ]
 
@@ -220,10 +250,19 @@ def geography_violations(case: "Case", transactions: Iterable[Any]) -> dict[str,
     unexpected_outcodes: set[str] = set()
     unexpected_sectors: set[str] = set()
     same_sector_unit_violations = 0
+    rows_without_postcode = 0
 
     for transaction in transactions:
         pc = (getattr(transaction, "postcode", None) or "").strip().upper()
         if not pc:
+            # A row a geography-filtered query cannot justify returning. Section
+            # 11 lists these as a known limit and leaves the question open;
+            # skipping them here would decide it silently and in the weakest
+            # direction -- a source could return arbitrary rows with the
+            # postcode blanked and every containment check would pass. Counted,
+            # and blocking. Only the count is persisted: the row is by
+            # definition the one whose geography cannot be stated.
+            rows_without_postcode += 1
             continue
         row_head, _, row_tail = pc.partition(" ")
         row_sector = f"{row_head} {row_tail[0]}" if row_tail else None
@@ -244,13 +283,16 @@ def geography_violations(case: "Case", transactions: Iterable[Any]) -> dict[str,
         "unexpected_outcodes": sorted(unexpected_outcodes),
         "unexpected_sectors": sorted(unexpected_sectors),
         "same_sector_unit_violations": same_sector_unit_violations,
+        "rows_without_postcode": rows_without_postcode,
     }
 
 
 def is_contaminated(violations: dict[str, Any]) -> bool:
+    """Any of the four is a containment failure, on whichever arm produced it."""
     return bool(violations["unexpected_outcodes"]
                 or violations["unexpected_sectors"]
-                or violations["same_sector_unit_violations"])
+                or violations["same_sector_unit_violations"]
+                or violations["rows_without_postcode"])
 
 
 def ids(transactions: Iterable[Any]) -> set[str]:
@@ -400,3 +442,45 @@ def returned_date_bounds(transactions: Any) -> tuple[Optional[str], Optional[str
     """
     dates = sorted(t.date for t in transactions if getattr(t, "date", None))
     return (dates[0], dates[-1]) if dates else (None, None)
+
+
+def validate_substitutions(raw: Any) -> dict[str, str]:
+    """An Instance's recorded substitution of the definitional geographies.
+
+    Absent is the normal case and yields `{}`. Present, it must supply all
+    three linked geographies, each with a justification: the Definition permits
+    substitution *with recorded justification*, so a substitution carrying no
+    reason is not the route it documents.
+    """
+    if raw in (None, {}):
+        return {}
+    if not isinstance(raw, dict):
+        raise InstanceRefused("substitutions must be a JSON object")
+    supplied = set(raw)
+    expected = set(DEFINITIONAL_GEOGRAPHIES)
+    if supplied != expected:
+        raise InstanceRefused(
+            f"substitutions must supply all of {sorted(expected)} or none; got "
+            f"{sorted(supplied)}. S3 is a sector inside S1's district and S2 is "
+            f"its neighbouring outcode, so substituting one alone would leave "
+            f"the containment relation the baselines establish silently false.")
+    resolved: dict[str, str] = {}
+    for key in sorted(expected):
+        entry = raw[key]
+        if not isinstance(entry, dict):
+            raise InstanceRefused(
+                f"substitutions[{key}] must be an object with a geography and "
+                f"a justification")
+        geography = entry.get("geography")
+        justification = entry.get("justification")
+        if not isinstance(geography, str) or not GEOGRAPHY_RE.match(
+                geography.strip().upper()):
+            raise InstanceRefused(
+                f"substitutions[{key}].geography is {geography!r}, which is "
+                f"not a postcode, sector or outcode")
+        if not isinstance(justification, str) or not justification.strip():
+            raise InstanceRefused(
+                f"substitutions[{key}] records no justification; the Definition "
+                f"permits substitution only WITH recorded justification")
+        resolved[key] = geography.strip().upper()
+    return resolved

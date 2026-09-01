@@ -86,7 +86,11 @@ def _instance_dict(m) -> dict:
         "geographies": dict(GEOGRAPHIES),
         "aggregate_baselines": {"S1_full": 100, "S3_full": 40, "S9_full": 55},
         "qualified_at": "2026-09-01",
-        "qualification": {"S5_dense": {"rule": "dense", "measured_rows": 30}},
+        # Complete: every case whose geography the Instance fixes.
+        "qualification": {
+            key: {"rule": "qualified for the test fixture"}
+            for key in sorted(s1.REQUIRED_QUALIFICATION_KEYS)
+        },
         "staleness_bound_days": 45,
         "governs_run": "stage-1-2026-09",
     }
@@ -375,46 +379,65 @@ def test_an_unhealthy_application_stops_the_run(materialized, instance, tmp_path
 # Failure isolation
 # ---------------------------------------------------------------------------
 
-def test_a_failing_live_arm_is_recorded_and_the_run_continues(
+def test_a_failing_snapshot_arm_aborts_before_any_live_call(
         materialized, instance, tmp_path, monkeypatch):
-    """A live failure is a fact about the run, not the end of it.
+    """Recorded, then fatal -- and the live call for that case never happens.
 
-    Mutation: let the exception escape the per-arm `except` and the run dies
-    with no report -- which is the outcome that leaves a gate undecidable.
+    Once the snapshot arm has failed, "zero snapshot errors on the frozen
+    corpus" is unreachable, so every later case is work whose result cannot
+    change the verdict. Making the live call anyway would be a request to HM
+    Land Registry for a comparison that can no longer take place.
+
+    Mutation: keep recording the error and fall through, and this run makes
+    thirteen live calls in service of a verdict already decided.
     """
     monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
-    live = FakeLive(raises=RuntimeError("upstream exploded"))
-    report = _run(materialized, instance, tmp_path, monkeypatch, live=live,
-                  latency_repeats=1, stop_on_unclassified=False)
-    assert report["aborted"] is None
-    assert len(report["live_errors"]) == 13
-    assert "upstream exploded" in report["live_errors"][0]["error"]
-    assert report["cases_total"] == 13
-
-
-def test_a_failing_snapshot_arm_is_recorded_and_fails_the_gate(
-        materialized, instance, tmp_path, monkeypatch):
-    """Recorded, not propagated -- and it must still fail the exit criterion.
-
-    "Zero snapshot errors on the frozen corpus" is only meaningful if an error
-    that was caught still counts. Swallowing it into a green report would be
-    the worst of both.
-    """
-    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    monkeypatch.setattr(s1.time, "sleep", lambda *_: None)
 
     class Exploding:
         def comps(self, **kwargs):
             raise RuntimeError("snapshot query failed")
 
+    live = FakeLive()
     report = s1.run_compare(
         instance=instance, materialized=materialized,
         limits=s1.RunLimits(live_delay_seconds=0.0, latency_repeats=1,
                             stop_on_unclassified=False),
         report_path=tmp_path / "report.json",
-        live_service=FakeLive(), snapshot_service=Exploding())
-    assert report["aborted"] is None
+        live_service=live, snapshot_service=Exploding())
+    assert report["aborted"] and "snapshot arm failed" in report["aborted"]
+    assert "no live call is made" in report["aborted"]
+    assert live.calls == [], "a live call was made after the snapshot arm failed"
+    assert len(report["cases"]) == 1, "a later case ran after the first failure"
     assert report["exit_criteria"]["zero_snapshot_errors"]["passed"] is False
     assert report["passed"] is False
+    assert (tmp_path / "report.json").is_file(), (
+        "the run aborted without writing the partial failed report")
+
+
+def test_a_failing_live_arm_aborts_and_no_later_case_runs(
+        materialized, instance, tmp_path, monkeypatch):
+    """Completeness is already lost, so continuing gathers nothing usable.
+
+    Mutation: record the error and continue, and the report accumulates twelve
+    more cases whose comparisons cannot rescue a verdict that has already
+    failed `all_thirteen_cases_compared`.
+    """
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    monkeypatch.setattr(s1.time, "sleep", lambda *_: None)
+    live = FakeLive(raises=RuntimeError("upstream exploded"))
+    report = s1.run_compare(
+        instance=instance, materialized=materialized,
+        limits=s1.RunLimits(live_delay_seconds=0.0, latency_repeats=1,
+                            stop_on_unclassified=False),
+        report_path=tmp_path / "report.json",
+        live_service=live, snapshot_service=None)
+    assert report["aborted"] and "live arm failed" in report["aborted"]
+    assert len(report["live_errors"]) == 1, "more than one case was attempted"
+    assert len(live.calls) == 1
+    assert len(report["cases"]) == 1
+    assert report["passed"] is False
+    assert (tmp_path / "report.json").is_file()
 
 
 # ---------------------------------------------------------------------------
@@ -618,7 +641,7 @@ ALLOWED_KEYS = {
     # unit-level violation inside the requested sector is a COUNT, never a
     # named postcode.
     "arm", "level", "unexpected_outcodes", "unexpected_sectors",
-    "same_sector_unit_violations",
+    "same_sector_unit_violations", "rows_without_postcode",
     "vacuous_comparison_shapes", "verdict", "n", "p95_ms",
     "required_observations", "required_repeats_per_case",
     "cases_short_of_the_required_repeats",
@@ -1140,12 +1163,18 @@ def agreeing_live(materialized):
 
 def test_a_live_arm_error_makes_the_verdict_false(materialized, instance,
                                                   tmp_path, monkeypatch):
-    """Item 1. A report is not allowed to pass while an arm failed."""
+    """A report is not allowed to pass while an arm failed.
+
+    The run now stops at the first failure, so the evidence is one error and
+    twelve cases never reached -- both of which block completeness.
+    """
     live = FakeLive(raises=RuntimeError("upstream exploded"))
     report = _full_run(materialized, instance, tmp_path, monkeypatch,
                        live=live, repeats=s1.REQUIRED_LATENCY_REPEATS)
-    assert report["exit_criteria"]["all_thirteen_cases_compared"]["passed"] is False
-    assert report["exit_criteria"]["all_thirteen_cases_compared"]["live_errors"] == 13
+    criterion = report["exit_criteria"]["all_thirteen_cases_compared"]
+    assert criterion["passed"] is False
+    assert criterion["live_errors"] == 1
+    assert len(criterion["cases_never_reached"]) == 12
     assert report["passed"] is False
 
 
@@ -1678,10 +1707,14 @@ def test_qualification_fails_when_b50_is_empty(tmp_path, monkeypatch):
                     "--out", str(tmp_path / "candidate.json")])
     assert code == 1
     out = json.loads((tmp_path / "candidate.json").read_text())
+    # S2 has nothing in it: an outright qualification failure.
     assert "S2_district" in out["unqualified_definitional_cases"]
-    assert "S1_district" in out["unqualified_definitional_cases"]
     assert out["candidate_instance"]["qualification"]["S2_district"][
         "measured_rows"] == 0
+    # S1's district is populated, so the question is not "did it fail" but
+    # "is a neighbour holding 0% comparable?" -- which is the owner's call.
+    assert "S1_district" in out["requires_owner_adjudication"]
+    assert "S1_district" not in out["unqualified_definitional_cases"]
 
 
 def test_a_definitional_failure_alone_makes_qualify_exit_non_zero(
@@ -1693,9 +1726,14 @@ def test_a_definitional_failure_alone_makes_qualify_exit_non_zero(
     test noticing. This drives the exit code from a definitional failure alone.
     """
     payload = s1.qualify(materialized)
+    # Every OTHER reason to exit non-zero is cleared, so the exit code can only
+    # be coming from the definitional branch. Leaving adjudication populated
+    # masked this: the run exited 1 either way and the branch could have been
+    # dead without any test noticing.
     payload["unqualified_placeholders"] = []
     payload["baselines_satisfy_their_relations"] = True
     payload["baselines_refusal"] = None
+    payload["requires_owner_adjudication"] = []
     payload["unqualified_definitional_cases"] = ["S2_district"]
     monkeypatch.setattr(s1, "qualify", lambda *a, **k: payload)
     monkeypatch.setenv(s1.SHADOW_COMPARE_ENABLED_ENV, "1")
@@ -1724,9 +1762,12 @@ def test_qualification_records_the_neighbour_ratio_it_judged_on(tmp_path):
     s1_block = out["candidate_instance"]["qualification"]["S1_district"]
     assert s1_block["measured_neighbour_rows"] == 20
     assert s1_block["measured_neighbour_ratio"] == 1.0
-    assert s1_block["threshold_is_an_operationalisation"] is True
+    # Equal volume IS "comparable or greater", so this one qualifies outright
+    # and needs no judgement from anybody.
+    assert s1_block["comparable_or_greater"] is True
     assert "S1_district" not in out["unqualified_definitional_cases"]
     assert "S2_district" not in out["unqualified_definitional_cases"]
+    assert "S1_district" not in out["requires_owner_adjudication"]
 
 
 # ---------------------------------------------------------------------------
@@ -1901,4 +1942,304 @@ def test_the_runbook_documents_enforced_staleness_and_b50_qualification():
     body = RUNBOOK.read_text()
     assert "enforced at load, not merely recorded" in body
     assert "unqualified_definitional_cases" in body
-    assert "MIN_NEIGHBOUR_VOLUME_RATIO" in body
+    assert "NEIGHBOUR_COMPARABLE_RATIO" in body
+
+
+# ---------------------------------------------------------------------------
+# A row with no usable postcode is a containment failure
+# ---------------------------------------------------------------------------
+
+def test_a_row_with_no_postcode_is_a_containment_violation():
+    """Skipping it would decide an open question in the weakest direction.
+
+    Definition section 11 lists rows with no geography as a known limit and
+    leaves the question open. Silently skipping them settles it: a source could
+    return arbitrary rows with the postcode blanked and every containment check
+    would pass. Mutation: `continue` past them and this returns clean.
+    """
+    rows = [PPDTransaction(transaction_id="A", postcode="B5 4AA", date="2026-05-01"),
+            PPDTransaction(transaction_id="B", postcode=None, date="2026-05-01"),
+            PPDTransaction(transaction_id="C", postcode="   ", date="2026-05-01")]
+    violations = s1.geography_violations(_case("S3", "B5 4", "sector"), rows)
+    assert violations["rows_without_postcode"] == 2
+    assert s1.is_contaminated(violations) is True
+
+
+def test_a_postcode_less_row_is_counted_never_described():
+    """Only a count. The row is by definition the one whose geography cannot
+    be stated, so there is nothing safe to record about it beyond how many."""
+    rows = [PPDTransaction(transaction_id="SECRET-ID", postcode=None,
+                           date="2026-05-01", price=999_000, street="HIGH STREET")]
+    violations = s1.geography_violations(_case("S1", "B5", "district"), rows)
+    body = json.dumps(violations)
+    assert "SECRET-ID" not in body and "HIGH STREET" not in body
+    assert "999000" not in body
+    assert violations["rows_without_postcode"] == 1
+
+
+def test_postcode_less_rows_block_the_verdict_on_either_arm(
+        materialized, instance, tmp_path, monkeypatch, agreeing_live):
+    """End to end, on the live arm."""
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    monkeypatch.setattr(s1.time, "sleep", lambda *_: None)
+    blank = FakeLive(transactions=[
+        PPDTransaction(transaction_id="X", postcode=None, date="2026-05-01")])
+    report = _full_run(materialized, instance, tmp_path, monkeypatch,
+                       live=blank, repeats=1)
+    criterion = report["exit_criteria"]["zero_geography_contamination"]
+    assert criterion["passed"] is False
+    assert any(f["rows_without_postcode"] > 0 for f in criterion["findings"])
+    assert report["passed"] is False
+
+
+# ---------------------------------------------------------------------------
+# The qualification block must be complete and exact
+# ---------------------------------------------------------------------------
+
+def test_a_partial_qualification_block_is_refused(materialized, tmp_path):
+    """Silent about the cases it omits, while looking like evidence.
+
+    Mutation: accept any non-empty dict and an Instance naming one rule for one
+    case qualifies all thirteen.
+    """
+    partial = {"S5_dense": {"rule": "dense"}}
+    path = _write(tmp_path, materialized, qualification=partial)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "qualification is missing" in str(exc.value)
+    assert "S1_district" in str(exc.value)
+
+
+def test_an_unknown_qualification_key_is_refused(materialized, tmp_path):
+    """A typo leaves the case it meant to qualify unqualified, block complete."""
+    block = {key: {"rule": "ok"} for key in s1.REQUIRED_QUALIFICATION_KEYS}
+    block["S5_dnese"] = {"rule": "typo"}
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "unknown key" in str(exc.value)
+    assert "S5_dnese" in str(exc.value)
+
+
+def test_a_qualification_entry_with_no_rule_is_refused(materialized, tmp_path):
+    """Naming a geography is not qualifying it."""
+    block = {key: {"rule": "ok"} for key in s1.REQUIRED_QUALIFICATION_KEYS}
+    block["S4_thin"] = {"measured_rows": 3}
+    path = _write(tmp_path, materialized, qualification=block)
+    with pytest.raises(InstanceRefused) as exc:
+        s1.load_instance(path, materialized)
+    assert "records no rule" in str(exc.value)
+
+
+def test_the_required_qualification_keys_cover_every_fixed_geography():
+    """Placeholders plus the definitional cases -- nothing fixed goes unrecorded."""
+    from tools.ppd_snapshot.corpus import REQUIRED_GEOGRAPHIES
+
+    assert s1.REQUIRED_QUALIFICATION_KEYS == (
+        set(REQUIRED_GEOGRAPHIES) | {"S1_district", "S2_district"})
+
+
+def test_a_qualify_candidate_satisfies_the_loader_it_will_be_checked_by(
+        tmp_path):
+    """The two halves of the same rule, again: what qualify writes, load accepts.
+
+    Mutation: add a key to one side only and a freshly generated candidate is
+    refused by the tool that generated it.
+    """
+    rows = [row(f"T-B54-{i:03d}", "B5 4AA", "2026-05-04", 200_000 + i)
+            for i in range(30)]
+    rows += [row(f"T-B50-{i:03d}", "B50 4AA", "2026-05-04", 400_000 + i)
+             for i in range(60)]
+    rows += [row("T-B54-CATB", "B5 4AB", "2026-05-04", 900_000, ppd_category="B")]
+    rows += [row(f"T-B56-{i:03d}", "B5 6QQ", "2026-05-04", 300_000 + i,
+                 property_type=t) for i, t in enumerate("DST")]
+    build_snapshot(tmp_path, rows, version="v20260828T194003Z")
+    opened = s1.open_materialized(tmp_path)
+    try:
+        candidate = s1.qualify(opened)["candidate_instance"]
+        assert set(candidate["qualification"]) == s1.REQUIRED_QUALIFICATION_KEYS - (
+            s1.REQUIRED_QUALIFICATION_KEYS - set(candidate["qualification"])), (
+            "qualify emitted qualification keys the loader does not expect")
+        assert not (set(candidate["qualification"])
+                    - s1.REQUIRED_QUALIFICATION_KEYS), (
+            "qualify emits a qualification key load_instance would refuse")
+    finally:
+        opened.adapter.close()
+
+
+# ---------------------------------------------------------------------------
+# The Definition's B5/B50 rule, unredefined; its substitution route, restored
+# ---------------------------------------------------------------------------
+
+def test_the_neighbour_rule_is_the_literal_one_not_a_weaker_threshold():
+    """A tenth is not "comparable or greater", and the tool no longer says so.
+
+    An earlier version auto-qualified S1 at a 10% neighbour ratio, quietly
+    redefining a frozen rule downwards inside an implementation. Mutation: set
+    this back below 1.0 and the deferral tests below stop deferring -- the tool
+    resumes deciding a question that is not its to decide.
+    """
+    assert s1.NEIGHBOUR_COMPARABLE_RATIO == 1.0
+    source = (REPO / "tools" / "ppd_snapshot" / "stage1_shadow.py").read_text()
+    assert "MIN_NEIGHBOUR_VOLUME_RATIO" not in source
+    assert "threshold_is_an_operationalisation" not in source
+
+
+def test_a_thin_neighbour_is_referred_to_the_owner_not_decided(tmp_path):
+    """Neither auto-passed nor auto-failed: measured, and handed over.
+
+    "Is 6% comparable for this artifact?" is a judgement about the corpus, and
+    the Definition already provides the two ways to settle it -- accept it, or
+    substitute a geography with recorded justification.
+    """
+    rows = [row(f"T-B54-{i:03d}", "B5 4AA", "2026-05-04", 200_000 + i)
+            for i in range(30)]
+    rows += [row("T-B50-001", "B50 4AA", "2026-05-04", 400_000)]
+    build_snapshot(tmp_path, rows, version="v20260828T194003Z")
+    opened = s1.open_materialized(tmp_path)
+    try:
+        out = s1.qualify(opened, today=date(2026, 6, 15))
+    finally:
+        opened.adapter.close()
+    block = out["candidate_instance"]["qualification"]["S1_district"]
+    assert block["comparable_or_greater"] is False
+    assert 0 < block["measured_neighbour_ratio"] < 1.0
+    assert "S1_district" in out["requires_owner_adjudication"]
+    # Not silently failed either -- the distinction is the point.
+    assert "S1_district" not in out["unqualified_definitional_cases"]
+    assert "This tool does not decide" in block["adjudication"]
+
+
+def test_adjudication_pending_makes_qualify_exit_non_zero(materialized, tmp_path,
+                                                          monkeypatch):
+    """A candidate awaiting a judgement is not a candidate ready to run."""
+    payload = s1.qualify(materialized)
+    # Symmetrically: every other reason cleared, so only adjudication remains.
+    payload["unqualified_placeholders"] = []
+    payload["unqualified_definitional_cases"] = []
+    payload["baselines_satisfy_their_relations"] = True
+    payload["baselines_refusal"] = None
+    payload["requires_owner_adjudication"] = ["S1_district"]
+    monkeypatch.setattr(s1, "qualify", lambda *a, **k: payload)
+    monkeypatch.setenv(s1.SHADOW_COMPARE_ENABLED_ENV, "1")
+    code = s1.main(["qualify", "--cache-dir", str(materialized.directory.parents[1]),
+                    "--out", str(tmp_path / "candidate.json")])
+    assert code == 1
+
+
+def test_the_substitution_route_the_definition_documents_still_exists():
+    """Section 4 permits substituting a definitional geography WITH justification.
+
+    A previous revision asserted these "cannot be substituted", which removed a
+    route the frozen contract grants. Mutation: drop `validate_substitutions`
+    and an Instance exercising the documented route is refused.
+    """
+    from tools.ppd_snapshot.corpus import DEFINITIONAL_GEOGRAPHIES, cases
+
+    assert set(DEFINITIONAL_GEOGRAPHIES) == {
+        "S1_district", "S2_neighbour_district", "S3_sector"}
+    substituted = {"S1_district": "M3", "S2_neighbour_district": "M30",
+                   "S3_sector": "M3 7"}
+    shapes = {c.shape: c.postcode for c in cases(GEOGRAPHIES, substituted)}
+    assert shapes["S1"] == "M3" and shapes["S12"] == "M3"
+    assert shapes["S2"] == "M30"
+    assert shapes["S3"] == "M3 7" and shapes["S9"] == "M3 7"
+    assert shapes["S14"] == "M3 7"
+    # Defaults still apply when nothing is substituted.
+    assert {c.shape: c.postcode for c in cases(GEOGRAPHIES)}["S1"] == "B5"
+
+
+def test_a_substitution_must_supply_all_three_linked_geographies():
+    """S3 is a sector inside S1's district; S2 is its neighbour.
+
+    Substituting one alone leaves S3 outside S1 and the containment relation
+    the baselines exist to establish silently false.
+    """
+    from tools.ppd_snapshot.corpus import validate_substitutions
+
+    with pytest.raises(InstanceRefused) as exc:
+        validate_substitutions({"S1_district": {"geography": "M3",
+                                                "justification": "why"}})
+    assert "all of" in str(exc.value)
+    assert "silently false" in str(exc.value)
+
+
+def test_a_substitution_without_a_justification_is_refused():
+    """The Definition permits substitution *with recorded justification*."""
+    from tools.ppd_snapshot.corpus import validate_substitutions
+
+    entry = {key: {"geography": geo, "justification": "recorded reason"}
+             for key, geo in (("S1_district", "M3"),
+                              ("S2_neighbour_district", "M30"),
+                              ("S3_sector", "M3 7"))}
+    assert validate_substitutions(entry) == {
+        "S1_district": "M3", "S2_neighbour_district": "M30",
+        "S3_sector": "M3 7"}
+    entry["S3_sector"] = {"geography": "M3 7", "justification": "  "}
+    with pytest.raises(InstanceRefused) as exc:
+        validate_substitutions(entry)
+    assert "records no justification" in str(exc.value)
+
+
+def test_absent_substitutions_are_the_normal_case():
+    from tools.ppd_snapshot.corpus import validate_substitutions
+
+    assert validate_substitutions(None) == {}
+    assert validate_substitutions({}) == {}
+
+
+def test_an_instance_carrying_a_substitution_drives_the_corpus(
+        materialized, tmp_path):
+    """End to end: the Instance's substitution reaches the executed cases."""
+    raw = _instance_dict(materialized)
+    raw["governs_run"] = "substituted-run"
+    raw["substitutions"] = {
+        "S1_district": {"geography": "M3", "justification": "B50 too thin"},
+        "S2_neighbour_district": {"geography": "M30", "justification": "ditto"},
+        "S3_sector": {"geography": "M3 7", "justification": "inside M3"},
+    }
+    path = tmp_path / "substituted.json"
+    path.write_text(json.dumps(raw))
+    loaded = s1.load_instance(path, materialized)
+    assert loaded.substitutions["S1_district"] == "M3"
+    from tools.ppd_snapshot.corpus import cases as build
+
+    assert {c.shape: c.postcode
+            for c in build(loaded.geographies, loaded.substitutions)}["S1"] == "M3"
+
+
+def test_the_runbook_carries_post_release_checks_for_propertydata():
+    """It is redeployed by the same release, so it is checked, not assumed.
+
+    "Out of scope" is a statement about what changes, not a reason to skip
+    verifying that nothing did.
+    """
+    body = RUNBOOK.read_text()
+    assert "Post-release checks — `propertydata`" in body
+    assert "must be checked, not assumed" in body
+    for check in ("propertydata.fly.dev/health", "fly secrets list -a propertydata",
+                  "fly status -a propertydata", "stage1_shadow.py",
+                  "fly image show -a propertydata"):
+        assert check in body, f"the runbook omits the propertydata check: {check}"
+    assert "stop" in body.lower()
+
+
+def test_the_runbook_documents_abort_on_first_arm_error():
+    body = RUNBOOK.read_text()
+    assert "the first error on\neither arm" in body or \
+        "**the first error on" in body
+    assert "before that case makes its live call" in body
+
+
+def test_the_runbook_documents_the_postcode_less_row_rule():
+    body = RUNBOOK.read_text()
+    assert "no usable postcode" in body
+    assert "rows_without_postcode" in body
+
+
+def test_the_runbook_documents_adjudication_and_substitution():
+    body = RUNBOOK.read_text()
+    assert "requires_owner_adjudication" in body
+    assert "NEIGHBOUR_COMPARABLE_RATIO = 1.0" in body
+    assert "auto-qualified at a 10% ratio" in body
+    assert '"substitutions"' in body
