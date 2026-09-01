@@ -5,6 +5,66 @@ Versioning here is not strict SemVer: breaking changes are documented in a
 v1.11.0, v1.10.0, v1.4.0) rather than forcing a major bump. This entry follows
 that established practice.
 
+## v1.17.0 (2026-09-01) — non-blocking snapshot startup and a control-only shadow flag; serving still off
+
+Phase D measured 36.7 s of materialization plus 3.1 s of adapter-open
+validation against the real private artifact on the deployed `property-shared`
+Machine. Under the previous design that work sat inside the ASGI lifespan, so
+on the measured path the application was not ready until the download finished
+and the 30 s readiness target was missed. A faster transfer could have met it —
+this release removes readiness' dependence on that question rather than
+answering it.
+
+### Changed
+
+- **The snapshot boot no longer gates readiness.** The lifespan starts the boot
+  and returns immediately; the application is ready serving live data from the
+  first request while the snapshot warms behind it. The boot runs on a daemon
+  thread rather than an anyio task group: the work is blocking I/O that no
+  cancellation can interrupt, and cancelling a task-group scope from a
+  lifespan's `finally` deadlocks when the lifespan runs in a portal task, which
+  is what Starlette's `TestClient` and uvicorn's startup both do.
+- **Shutdown stops accepting installs before clearing state**, under the same
+  lock the installing thread takes, then joins briefly and abandons anything
+  still running. A boot landing at that instant is either installed-then-cleared
+  or refused — never installed into a torn-down process, which would leak an
+  open DuckDB handle.
+- **The once-per-process boot claim is atomic.** The check-and-set previously
+  sat outside any lock; the GIL does not make that one step, so two callers
+  could both boot.
+- **`snapshot_status()` and `/v1/meta` report the boot lifecycle**: `state`
+  (`not_started` / `warming` / `ready` / `failed`), `shadow_enabled`,
+  `source_error` and the artifact identity. `routable` tracks
+  `active_adapter()`, so it is true only when serving is enabled *and*
+  validation completed.
+- A boot that fails without installing now reports *why*. It previously said
+  only "no snapshot materialized" while the real cause sat in the logs.
+- The missing-source error named only `PPD_SNAPSHOT_ENABLED`, which under
+  shadow mode points an operator at a flag that is legitimately off. It now
+  names both.
+
+### Added
+
+- **`PPD_SNAPSHOT_SHADOW_ENABLED`** — control-only. It starts exactly the same
+  boot and **never** makes the result routable: `active_adapter()` continues to
+  consult `PPD_SNAPSHOT_ENABLED` alone, on every call. Its purpose is to let
+  application time-to-readiness (the outstanding half of G1a) be measured
+  against the real lifespan, on the real image and Machine, with a real
+  artifact, while every user request is still answered from the live source.
+  Enabling it is not, and never becomes, permission to serve snapshot data.
+
+### Unchanged
+
+`PPD_SNAPSHOT_ENABLED` remains the sole authority to route, and is **absent on
+both applications** — this release enables nothing. Snapshot serving stays off.
+`comps`, `yield`, `report` and `blocks` semantics are untouched. The Stage 1
+shadow corpus remains `comps` only. No artifact was rebuilt or replaced. The
+specification moves rev 8 → rev 9, narrowly: §4.10 gains the non-blocking rule,
+the shadow flag and the status contract, and the G2 paragraph's claim that the
+boot "blocks startup" is corrected — while what remains open above one worker
+is left open. **The 30 s readiness target is unchanged**; rev 9 makes it
+measurable, not met.
+
 ## v1.16.0 (2026-09-01) — removed the published `dev` extra; property-shared-only boot-only G1a verifier, serving off
 
 This repo had two differently-named "dev" dependency mechanisms: a published
