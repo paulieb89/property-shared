@@ -1,6 +1,6 @@
 [project]
 name = "property-shared"
-version = "1.17.0"
+version = "1.18.0"
 description = "UK property data MCP server and API — Land Registry comparable sales, Rightmove listings, EPC certificates (England & Wales, GOV.UK Bearer API), rental analysis, and stamp duty."
 readme = "README.md"
 license = "MIT"

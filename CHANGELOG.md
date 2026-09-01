@@ -5,6 +5,19 @@ Versioning here is not strict SemVer: breaking changes are documented in a
 v1.11.0, v1.10.0, v1.4.0) rather than forcing a major bump. This entry follows
 that established practice.
 
+## v1.18.0 (2026-09-02) — out-of-band Stage 1 shadow comparator; serving still off
+
+Adds the Stage 1 shadow comparator and its frozen corpus definition, shipped in
+the `property-shared` image as an out-of-band operator tool. It sits outside the
+request path — the application never imports it and it is not wired into `CMD` —
+and is inert unless explicitly invoked with `PPD_SHADOW_COMPARE_ENABLED` set for
+that invocation. Snapshot serving remains off: `PPD_SNAPSHOT_ENABLED`, the sole
+routing authority for the snapshot-backed PPD/comps path, is absent from both
+applications. `propertydata` is redeployed by the shared release workflow, as on
+every release, and remains outside snapshot scope. Operational details are in
+`docs/ops/ppd-stage1-shadow-runbook.md` and `docs/design/ppd-source-routing.md`
+§7.2 (rev 10).
+
 ## v1.17.0 (2026-09-01) — non-blocking snapshot startup and a control-only shadow flag; serving still off
 
 Phase D measured 36.7 s of materialization plus 3.1 s of adapter-open
