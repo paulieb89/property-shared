@@ -82,7 +82,14 @@ def _filesystem_type(path: Path, mounts_text: Optional[str] = None) -> str:
             continue
         mount_point, fs_type = parts[1], parts[2]
         stripped = mount_point.rstrip("/") or "/"
-        if resolved == stripped or resolved.startswith(stripped + "/"):
+        # The prefix must not be built as `stripped + "/"`: for the root mount
+        # `stripped` is "/", so that yields "//", which no absolute path starts
+        # with, and the root filesystem then matches only the exact path "/".
+        # A Fly Machine has no dedicated /tmp mount, so every path under / was
+        # refused as "no mount entry" -- including this module's own documented
+        # invocation.
+        prefix = stripped if stripped.endswith("/") else stripped + "/"
+        if resolved == stripped or resolved.startswith(prefix):
             if len(stripped) >= len(best_match):
                 best_match, best_type = stripped, fs_type
     if not best_type:

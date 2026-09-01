@@ -114,6 +114,48 @@ def test_disk_backed_assertion_refuses_when_nothing_matches(tmp_path):
         assert_disk_backed(tmp_path, "none /completely/unrelated ext4 rw 0 0\n")
 
 
+def test_disk_backed_assertion_matches_the_root_mount_for_a_path_beneath_it(tmp_path):
+    """A path whose only enclosing mount is `/` must resolve to the root filesystem.
+
+    Regression, observed on the deployed `property-shared` Machine on
+    2026-09-01: the prefix test was `resolved.startswith(stripped + "/")`, and
+    for the root mount `stripped` is `"/"`, so the prefix became `"//"` --
+    which no absolute path ever starts with. The root filesystem therefore
+    matched only the exact path `/` and nothing beneath it.
+
+    A Fly Machine has no dedicated `/tmp` mount (`/tmp` falls under `/`, an
+    overlay whose upper layer is ext4 on `/dev/vdb`), so this refused every
+    run with "no mount entry matches /tmp" -- including the invocation in this
+    module's own docstring. Every existing test here synthesised a mount entry
+    for the exact parent directory, so none of them exercised this path.
+    """
+    assert assert_disk_backed(tmp_path, "none / overlay rw 0 0\n") == "overlay"
+
+
+def test_a_closer_mount_still_wins_over_the_root_mount(tmp_path):
+    """Longest-match must survive the fix; the root entry must not shadow it."""
+    mounts = f"none / overlay rw 0 0\nnone {tmp_path} ext4 rw 0 0\n"
+
+    assert assert_disk_backed(tmp_path, mounts) == "ext4"
+
+
+def test_a_tmpfs_root_is_still_refused_for_a_path_beneath_it(tmp_path):
+    """The guard this check exists for must not be weakened by matching root.
+
+    Making the root mount match everything beneath it is only safe if a
+    tmpfs-backed root still refuses -- otherwise the fix would turn a false
+    negative into a false positive, which is the more dangerous direction.
+
+    Matched on the filesystem-type wording rather than the bare word "tmpfs":
+    pytest names `tmp_path` after the test, so this test's own directory
+    contains "tmpfs", and the *wrong* refusal ("no mount entry matches
+    /tmp/.../test_a_tmpfs_root...") satisfies a bare match. Asserting the
+    reason, not a substring that the path supplies for free.
+    """
+    with pytest.raises(VerificationRefused, match=r"backed by 'tmpfs', not disk"):
+        assert_disk_backed(tmp_path, "none / tmpfs rw 0 0\n")
+
+
 # -- verification-directory preparation --------------------------------------
 
 def test_verification_directory_must_not_nest_inside_the_app_cache(tmp_path):
