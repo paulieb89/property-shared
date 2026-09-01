@@ -2,8 +2,10 @@
 
 Phase D measured 36.7 s of materialization plus 3.1 s of validation on the real
 `property-shared` Machine. Under the previous design that time sat inside the
-ASGI lifespan, so the 30 s readiness target could not be met by construction:
-the application was not ready until the download finished.
+ASGI lifespan, so on the measured path the 30 s readiness target was missed:
+the application was not ready until the download finished. A faster transfer
+could have met it -- the change below removes readiness' dependence on that
+question rather than settling it.
 
 This module pins the replacement. The boot moves to a background task; the
 application is ready immediately, serving live data; the snapshot becomes
@@ -569,3 +571,318 @@ def test_status_reports_why_the_source_failed_not_just_that_it_did(monkeypatch):
 
     assert status["state"] == "failed"
     assert "Connection refused" in (status["source_error"] or ""), status["source_error"]
+
+
+# ---------------------------------------------------------------------------
+# The once-per-process claim must be atomic
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_callers_produce_exactly_one_materialisation(monkeypatch):
+    """Two lifespans racing must not both materialise.
+
+    `boot_once` originally read `_booted` and wrote it as two separate
+    statements outside any lock. The GIL does not make that atomic: a thread
+    switch between the LOAD and the STORE lets two callers both observe False
+    and both boot -- two concurrent downloads, two adapters, one of them
+    leaked. Both FastMCP servers and the FastAPI app can enter the lifespan on
+    the same process, so this is a reachable interleaving, not a theoretical
+    one.
+    """
+    import sys
+
+    monkeypatch.setenv("PPD_SNAPSHOT_SHADOW_ENABLED", "1")
+
+    materialisations: list[int] = []
+    lock = threading.Lock()
+
+    def _counted():
+        with lock:
+            materialisations.append(1)
+
+    monkeypatch.setattr(bootstrap, "_materialize", _counted)
+
+    workers = 64
+    barrier = threading.Barrier(workers)
+    previous_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)  # maximise preemption inside the claim window
+    try:
+        threads = [
+            threading.Thread(target=lambda: (barrier.wait(), bootstrap.boot_once()))
+            for _ in range(workers)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10.0)
+    finally:
+        sys.setswitchinterval(previous_interval)
+
+    assert materialisations == [1], (
+        f"{len(materialisations)} concurrent materialisations; the boot claim is "
+        f"not atomic"
+    )
+
+
+def test_the_boot_claim_is_serialised_by_the_lock(monkeypatch):
+    """Deterministic proof of atomicity, not a probabilistic one.
+
+    A contention test cannot reliably force the LOAD/STORE interleaving -- 64
+    racing threads did not reproduce it. This instead holds the lock the claim
+    must take and asserts the claim blocks. If the check-and-set is not under
+    that lock, the claimer completes immediately and this fails every time.
+    """
+    monkeypatch.setenv("PPD_SNAPSHOT_SHADOW_ENABLED", "1")
+
+    done = threading.Event()
+
+    def _claimer():
+        bootstrap._claim_boot()
+        done.set()
+
+    with bootstrap._phase_lock:
+        thread = threading.Thread(target=_claimer)
+        thread.start()
+        blocked = not done.wait(timeout=0.3)
+
+    thread.join(timeout=5.0)
+
+    assert blocked, "the boot claim completed while its lock was held by another thread"
+    assert done.is_set(), "the claim never completed after the lock was released"
+
+
+def test_the_boot_claim_is_granted_to_exactly_one_caller(monkeypatch):
+    """The claim itself, isolated from everything the boot then does."""
+    import sys
+
+    monkeypatch.setenv("PPD_SNAPSHOT_SHADOW_ENABLED", "1")
+
+    granted: list[bool] = []
+    lock = threading.Lock()
+    workers = 64
+    barrier = threading.Barrier(workers)
+
+    def _claim():
+        barrier.wait()
+        won = bootstrap._claim_boot()
+        with lock:
+            granted.append(won)
+
+    previous_interval = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        threads = [threading.Thread(target=_claim) for _ in range(workers)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10.0)
+    finally:
+        sys.setswitchinterval(previous_interval)
+
+    assert sum(granted) == 1, f"{sum(granted)} callers claimed the single boot"
+    assert len(granted) == workers
+
+
+# ---------------------------------------------------------------------------
+# The real adapter, opened on the boot thread, queried from another thread
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    __import__("importlib.util", fromlist=["util"]).find_spec("duckdb") is None
+    or __import__("importlib.util", fromlist=["util"]).find_spec("zstandard") is None,
+    reason="needs the optional 'snapshot' extra",
+)
+def test_real_snapshot_boots_in_background_then_serves_a_cross_thread_query(
+    tmp_path, monkeypatch
+):
+    """End-to-end on the real code path, with a real DuckDB adapter.
+
+    Every other success test here installs a `FakeAdapter`, and the built-image
+    smoke only exercised an unreachable source -- so nothing yet proved the
+    thing most likely to break: a DuckDB connection opened on the background
+    boot thread and then queried from the thread serving a request. DuckDB
+    connections are not safe to share across threads, which is why
+    `SnapshotAdapter` carries a lock; this asserts that guarantee holds through
+    the new lifecycle rather than trusting the comment.
+
+    Uses the synthetic fixture and a local directory source. No network, no
+    credentials, no PPD data.
+    """
+    from tests.snapshot.image_smoke import fixture as build_snapshot_fixture
+
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    build_snapshot_fixture(source_dir)
+
+    monkeypatch.setenv("PPD_SNAPSHOT_DIR", str(source_dir))
+    monkeypatch.setenv("PPD_SNAPSHOT_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("PPD_SNAPSHOT_SHADOW_ENABLED", "1")
+    monkeypatch.setenv("PPD_SNAPSHOT_ENABLED", "1")
+
+    observed: dict[str, object] = {}
+
+    async def _run():
+        async with bootstrap.snapshot_lifespan():
+            await _wait_for_phase({"ready", "failed"}, timeout=60.0)
+            observed["phase"] = bootstrap.boot_phase()
+            observed["error"] = bootstrap.boot_error()
+            observed["boot_thread"] = (
+                bootstrap._boot_thread.name if bootstrap._boot_thread else None
+            )
+            adapter = state.active_adapter()
+            observed["routable"] = adapter is not None
+            if adapter is not None:
+                observed["query_thread"] = threading.current_thread().name
+                page = adapter.search(postcode="B5 7AA", limit=50)
+                observed["rows"] = len(page.transactions)
+                observed["version"] = adapter.version
+                observed["status"] = bootstrap.snapshot_status()
+
+    anyio.run(_run)
+
+    assert observed["phase"] == "ready", observed.get("error")
+    assert observed["routable"] is True
+    # The adapter was opened on the boot thread and queried from another.
+    assert observed["boot_thread"] == "ppd-snapshot-boot"
+    assert observed["query_thread"] != "ppd-snapshot-boot"
+    assert observed["rows"] == 1, "the real adapter returned no rows"
+    assert observed["version"] == "synthetic-v1"
+    status = observed["status"]
+    assert status["state"] == "ready"
+    assert status["routable"] is True
+    assert status["coverage_to"] == "2026-06-30"
+
+
+@pytest.mark.skipif(
+    __import__("importlib.util", fromlist=["util"]).find_spec("duckdb") is None
+    or __import__("importlib.util", fromlist=["util"]).find_spec("zstandard") is None,
+    reason="needs the optional 'snapshot' extra",
+)
+def test_a_real_snapshot_under_shadow_alone_is_validated_but_not_routable(
+    tmp_path, monkeypatch
+):
+    """The same real boot, with serving off: materialised and unreachable."""
+    from tests.snapshot.image_smoke import fixture as build_snapshot_fixture
+
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    build_snapshot_fixture(source_dir)
+
+    monkeypatch.setenv("PPD_SNAPSHOT_DIR", str(source_dir))
+    monkeypatch.setenv("PPD_SNAPSHOT_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("PPD_SNAPSHOT_SHADOW_ENABLED", "1")
+    monkeypatch.delenv("PPD_SNAPSHOT_ENABLED", raising=False)
+
+    observed: dict[str, object] = {}
+
+    async def _run():
+        async with bootstrap.snapshot_lifespan():
+            await _wait_for_phase({"ready", "failed"}, timeout=60.0)
+            observed["phase"] = bootstrap.boot_phase()
+            observed["error"] = bootstrap.boot_error()
+            observed["installed"] = state.installed_adapter() is not None
+            observed["routable"] = state.active_adapter() is not None
+            observed["status"] = bootstrap.snapshot_status()
+
+    anyio.run(_run)
+
+    assert observed["phase"] == "ready", observed.get("error")
+    assert observed["installed"] is True, "shadow must really materialise"
+    assert observed["routable"] is False, "shadow must never route"
+    status = observed["status"]
+    assert status["shadow_enabled"] is True
+    assert status["enabled"] is False
+    assert status["routable"] is False
+    assert status["version"] == "synthetic-v1"
+
+
+@pytest.mark.skipif(
+    __import__("importlib.util", fromlist=["util"]).find_spec("duckdb") is None
+    or __import__("importlib.util", fromlist=["util"]).find_spec("zstandard") is None,
+    reason="needs the optional 'snapshot' extra",
+)
+def test_the_real_adapter_survives_concurrent_queries_from_many_threads(
+    tmp_path, monkeypatch
+):
+    """Concurrent request threads against one boot-thread-opened connection.
+
+    A single cross-thread query does not exercise `SnapshotAdapter._lock` --
+    removing that lock left the earlier test green. DuckDB connections are not
+    safe to share across threads, and the service layer runs sync calls in a
+    thread pool, so concurrent use is the real deployed shape.
+    """
+    from tests.snapshot.image_smoke import fixture as build_snapshot_fixture
+
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    build_snapshot_fixture(source_dir)
+
+    monkeypatch.setenv("PPD_SNAPSHOT_DIR", str(source_dir))
+    monkeypatch.setenv("PPD_SNAPSHOT_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("PPD_SNAPSHOT_SHADOW_ENABLED", "1")
+    monkeypatch.setenv("PPD_SNAPSHOT_ENABLED", "1")
+
+    results: list[int] = []
+    failures: list[str] = []
+    results_lock = threading.Lock()
+
+    async def _run():
+        async with bootstrap.snapshot_lifespan():
+            phase = await _wait_for_phase({"ready", "failed"}, timeout=60.0)
+            assert phase == "ready", bootstrap.boot_error()
+            adapter = state.active_adapter()
+            assert adapter is not None
+
+            workers = 16
+            barrier = threading.Barrier(workers)
+
+            def _query():
+                barrier.wait()
+                try:
+                    for _ in range(10):
+                        page = adapter.search(postcode="B5 7AA", limit=50)
+                        with results_lock:
+                            results.append(len(page.transactions))
+                except Exception as exc:  # noqa: BLE001
+                    with results_lock:
+                        failures.append(f"{type(exc).__name__}: {exc}")
+
+            threads = [threading.Thread(target=_query) for _ in range(workers)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=30.0)
+
+    anyio.run(_run)
+
+    assert failures == [], f"concurrent queries failed: {failures[:3]}"
+    assert len(results) == 160, f"only {len(results)} of 160 queries completed"
+    assert set(results) == {1}, f"inconsistent row counts across threads: {set(results)}"
+
+
+def test_a_missing_source_under_shadow_names_both_flags(monkeypatch):
+    """The diagnostic must not send an operator to check a flag that is off.
+
+    Under shadow mode with no source configured, the error previously read
+    "must be set when PPD_SNAPSHOT_ENABLED is on" -- naming a flag that is
+    legitimately off and saying nothing about the one that actually started
+    the boot.
+    """
+    monkeypatch.setenv("PPD_SNAPSHOT_SHADOW_ENABLED", "1")
+    monkeypatch.delenv("PPD_SNAPSHOT_ENABLED", raising=False)
+    for name in ("PPD_SNAPSHOT_URL", "PPD_SNAPSHOT_DIR", "PPD_SNAPSHOT_S3_BUCKET"):
+        monkeypatch.delenv(name, raising=False)
+
+    status: dict = {}
+
+    async def _run():
+        async with bootstrap.snapshot_lifespan():
+            await _wait_for_phase({"failed"})
+            status.update(bootstrap.snapshot_status())
+
+    anyio.run(_run)
+
+    error = status["source_error"] or ""
+    assert "PPD_SNAPSHOT_SHADOW_ENABLED" in error, error
+    assert "PPD_SNAPSHOT_ENABLED" in error, error

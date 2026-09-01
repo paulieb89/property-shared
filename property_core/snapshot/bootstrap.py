@@ -15,8 +15,14 @@ discovered:
   normal outcome, not a startup error, so nothing here is allowed to raise into
   the ASGI startup sequence.
 
-Everything is off unless `PPD_SNAPSHOT_ENABLED` is set. With it unset this module
-imports nothing from DuckDB and touches no filesystem.
+Nothing happens unless `PPD_SNAPSHOT_ENABLED` or `PPD_SNAPSHOT_SHADOW_ENABLED`
+is set. With both unset this module imports nothing from DuckDB and touches no
+filesystem.
+
+The two flags are not interchangeable. `PPD_SNAPSHOT_ENABLED` is the sole
+authority to *route*: `state.active_adapter()` consults it alone, on every
+call. `PPD_SNAPSHOT_SHADOW_ENABLED` only causes the same materialization to
+happen, and never makes its result reachable from a request.
 """
 
 from __future__ import annotations
@@ -28,7 +34,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
-from property_core.config import ppd_snapshot_enabled, ppd_snapshot_shadow_enabled
+from property_core.config import (
+    PPD_SNAPSHOT_ENABLED_ENV,
+    PPD_SNAPSHOT_SHADOW_ENABLED_ENV,
+    ppd_snapshot_enabled,
+    ppd_snapshot_shadow_enabled,
+)
 from property_core.snapshot import state
 
 log = logging.getLogger("property_core.snapshot.boot")
@@ -105,6 +116,24 @@ def _install_if_wanted(adapter: Any, report: Any) -> bool:
         return True
 
 
+def _claim_boot() -> bool:
+    """Claim the single per-process boot. True for exactly one caller.
+
+    Under `_phase_lock` because the check and the set must be one step. Reading
+    `_booted` and writing it as two statements is not atomic even with the GIL:
+    a thread switch between the LOAD and the STORE lets two callers both see
+    False and both boot, giving two concurrent downloads and two adapters, one
+    of which is then leaked. Both FastMCP servers and the FastAPI app can enter
+    the lifespan on one process, so that interleaving is reachable.
+    """
+    global _booted
+    with _phase_lock:
+        if _booted:
+            return False
+        _booted = True
+        return True
+
+
 def boot_phase() -> str:
     """Where the snapshot boot has got to. One of the PHASE_* constants."""
     with _phase_lock:
@@ -158,9 +187,13 @@ def _build_source() -> Any:
     if directory:
         return LocalDirectorySource(Path(directory))
     if not url:
+        # Names both flags: either one starts a boot, and saying only
+        # PPD_SNAPSHOT_ENABLED sends an operator debugging a shadow-mode boot
+        # to check a flag that is legitimately off.
         raise RuntimeError(
-            f"{SNAPSHOT_URL_ENV}, {SNAPSHOT_DIR_ENV} or {SNAPSHOT_BUCKET_ENV} must be set when "
-            f"PPD_SNAPSHOT_ENABLED is on"
+            f"{SNAPSHOT_URL_ENV}, {SNAPSHOT_DIR_ENV} or {SNAPSHOT_BUCKET_ENV} must be "
+            f"set when {PPD_SNAPSHOT_ENABLED_ENV} or {PPD_SNAPSHOT_SHADOW_ENABLED_ENV} "
+            f"is on"
         )
     return HttpObjectSource(url)
 
@@ -224,10 +257,8 @@ def boot_once() -> None:
     propagate: a snapshot that cannot be materialized means the live source
     answers, which is the documented steady state after every restart anyway.
     """
-    global _booted
-    if _booted:
+    if not _claim_boot():
         return
-    _booted = True
     if not snapshot_boot_requested():
         return
 
@@ -277,11 +308,12 @@ async def snapshot_lifespan() -> AsyncIterator[None]:
     once too.
 
     **The boot does not gate readiness.** Phase D measured 36.7 s of
-    materialization plus 3.1 s of validation on the real 2 GB Machine; awaiting
-    that here made the 30 s readiness target unreachable by construction. The
-    boot is started as a background task and the lifespan yields immediately,
-    so the application serves live data from the first request while the
-    snapshot warms behind it.
+    materialization plus 3.1 s of validation on the real 2 GB Machine, so on
+    that path an awaited boot missed the 30 s readiness target. A faster
+    transfer might make it; the point here is that readiness no longer depends
+    on the answer. The boot is started in the background and the lifespan
+    yields immediately, so the application serves live data from the first
+    request while the snapshot warms behind it.
 
     The single-flight `flock` is unchanged -- it still coordinates the worker
     processes sharing a Machine, which lifespan wiring cannot.

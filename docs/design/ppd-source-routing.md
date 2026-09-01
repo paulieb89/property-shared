@@ -7,9 +7,12 @@ to this document require a new decision round, not an edit in passing.
 measurement recorded in
 [`docs/ops/2026-08-31-ppd-snapshot-rollout.md`](../ops/2026-08-31-ppd-snapshot-rollout.md).
 That measurement showed 36.7 s of materialization plus 3.1 s of adapter-open
-validation on the real `property-shared` Machine — so a boot awaited inside the
-ASGI lifespan could not meet the 30 s readiness target **by construction**, on
-any artifact of this size, however fast the network.
+validation on the real `property-shared` Machine — so on **the measured path**,
+a boot awaited inside the ASGI lifespan did not meet the 30 s readiness target.
+That is a statement about what was measured, not a proof about every possible
+path: the transfer ran at 63.6 Mbit/s on a depleted CPU burst balance, and a
+faster transfer could bring an awaited boot back under 30 s. Rev 9 removes the
+dependency on that question rather than answering it.
 
 Rev 9 changes **when the boot runs**, not what it produces or what may be
 served. §4.10 gains a non-blocking rule: the lifespan *starts* the boot and
@@ -859,8 +862,9 @@ detail, so it is fixed here before PR 4 begins.
 * **The boot must not gate readiness (rev 9).** The lifespan *starts* the boot
   and returns immediately; ASGI/FastMCP readiness never awaits materialization.
   Phase D measured 36.7 s of materialization plus 3.1 s of validation on the
-  2 GB Machine, so an awaited boot cannot satisfy the 30 s readiness target on
-  an artifact of this size regardless of network speed. The boot therefore runs
+  2 GB Machine, so on that path an awaited boot did not satisfy the 30 s
+  readiness target. A faster transfer might; the point of this rule is that
+  readiness no longer depends on the answer. The boot therefore runs
   on its own thread, outside the event loop and outside any cancel scope: the
   work it does is blocking I/O that no cancellation can interrupt, and a
   task-group scope cancelled from a lifespan's `finally` deadlocks when the
