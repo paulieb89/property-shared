@@ -284,8 +284,9 @@ in whichever source produced it.
 
 ## 8. Stage 1 exit criteria
 
-Carried forward from rev 7 §7.2 unchanged, and unchanged again by rev 8. All
-must hold. **No percentage threshold.**
+Carried forward from rev 7 §7.2, unchanged by rev 8, and changed by **rev 10 in
+exactly one criterion — p95 — before Stage 1 started**. All must hold. **No
+percentage threshold.**
 
 * **Zero unexplained false empties** — no case where the snapshot returns empty
   and live returns rows within coverage without a classified explanation.
@@ -296,7 +297,18 @@ must hold. **No percentage threshold.**
   blocks exit.
 * **Zero snapshot errors** in the agreed corpus — no unhandled exception, no
   typed error where the request was in-coverage and well-formed.
-* **p95 < 1 second** on real traffic.
+* **p95 < 1 second on the deployed production Machine and selected artifact,
+  measured across the frozen corpus request mix** (rev 10). The governing
+  §7.2 carries the reasoning; in short, organic `comps` traffic here is sparse
+  and uncontrolled, so a percentile over it measures the callers rather than the
+  adapter, while this corpus is risk-shaped, repeatable and attributable.
+  **The request mix is chosen, not observed** — a corpus run is never to be
+  described as organic traffic.
+
+  Latency recorded by any run that is **not** on the deployed Machine and the
+  selected artifact — a local rehearsal above all — is `controlled_synthetic`
+  and is excluded from this percentile. The two are separate fields in a report
+  and no code path merges them.
 
 ---
 
@@ -366,8 +378,9 @@ expected shape — before any production shadow.
    dropping an adapter the caller had installed, would leave that process
    quietly different afterwards.
 
-**A rehearsal produces no real-traffic sample.** It can satisfy neither the p95
-criterion nor any divergence criterion — there is no live arm to diverge from.
+**A rehearsal is neither a production-Machine measurement nor a comparison.** It
+runs on a workstation against a local artifact, so it satisfies no p95 criterion,
+and it has no live arm, so it satisfies no divergence criterion.
 Its output is labelled a rehearsal result and is **never filed as Stage 1
 evidence**.
 

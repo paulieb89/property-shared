@@ -283,3 +283,31 @@ def test_the_freeze_does_not_claim_an_instance():
             f"the freeze describes the absent Instance as incomplete work "
             f"({overreach!r}); it is deferred by design, not missing"
         )
+
+
+def test_the_definition_carries_the_rev_10_p95_qualification():
+    """§8 must not keep the pre-rev-10 wording while §7.2 has moved on.
+
+    The Definition says its criteria are carried forward from the governing
+    spec. Two documents stating the same criterion differently is the failure
+    mode that makes "which one governs?" an open question mid-run.
+    """
+    body = _normalised(DEFINITION)
+    assert ("p95 < 1 second on the deployed production Machine and selected "
+            "artifact, measured across the frozen corpus request mix") in body
+    assert "on real traffic" not in body, (
+        "the Definition still carries the pre-rev-10 'on real traffic' wording"
+    )
+
+
+def test_the_definition_excludes_non_machine_latency_from_the_percentile():
+    """A rehearsal's latency must not be able to reach the gate percentile.
+
+    Both tools record per-case latency in the same shape. Without an explicit
+    exclusion rule, the cheap mistake is to pool them -- and a workstation run
+    against a local artifact is faster than the Machine, so pooling would
+    flatter the gate.
+    """
+    body = _normalised(DEFINITION)
+    assert "controlled_synthetic" in body
+    assert "excluded from this percentile" in body
