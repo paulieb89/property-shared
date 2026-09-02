@@ -682,12 +682,19 @@ def _aggregate(m: Materialized, *, geography_sql: str, geo_params: list[Any],
 def _rank(m: Materialized, column: str, *, months: int, today: date,
           property_types: Optional[tuple[str, ...]] = RESIDENTIAL_TYPES,
           category: Optional[str] = "A",
-          having: str = "", limit: int = 200) -> list[tuple[str, int]]:
+          having: str = "", having_params: Optional[list[Any]] = None,
+          limit: int = 200) -> list[tuple[str, int]]:
     """Candidate geographies by row count under the frozen parameters.
 
     Ordered by count then value so selection is deterministic: the same
     artifact must qualify the same geographies on every run, or the Instance
     is not reproducible.
+
+    `having` selects on the group's own aggregate, which is the only way to
+    reach a population the `n DESC` ordering puts out of reach -- the sparse
+    tail. Its placeholders bind after the WHERE clause's, in clause order, so a
+    date in a HAVING predicate stays a bound parameter rather than becoming
+    interpolated SQL.
     """
     from property_core.snapshot.adapter import VIEW
 
@@ -704,6 +711,7 @@ def _rank(m: Materialized, column: str, *, months: int, today: date,
     sql = (f"SELECT {column}, count(*) AS n FROM {VIEW} "
            f"WHERE {' AND '.join(where)} GROUP BY {column} "
            f"{having} ORDER BY n DESC, {column} ASC LIMIT {int(limit)}")
+    params.extend(having_params or [])
     return [(r[0], int(r[1])) for r in m.adapter._execute(sql, params).fetchall()]
 
 
@@ -811,9 +819,21 @@ def qualify(m: Materialized, *, today: Optional[date] = None,
     if s3 <= 0:
         unqualified_definitional.append("S3_sector")
 
-    # -- S4: thin market, strictly below the threshold ----------------------
+    # -- the dense candidate pool, for the placeholders defined by density ---
+    # `n DESC ... LIMIT` is exactly right for S5/S6/S7/S8/S13 and structurally
+    # wrong for S4 and S11, which live in the sparse tail this ordering
+    # discards. Those two select over the same eligible population through
+    # their own HAVING predicate rather than filtering this pool.
     sectors_ranked = _rank(m, "sector", months=24, today=today)
-    thin = [(s, n) for s, n in sectors_ranked if 0 < n < THIN_MARKET_THRESHOLD]
+
+    # -- S4: thin market, strictly below the threshold ----------------------
+    # `GROUP BY` cannot produce an empty group, so `count(*) < threshold` on a
+    # returned row IS `0 < n < threshold`. Ordered `n DESC, sector ASC` like
+    # every other selector, so the case chosen is the densest qualifying thin
+    # sector -- the one closest to the boundary it exists to probe -- and the
+    # tie-break keeps it reproducible.
+    thin = _rank(m, "sector", months=24, today=today,
+                 having=f"HAVING count(*) < {THIN_MARKET_THRESHOLD}", limit=1)
     if thin:
         geo["S4_thin"] = thin[0][0]
         qualification["S4_thin"] = {
@@ -867,20 +887,29 @@ def qualify(m: Materialized, *, today: Optional[date] = None,
             break
 
     # -- S11: empty over a 6-month window that intersects the provisional tail
+    # Active in the 24-month window (the group exists) and silent in the
+    # 6-month one (the FILTER counts nothing). Both halves are asserted inside
+    # one GROUP BY over the frozen predicate, so the two windows cannot be
+    # measured under different filters -- and the 6-month bound is the one
+    # `_clamped_window` returns, bound as a parameter.
+    #
+    # `>=` is the boundary comps itself queries on: a row dated exactly on the
+    # lower bound is IN the window and disqualifies the sector.
     six = _clamped_window(m, 6, today)
     provisional_intersects = bool(
         m.provisional_from and m.coverage_to
         and not (six[1] < m.provisional_from or six[0] > m.coverage_to))
-    for sector, _ in sectors_ranked:
-        if _aggregate(m, geography_sql="sector = ?", geo_params=[sector],
-                      months=6, today=today) == 0:
-            geo["S11_provisional_empty"] = sector
-            qualification["S11_provisional_empty"] = {
-                "rule": ("returns zero rows over months=6 while the window "
-                         "intersects the provisional period"),
-                "measured_rows": 0,
-                "window_intersects_provisional": provisional_intersects}
-            break
+    empty_since = _rank(
+        m, "sector", months=24, today=today,
+        having="HAVING count(*) FILTER (WHERE transfer_date >= ?) = 0",
+        having_params=[six[0]], limit=1)
+    if empty_since:
+        geo["S11_provisional_empty"] = empty_since[0][0]
+        qualification["S11_provisional_empty"] = {
+            "rule": ("returns zero rows over months=6 while the window "
+                     "intersects the provisional period"),
+            "measured_rows": 0,
+            "window_intersects_provisional": provisional_intersects}
 
     # -- S13: a unit postcode non-empty under defaults with no `D` rows ------
     for postcode, total in dense_units:

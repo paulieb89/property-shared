@@ -3217,3 +3217,305 @@ def test_qualify_treats_exact_parity_as_comparable(materialized, monkeypatch):
     block = out["candidate_instance"]["qualification"]["S1_district"]
     assert block["comparable_or_greater"] is True
     assert "S1_district" not in out["requires_owner_adjudication"]
+
+
+# ---------------------------------------------------------------------------
+# The sparse tail: S4 and S11 (regression -- v1.18.0 selection defect)
+#
+# Both placeholders are defined by SCARCITY, and both were selected by
+# filtering the dense `n DESC ... LIMIT 200` pool. On the real artifact that
+# pool's floor was 368 rows against S4's ceiling of 5, so neither could ever be
+# found: 155 thin sectors and 309 silent ones existed, none of them reachable.
+#
+# The fixture below reproduces that shape -- a dense population larger than the
+# pool, with the valid candidates in the tail beneath it -- and every negative
+# is built to WIN under the corresponding broken behaviour, so a test that
+# passes cannot be passing by accident.
+# ---------------------------------------------------------------------------
+
+TODAY = date(2026, 9, 2)
+COVERAGE_FROM = "2016-01-01"
+COVERAGE_TO = "2026-06-30"
+PROVISIONAL_FROM = "2026-03-01"
+
+
+def _bounds(months: int, coverage_from: str = COVERAGE_FROM,
+            coverage_to: str = COVERAGE_TO) -> tuple[str, str]:
+    """The window through the real function, so fixture dates cannot drift.
+
+    `_clamped_window` reads `coverage_from` and `coverage_to` and nothing else,
+    so a `Materialized` carrying no adapter answers it exactly as a real one
+    would -- and if that ever stops being true, every test here fails loudly
+    rather than quietly measuring a different window from the query.
+    """
+    m = s1.Materialized(adapter=None, version="v20260828T194003Z",
+                        bundle_sha256="0" * 64, coverage_from=coverage_from,
+                        coverage_to=coverage_to,
+                        provisional_from=PROVISIONAL_FROM, directory=Path("."))
+    return s1._clamped_window(m, months, TODAY)
+
+
+SIX_LOWER, WINDOW_UPPER = _bounds(6)
+M24_LOWER, _ = _bounds(24)
+
+
+def _shift(iso: str, days: int) -> str:
+    return (date.fromisoformat(iso) + timedelta(days=days)).isoformat()
+
+
+#: Inside the six-month window: disqualifies a sector from S11.
+IN_SIX = _shift(SIX_LOWER, 30)
+#: One day before the inclusive lower bound: does NOT disqualify.
+DAY_BEFORE_SIX = _shift(SIX_LOWER, -1)
+#: Comfortably inside 24 months, outside six.
+WELL_BEFORE_SIX = _shift(SIX_LOWER, -60)
+#: Outside the 24-month window entirely, but inside coverage.
+OUTSIDE_24M = _shift(M24_LOWER, -30)
+
+#: More than the 200 `_rank` returns, each denser than every sparse candidate,
+#: so the valid S4/S11 cases are provably outside the pool.
+FILLER_SECTORS = 205
+FILLER_ROWS_EACH = 12
+
+
+def _sparse_tail_rows() -> list[dict]:
+    rows: list[dict] = []
+
+    # -- dense filler: >200 sectors, all active inside the six-month window so
+    #    none of them can become an S11 candidate.
+    for i in range(FILLER_SECTORS):
+        rows += [row(f"T-F{i:03d}-{j:02d}", f"ZZ{i:03d} 1AA", IN_SIX)
+                 for j in range(FILLER_ROWS_EACH)]
+
+    # -- S5 / S6 / S7 / S13: one very dense sector at one very dense unit.
+    rows += [row(f"T-DA-{i:03d}", "DA1 1AA", IN_SIX, 200_000 + i)
+             for i in range(260)]
+    # -- S8: >= LIMIT rows with a real spread and F not dominant.
+    for i in range(60):
+        rows.append(row(f"T-DB-{i:03d}", "DB2 2AA", IN_SIX, 300_000 + i,
+                        property_type="FFDDSSTT"[i % 8] if i % 8 < 2 else
+                        ("F", "F", "D", "D", "S", "S", "T", "T")[i % 8]))
+
+    # -- definitional B5 / B50 / B5 4, so qualify() can exit 0.
+    rows += [row(f"T-B54A-{i:03d}", "B5 4AA", IN_SIX, 210_000 + i)
+             for i in range(30)]
+    rows += [row(f"T-B54B-{i:03d}", "B5 4AB", IN_SIX, 900_000 + i,
+                 ppd_category="B") for i in range(10)]
+    rows += [row(f"T-B57-{i:03d}", "B5 7AA", IN_SIX, 220_000 + i)
+             for i in range(20)]
+    rows += [row(f"T-B50-{i:03d}", "B50 4AA", IN_SIX, 400_000 + i)
+             for i in range(55)]
+
+    # -- S4 valid: three qualifying rows, in the tail.
+    rows += [row(f"T-THIN-{i}", "YA1 1AA", WELL_BEFORE_SIX) for i in range(3)]
+
+    # -- S4 negatives. FOUR rows each and sectors sorting before `YA1 1`, so a
+    #    broken filter does not merely admit them -- it makes them WIN.
+    rows += [row(f"T-NCAT-{i}", "XA1 1AA", WELL_BEFORE_SIX, ppd_category="B")
+             for i in range(4)]
+    rows += [row(f"T-NTYP-{i}", "XA2 2AA", WELL_BEFORE_SIX, property_type="O")
+             for i in range(4)]
+    rows += [row(f"T-NDAT-{i}", "XA3 3AA", OUTSIDE_24M) for i in range(4)]
+
+    # -- S11 valid: eight rows, the most recent exactly one day before the
+    #    inclusive lower bound, plus non-qualifying rows INSIDE the window.
+    #    Correct filtering ignores those; a dropped category or type filter
+    #    makes this sector fail and `ZC1 1` win instead.
+    rows += [row(f"T-Q-{i}", "YB2 2AA", DAY_BEFORE_SIX) for i in range(8)]
+    rows += [row(f"T-QCAT-{i}", "YB2 2AB", IN_SIX, ppd_category="B")
+             for i in range(2)]
+    rows += [row(f"T-QTYP-{i}", "YB2 2AC", IN_SIX, property_type="O")
+             for i in range(2)]
+
+    # -- S11 boundary negative: ten rows -- more than the valid eight, sorting
+    #    earlier -- one of them EXACTLY on the lower bound. `>=` rejects it;
+    #    an off-by-one `>` would qualify it and it would outrank the valid case.
+    rows += [row(f"T-ONB-{i}", "XB1 1AA", WELL_BEFORE_SIX) for i in range(9)]
+    rows.append(row("T-ONB-BOUND", "XB1 1AA", SIX_LOWER))
+
+    # -- the named wrong answer: legitimately silent, but ranked below.
+    rows += [row(f"T-ZC-{i}", "ZC1 1AA", WELL_BEFORE_SIX) for i in range(6)]
+    return rows
+
+
+@pytest.fixture(scope="module")
+def sparse_tail(tmp_path_factory):
+    """~2.9k rows over 214 sectors. Built once: it is the expensive fixture."""
+    root = tmp_path_factory.mktemp("sparse-tail")
+    build_snapshot(root, _sparse_tail_rows(), version="v20260828T194003Z",
+                   coverage_from=COVERAGE_FROM, coverage_to=COVERAGE_TO,
+                   provisional_from=PROVISIONAL_FROM)
+    opened = s1.open_materialized(root)
+    yield opened
+    opened.adapter.close()
+
+
+def test_the_dense_pool_does_not_contain_the_thin_or_empty_candidates(
+        sparse_tail):
+    """The defect's precondition, pinned.
+
+    If this ever fails the later assertions stop proving anything: they would
+    be satisfied by the old pool-filtering code too.
+    """
+    pool = dict(s1._rank(sparse_tail, "sector", months=24, today=TODAY))
+    assert len(pool) == 200, "the pool is the capped dense ranking"
+    for tail_sector in ("YA1 1", "YB2 2", "XB1 1", "ZC1 1"):
+        assert tail_sector not in pool, (
+            f"{tail_sector} is inside the dense pool; the fixture no longer "
+            f"reproduces the defect")
+    assert min(pool.values()) > 10, "the pool floor must exceed every candidate"
+
+
+def test_qualify_selects_a_thin_sector_outside_the_dense_pool(sparse_tail):
+    out = s1.qualify(sparse_tail, today=TODAY)
+    geo = out["candidate_instance"]["geographies"]
+    assert geo["S4_thin"] == "YA1 1"
+    assert out["candidate_instance"]["qualification"][
+        "S4_thin"]["measured_rows"] == 3
+
+
+def test_qualify_selects_a_provisional_empty_sector_outside_the_dense_pool(
+        sparse_tail):
+    out = s1.qualify(sparse_tail, today=TODAY)
+    geo = out["candidate_instance"]["geographies"]
+    entry = out["candidate_instance"]["qualification"]["S11_provisional_empty"]
+    assert geo["S11_provisional_empty"] == "YB2 2"
+    assert entry["measured_rows"] == 0
+    assert entry["window_intersects_provisional"] is True
+
+
+def test_every_placeholder_is_qualified_and_qualify_exits_zero(
+        sparse_tail, tmp_path, monkeypatch):
+    """The assertion the suite never made, and the one the defect would fail.
+
+    No fixture in this module has ever produced a complete qualification, which
+    is exactly why two unreachable placeholders shipped.
+    """
+    out = s1.qualify(sparse_tail, today=TODAY)
+    assert out["unqualified_placeholders"] == []
+    assert out["unqualified_definitional_cases"] == []
+    assert out["requires_owner_adjudication"] == []
+    assert out["baselines_satisfy_their_relations"] is True
+    assert set(out["candidate_instance"]["geographies"]) == set(
+        s1.REQUIRED_GEOGRAPHIES)
+
+
+def test_selection_is_deterministic_under_ties(sparse_tail):
+    first = s1.qualify(sparse_tail, today=TODAY)["candidate_instance"]
+    second = s1.qualify(sparse_tail, today=TODAY)["candidate_instance"]
+    assert first == second
+
+
+def test_s4_enforces_strictly_below_the_thin_threshold(sparse_tail):
+    """`0 < n < threshold`, both ends."""
+    thin = s1._rank(sparse_tail, "sector", months=24, today=TODAY,
+                    having=f"HAVING count(*) < {s1.THIN_MARKET_THRESHOLD}",
+                    limit=10_000)
+    assert thin, "no thin sector selected at all"
+    for _, n in thin:
+        assert 0 < n < s1.THIN_MARKET_THRESHOLD
+
+
+def test_s4_ignores_wrong_category_type_and_out_of_window_rows(sparse_tail):
+    """Each negative holds FOUR rows against the valid three and sorts earlier.
+
+    Mutation: drop the category, property-type or lower-bound filter from
+    `_rank` and the corresponding negative is selected instead -- it wins on
+    count, so this cannot pass by luck.
+    """
+    out = s1.qualify(sparse_tail, today=TODAY)
+    assert out["candidate_instance"]["geographies"]["S4_thin"] == "YA1 1"
+    pool = dict(s1._rank(sparse_tail, "sector", months=24, today=TODAY,
+                         limit=10_000))
+    for excluded in ("XA1 1", "XA2 2", "XA3 3"):
+        assert excluded not in pool, (
+            f"{excluded} survived the frozen filters and would outrank YA1 1")
+
+
+def test_s11_requires_activity_in_24m_and_silence_in_6m(sparse_tail):
+    out = s1.qualify(sparse_tail, today=TODAY)
+    chosen = out["candidate_instance"]["geographies"]["S11_provisional_empty"]
+    pool = dict(s1._rank(sparse_tail, "sector", months=24, today=TODAY,
+                         limit=10_000))
+    # Active over 24 months.
+    assert pool[chosen] > 0
+    # Silent over the clamped six-month window.
+    assert s1._aggregate(sparse_tail, geography_sql="sector = ?",
+                         geo_params=[chosen], months=6, today=TODAY) == 0
+    # A sector active inside the window is never chosen.
+    assert chosen != "DA1 1"
+
+
+def test_s11_category_and_type_rows_in_window_do_not_disqualify(sparse_tail):
+    """`YB2 2` carries category-B and type-`O` rows inside the six-month window.
+
+    Correct filtering ignores them and the sector qualifies. Drop either filter
+    and it is disqualified, and `ZC1 1` -- the next silent sector -- is chosen
+    instead. This is a false-NEGATIVE guard: a dropped filter counts more rows,
+    so it can only ever remove a candidate, never manufacture one.
+    """
+    out = s1.qualify(sparse_tail, today=TODAY)
+    assert out["candidate_instance"]["geographies"][
+        "S11_provisional_empty"] == "YB2 2", (
+        "expected YB2 2; ZC1 1 means a category or property-type filter was "
+        "dropped and the non-qualifying in-window rows were counted")
+
+
+@pytest.mark.parametrize("months, coverage_from, expect_lower", [
+    # The derived bound sits inside coverage: returned unchanged.
+    (6, "2016-01-01", "2026-03-06"),
+    (24, "2016-01-01", "2024-09-12"),
+    # Coverage edge: the derived bound precedes coverage_from, narrowed UP.
+    (6, "2026-06-01", "2026-06-01"),
+    (24, "2026-06-01", "2026-06-01"),
+])
+def test_clamped_window_returns_the_documented_bounds(
+        months, coverage_from, expect_lower):
+    """`max(today - months*30, coverage_from)` and `coverage_to`.
+
+    The clamp only ever narrows, which is why no selector that got it wrong
+    could produce a false positive -- the failure mode it guards is the
+    opposite one.
+    """
+    lower, upper = _bounds(months, coverage_from=coverage_from)
+    assert lower == expect_lower
+    assert upper == COVERAGE_TO
+    assert lower >= coverage_from
+
+
+def test_s11_rejects_a_row_exactly_on_the_six_month_lower_bound(sparse_tail):
+    """The bound is inclusive: a row dated exactly on it is IN the window.
+
+    Mutation: weaken the FILTER to `>` and `XB1 1` -- ten rows against the
+    valid eight, sorting earlier -- qualifies and is selected instead.
+    """
+    out = s1.qualify(sparse_tail, today=TODAY)
+    geo = out["candidate_instance"]["geographies"]
+    assert geo["S11_provisional_empty"] == "YB2 2"
+
+    # The on-bound sector was a live candidate, and was rejected for its row
+    # rather than being absent for some unrelated reason.
+    pool = dict(s1._rank(sparse_tail, "sector", months=24, today=TODAY,
+                         limit=10_000))
+    assert pool["XB1 1"] == 10
+    assert geo["S11_provisional_empty"] != "XB1 1"
+    assert s1._aggregate(sparse_tail, geography_sql="sector = ?",
+                         geo_params=["XB1 1"], months=6, today=TODAY) == 1
+
+
+def test_dense_placeholder_selections_are_unchanged(sparse_tail, materialized):
+    """The dense pool and its five placeholders are untouched by this fix."""
+    geo = s1.qualify(sparse_tail, today=TODAY)["candidate_instance"][
+        "geographies"]
+    assert geo["S5_dense"] == "DA1 1"
+    assert geo["S6_unit"] == "DA1 1AA"
+    assert geo["S7_type_weak"] == "DA1 1"
+    assert geo["S8_type_strong"] == "DB2 2"
+    assert geo["S13_empty_unit"] == "DA1 1AA"
+
+    # And on the pre-existing fixture the dense selections are what they were:
+    # only `B5 7AA` clears MIN_UNIT_POSTCODE_ROWS there.
+    legacy = s1.qualify(materialized, today=TODAY)["candidate_instance"][
+        "geographies"]
+    assert legacy["S6_unit"] == "B5 7AA"
+    assert legacy["S13_empty_unit"] == "B5 7AA"
