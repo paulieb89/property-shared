@@ -5,7 +5,23 @@ Versioning here is not strict SemVer: breaking changes are documented in a
 v1.11.0, v1.10.0, v1.4.0) rather than forcing a major bump. This entry follows
 that established practice.
 
-## v1.18.1 (2026-09-03) — fix sparse Stage 1 qualification selection; serving still off
+## v1.18.2 (2026-09-02) — live-arm diagnostic evidence for rate-limit failures; serving still off
+
+The out-of-band Stage 1 comparator now records why a live observation failed,
+not just that it did. A failed live arm keeps the HTTP status and reason and an
+allow-listed subset of response headers — `Retry-After`, `RateLimit-*` and
+`X-RateLimit-*` — and every live observation records when it started and
+finished, so the realised spacing between requests can be read off the report
+rather than inferred. The first Stage 1 run stopped on an HTTP 429 and preserved
+only the error string, which left the pacing question unanswerable.
+
+Comparison semantics are unchanged: one live observation per case, the same
+budget guard, no retry, no resume, no automatic backoff. The response body is
+never read and no public response model is widened; the change is confined to
+the comparator, which stays outside the request path. Snapshot serving remains
+off.
+
+## v1.18.1 (2026-09-02) — fix sparse Stage 1 qualification selection; serving still off
 
 Fixes the out-of-band Stage 1 comparator’s selection of sparse placeholders,
 so `S4_thin` and `S11_provisional_empty` are selected from the eligible
