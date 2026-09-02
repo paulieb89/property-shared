@@ -5,6 +5,15 @@ Versioning here is not strict SemVer: breaking changes are documented in a
 v1.11.0, v1.10.0, v1.4.0) rather than forcing a major bump. This entry follows
 that established practice.
 
+## v1.18.1 (2026-09-02) — fix sparse Stage 1 qualification selection; serving still off
+
+Fixes the out-of-band Stage 1 comparator’s selection of sparse placeholders,
+so `S4_thin` and `S11_provisional_empty` are selected from the eligible
+artifact population rather than the dense top-200 candidate pool. Corpus
+definitions, frozen parameters and snapshot-serving policy are unchanged.
+The `property-shared` image changes, but the comparator remains outside the
+request path and inert unless explicitly invoked. Snapshot serving remains off.
+
 ## v1.18.0 (2026-09-02) — out-of-band Stage 1 shadow comparator; serving still off
 
 Adds the Stage 1 shadow comparator and its frozen corpus definition, shipped in
