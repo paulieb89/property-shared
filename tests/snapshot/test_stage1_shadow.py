@@ -666,6 +666,9 @@ ALLOWED_KEYS = {
     # per case
     "shape", "intent", "request", "wire", "effective", "snapshot", "live",
     "snapshot_error", "live_error", "snapshot_invariants", "diff",
+    # live-arm diagnostics: request timing and the failure description
+    "live_timing", "started_at", "finished_at", "elapsed_ms", "outcome",
+    "live_error_detail", "type", "message", "status", "reason", "headers",
     "classification", "snapshot_false_empty", "live_truncation_evidenced",
     "empty_id_intersection_with_rows_on_both_sides",
     # request echo -- the geography ASKED FOR, never one returned
@@ -736,13 +739,26 @@ def _scalars(node, path="$"):
         yield path, node
 
 
+def _is_allowed_header_name(key) -> bool:
+    """Whether a key is a response-header name the comparator may retain.
+
+    Deliberately asks the production allow-list rather than restating it: a
+    header the comparator would refuse to keep is still an un-reviewed key
+    here, so the two cannot drift apart.
+    """
+    name = str(key).strip().lower()
+    return (name in s1.LIVE_ERROR_HEADERS_EXACT
+            or name.startswith(s1.LIVE_ERROR_HEADER_PREFIXES))
+
+
 def _static_keys(node):
-    """Keys, minus the dynamic key spaces (months, shapes, field names)."""
+    """Keys, minus the dynamic key spaces (months, shapes, field names,
+    allow-listed response-header names)."""
     found = set()
     if isinstance(node, dict):
         for key, value in node.items():
             if not (MONTH.match(str(key)) or key in SHAPE_NAMES
-                    or key in FIELD_NAMES):
+                    or key in FIELD_NAMES or _is_allowed_header_name(key)):
                 found.add(key)
             found |= _static_keys(value)
     elif isinstance(node, list):
@@ -3519,3 +3535,329 @@ def test_dense_placeholder_selections_are_unchanged(sparse_tail, materialized):
         "geographies"]
     assert legacy["S6_unit"] == "B5 7AA"
     assert legacy["S13_empty_unit"] == "B5 7AA"
+
+
+# ---------------------------------------------------------------------------
+# Live-arm diagnostics: status, allow-listed headers and request timing
+#
+# The first authorised Stage 1 run recorded `"HTTPError: HTTP Error 429: Too
+# Many Requests"` and nothing else. The status, the reason and any `Retry-After`
+# were on the exception at that moment and were discarded, so the question the
+# failure raised -- how long before the next authorised run -- could not be
+# answered from the evidence. Everything below is synthetic; the module's
+# `_no_network` fixture hard-fails sockets.
+# ---------------------------------------------------------------------------
+
+def _http_error(status=429, reason="Too Many Requests", headers=None, body=None):
+    """A real `urllib.error.HTTPError`, shaped like the one Stage 1 hit."""
+    import io
+    import urllib.error
+    from http.client import HTTPMessage
+
+    message = HTTPMessage()
+    for name, value in (headers or {}).items():
+        message[name] = value
+    return urllib.error.HTTPError(
+        "https://landregistry.example.invalid/sparql", status, reason, message,
+        io.BytesIO(body if body is not None else b""))
+
+
+class RaisingSeamLive:
+    """`comps()` fails *through the transport seam the capture wraps*.
+
+    The point of the exercise: a 429 raises out of the transport rather than
+    returning, so a wrapper that only records on the way back records nothing
+    about the one case that needs explaining. Driving the failure through
+    `search_with_evidence` is what proves the capture sees it.
+    """
+
+    def __init__(self):
+        self.calls = 0
+
+    def comps(self, **kwargs):
+        from property_core.ppd_client import PricePaidDataClient
+
+        self.calls += 1
+        client = PricePaidDataClient.__new__(PricePaidDataClient)
+        return PricePaidDataClient.search_with_evidence(client, **kwargs)
+
+
+@pytest.fixture
+def seam_raises(monkeypatch):
+    """Make the wrapped transport method raise, before the capture wraps it."""
+    def _install(exc):
+        from property_core.ppd_client import PricePaidDataClient
+
+        def _raiser(self, **kwargs):
+            raise exc
+
+        monkeypatch.setattr(PricePaidDataClient, "search_with_evidence", _raiser)
+        return RaisingSeamLive()
+
+    return _install
+
+
+# -- 1. a synthetic 429 with allowed headers is recorded ---------------------
+
+def test_a_429_records_its_status_reason_and_allowed_headers(
+        materialized, instance, tmp_path, monkeypatch, seam_raises):
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    live = seam_raises(_http_error(headers={
+        "Retry-After": "120",
+        "RateLimit-Limit": "100",
+        "RateLimit-Remaining": "0",
+        "X-RateLimit-Reset": "1756820000",
+    }))
+    report = _run(materialized, instance, tmp_path, monkeypatch, live=live,
+                  latency_repeats=1, stop_on_unclassified=False)
+
+    assert report["passed"] is False
+    entry = report["live_errors"][0]
+    assert entry["status"] == 429
+    assert entry["reason"] == "Too Many Requests"
+    assert entry["headers"] == {
+        "retry-after": "120",
+        "ratelimit-limit": "100",
+        "ratelimit-remaining": "0",
+        "x-ratelimit-reset": "1756820000",
+    }
+
+    failed = [c for c in report["cases"] if "live_error_detail" in c][-1]
+    assert failed["live_error_detail"]["status"] == 429
+    assert failed["live_error_detail"]["headers"]["retry-after"] == "120"
+
+
+def test_a_non_http_failure_records_null_status_and_no_headers(
+        materialized, instance, tmp_path, monkeypatch, seam_raises):
+    """A timeout is a different fact from a status of zero."""
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    live = seam_raises(TimeoutError("timed out"))
+    report = _run(materialized, instance, tmp_path, monkeypatch, live=live,
+                  latency_repeats=1, stop_on_unclassified=False)
+
+    entry = report["live_errors"][0]
+    assert entry["status"] is None
+    assert entry["reason"] is None
+    assert entry["headers"] == {}
+    assert entry["type"] == "TimeoutError"
+
+
+# -- 2. arbitrary headers and the response body are excluded -----------------
+
+def test_arbitrary_headers_and_the_response_body_are_never_retained(
+        materialized, instance, tmp_path, monkeypatch, seam_raises):
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    live = seam_raises(_http_error(headers={
+        "Retry-After": "60",
+        "Set-Cookie": "session=SECRET-SESSION-VALUE",
+        "Authorization": "Bearer SECRET-TOKEN",
+        "Server": "upstream-internal-hostname",
+        "X-Request-Id": "0123456789",
+        "Content-Type": "application/json",
+    }, body=b'{"rows":[{"transaction_id":"SECRET-TXN","price":123456}]}'))
+    report = _run(materialized, instance, tmp_path, monkeypatch, live=live,
+                  latency_repeats=1, stop_on_unclassified=False)
+
+    assert report["live_errors"][0]["headers"] == {"retry-after": "60"}
+    serialized = json.dumps(report)
+    for forbidden in ("SECRET-SESSION-VALUE", "SECRET-TOKEN", "SECRET-TXN",
+                      "upstream-internal-hostname", "set-cookie", "Set-Cookie",
+                      "authorization", "Authorization", "123456",
+                      "0123456789", "application/json"):
+        assert forbidden not in serialized, f"leaked {forbidden!r} into the report"
+
+
+def test_the_header_allow_list_is_exactly_the_three_documented_shapes():
+    kept = s1.allowed_response_headers({
+        "Retry-After": "1", "RateLimit-Policy": "2", "X-RateLimit-Used": "3",
+        "Retry-After-Ms": "4", "Cookie": "5", "X-Rate-Limit": "6",
+    })
+    assert kept == {"retry-after": "1", "ratelimit-policy": "2",
+                    "x-ratelimit-used": "3"}
+
+
+def test_missing_headers_are_an_empty_mapping_not_a_null():
+    assert s1.allowed_response_headers(None) == {}
+    assert s1.allowed_response_headers({}) == {}
+
+
+def test_a_retained_header_value_is_bounded():
+    kept = s1.allowed_response_headers({"Retry-After": "9" * 5000})
+    assert len(kept["retry-after"]) == s1.LIVE_ERROR_HEADER_VALUE_MAX
+
+
+def test_describing_an_error_never_reads_the_response_body():
+    class Exploding:
+        code = 429
+        reason = "Too Many Requests"
+        headers = {"Retry-After": "30"}
+
+        def read(self, *a, **k):
+            raise AssertionError("the response body must never be read")
+
+    detail = s1.describe_live_error(Exploding())
+    assert detail["status"] == 429
+    assert detail["headers"] == {"retry-after": "30"}
+
+
+# -- 3. one observation, no retry, abort, partial report still written -------
+
+def test_a_429_consumes_one_observation_is_not_retried_and_aborts(
+        materialized, instance, tmp_path, monkeypatch, seam_raises):
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    live = seam_raises(_http_error(headers={"Retry-After": "120"}))
+    report = _run(materialized, instance, tmp_path, monkeypatch, live=live,
+                  latency_repeats=1, stop_on_unclassified=False)
+
+    assert live.calls == 1, "the failed live observation was retried"
+    assert report["limits"]["live_calls_made"] == 1
+    assert report["aborted"]
+    assert "no later case runs" in report["aborted"]
+    assert len(report["live_errors"]) == 1
+    assert report["cases_compared"] == 0
+
+
+def test_the_partial_report_is_still_written_to_disk(
+        materialized, instance, tmp_path, monkeypatch, seam_raises):
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    live = seam_raises(_http_error(headers={"Retry-After": "120"}))
+    _run(materialized, instance, tmp_path, monkeypatch, live=live,
+         latency_repeats=1, stop_on_unclassified=False)
+
+    written = json.loads((tmp_path / "report.json").read_text())
+    assert written["live_errors"][0]["status"] == 429
+    assert written["live_errors"][0]["headers"] == {"retry-after": "120"}
+
+
+# -- 4. successful records keep the transport evidence they always had -------
+
+def test_the_capture_still_records_transport_evidence_on_success(monkeypatch):
+    """The success path is unchanged: the same three fields, from the same seam."""
+    from property_core.ppd_client import PricePaidDataClient, SearchPage
+
+    page = SearchPage(transactions=[],
+                      evidence=TransportEvidence(raw_bindings_returned=7,
+                                                 fetch_limit=50))
+    monkeypatch.setattr(PricePaidDataClient, "search_with_evidence",
+                        lambda self, **kwargs: page)
+
+    with s1.LiveEvidenceCapture() as capture:
+        client = PricePaidDataClient.__new__(PricePaidDataClient)
+        PricePaidDataClient.search_with_evidence(client, postcode="B5 7")
+
+    assert capture.last == {"raw_bindings_returned": 7, "fetch_limit": 50,
+                            "source_exhausted": True}
+    assert capture.last_error is None
+    assert capture.truncation_evidenced is False
+
+
+def test_the_capture_records_a_failure_and_re_raises_it_untouched(monkeypatch):
+    """Observing a failure must not change what the caller sees, or retry it."""
+    from property_core.ppd_client import PricePaidDataClient
+
+    boom = _http_error(headers={"Retry-After": "90", "Set-Cookie": "s=SECRET"})
+    calls = []
+
+    def _raiser(self, **kwargs):
+        calls.append(kwargs)
+        raise boom
+
+    monkeypatch.setattr(PricePaidDataClient, "search_with_evidence", _raiser)
+
+    with s1.LiveEvidenceCapture() as capture:
+        client = PricePaidDataClient.__new__(PricePaidDataClient)
+        with pytest.raises(type(boom)) as caught:
+            PricePaidDataClient.search_with_evidence(client, postcode="B5 7")
+
+    assert caught.value is boom, "the exception was replaced, not re-raised"
+    assert len(calls) == 1, "the capture retried the failed request"
+    assert capture.last_error["status"] == 429
+    assert capture.last_error["headers"] == {"retry-after": "90"}
+
+
+def test_a_successful_run_records_no_failure_detail(
+        materialized, instance, tmp_path, monkeypatch):
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    report = _run(materialized, instance, tmp_path, monkeypatch,
+                  latency_repeats=1, stop_on_unclassified=False)
+
+    for case in report["cases"]:
+        assert "transport_evidence" in case["live"]
+        assert "live_error_detail" not in case
+    assert report["live_errors"] == []
+
+
+# -- 5. timing permits spacing between live requests to be calculated --------
+
+def test_every_live_observation_records_when_it_started_and_finished(
+        materialized, instance, tmp_path, monkeypatch):
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    report = _run(materialized, instance, tmp_path, monkeypatch,
+                  latency_repeats=1, stop_on_unclassified=False)
+
+    from datetime import datetime
+
+    stamps = []
+    for case in report["cases"]:
+        timing = case["live_timing"]
+        assert set(timing) == {"started_at", "finished_at", "elapsed_ms",
+                               "outcome"}
+        assert timing["outcome"] == "ok"
+        started = datetime.fromisoformat(timing["started_at"])
+        finished = datetime.fromisoformat(timing["finished_at"])
+        assert started.tzinfo is not None and finished >= started
+        stamps.append((started, finished))
+
+    # The whole point: spacing between consecutive live requests is computable.
+    assert len(stamps) == 13
+    spacings = [(stamps[i][0] - stamps[i - 1][1]).total_seconds()
+                for i in range(1, len(stamps))]
+    assert all(gap >= 0 for gap in spacings)
+
+
+def test_a_failed_live_observation_is_also_timed(
+        materialized, instance, tmp_path, monkeypatch, seam_raises):
+    """Without this the one request worth explaining is the one with no clock."""
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    live = seam_raises(_http_error(headers={"Retry-After": "120"}))
+    report = _run(materialized, instance, tmp_path, monkeypatch, live=live,
+                  latency_repeats=1, stop_on_unclassified=False)
+
+    timing = report["cases"][-1]["live_timing"]
+    assert timing["outcome"] == "error"
+    assert timing["started_at"] and timing["finished_at"]
+    assert isinstance(timing["elapsed_ms"], float)
+
+
+# -- 6. the budget guard is untouched ---------------------------------------
+
+def test_the_live_budget_guard_still_refuses_beyond_one_per_case(
+        materialized, instance, tmp_path, monkeypatch):
+    limits = s1.RunLimits(max_live_per_case=1)
+    with pytest.raises(s1.RunAborted, match="live-call budget"):
+        s1.check_live_budget(13, limits, 13, "S14")
+    # Under budget, it does not refuse.
+    s1.check_live_budget(12, limits, 13, "S14")
+
+
+def test_instrumentation_did_not_change_the_live_call_count(
+        materialized, instance, tmp_path, monkeypatch):
+    monkeypatch.setattr(s1, "health_ok", lambda *a, **k: (True, "200"))
+    live = FakeLive()
+    report = _run(materialized, instance, tmp_path, monkeypatch, live=live,
+                  latency_repeats=5, stop_on_unclassified=False)
+    assert len(live.calls) == 13
+    assert report["limits"]["live_calls_made"] == 13
+
+
+def test_the_comparator_never_retries_or_backs_off_a_live_failure():
+    """No sleep-and-reissue may appear on the live path.
+
+    `Retry-After` is captured so a human can pace the NEXT authorised run. A
+    run that honours it by waiting and re-issuing has made a second live
+    observation for one case, which is the rule this gate exists to hold.
+    """
+    source = (REPO / "tools" / "ppd_snapshot" / "stage1_shadow.py").read_text()
+    for forbidden in ("retry_live", "max_retries", "backoff", "tenacity",
+                      "while attempt", "for attempt"):
+        assert forbidden not in source, f"a retry mechanism appeared: {forbidden!r}"

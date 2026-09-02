@@ -54,7 +54,7 @@ import os
 import time
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -1158,13 +1158,90 @@ def classify(*, only_live_months: dict[str, int], only_snapshot_months: dict[str
 # Live transport evidence, captured without touching public models
 # ---------------------------------------------------------------------------
 
-class LiveEvidenceCapture:
-    """Record `raw_bindings_returned` / `fetch_limit` for the live arm.
+#: The ONLY response headers a failed live observation may retain.
+#:
+#: An allow-list, never a deny-list. A failed request's headers are attacker- and
+#: upstream-controlled and can carry session identifiers, cookies or upstream
+#: infrastructure detail; the diagnostic question here is narrow -- "was this
+#: rate limiting, and did the source say for how long?" -- so only headers that
+#: answer it are kept. Matching is case-insensitive because HTTP header names
+#: are.
+LIVE_ERROR_HEADERS_EXACT: tuple[str, ...] = ("retry-after",)
+LIVE_ERROR_HEADER_PREFIXES: tuple[str, ...] = ("ratelimit-", "x-ratelimit-")
 
-    Divergence class 3 must be *evidenced*, and those two numbers are the
-    evidence. They are carried up the live path as `TransportEvidence` but are
-    deliberately not exposed on `PPDCompsResponse`, so the only ways to see
-    them are to widen a public response model or to observe the transport call.
+#: A retained header value is truncated rather than trusted to be short. None of
+#: the allowed headers is long in practice; this bounds what a hostile or broken
+#: upstream can write into the evidence file.
+LIVE_ERROR_HEADER_VALUE_MAX = 200
+
+
+def allowed_response_headers(headers: Any) -> dict[str, str]:
+    """The allow-listed subset of a response's headers, lower-cased.
+
+    Accepts anything with `.items()` -- `email.message.Message` on the real
+    path, a plain dict in tests -- and returns `{}` for `None` or an object that
+    cannot be iterated. An empty result is the honest representation of "the
+    response carried none of these", and is not the same as "we did not look".
+    """
+    if headers is None:
+        return {}
+    try:
+        items = list(headers.items())
+    except Exception:  # noqa: BLE001 -- diagnostics must not raise
+        return {}
+    kept: dict[str, str] = {}
+    for raw_name, raw_value in items:
+        name = str(raw_name).strip().lower()
+        if name in LIVE_ERROR_HEADERS_EXACT or name.startswith(
+                LIVE_ERROR_HEADER_PREFIXES):
+            kept[name] = str(raw_value)[:LIVE_ERROR_HEADER_VALUE_MAX]
+    return kept
+
+
+def describe_live_error(exc: BaseException) -> dict[str, Any]:
+    """What a failed live observation is allowed to record about itself.
+
+    The first Stage 1 run recorded `"HTTPError: HTTP Error 429: Too Many
+    Requests"` and nothing else. The status code, the reason and any
+    `Retry-After` the source sent were all present on the exception at that
+    moment and were discarded, so the one question the failure raised -- how
+    long to wait before the next authorised run -- could not be answered from
+    the evidence.
+
+    **The response body is never read.** `HTTPError` is itself a readable file
+    object; calling `.read()` here would pull upstream content into an evidence
+    file for no diagnostic gain. Only the status line and the allow-listed
+    headers are kept.
+
+    `status` and `reason` are `None` for a failure that is not an `HTTPError`
+    (a timeout, a connection reset), which is a different fact from a status of
+    zero.
+    """
+    status = getattr(exc, "code", None)
+    detail: dict[str, Any] = {
+        "type": type(exc).__name__,
+        "message": str(exc),
+        "status": int(status) if isinstance(status, int) else None,
+        "reason": (str(getattr(exc, "reason", None))
+                   if getattr(exc, "reason", None) is not None else None),
+        "headers": allowed_response_headers(getattr(exc, "headers", None)),
+    }
+    return detail
+
+
+def _utc_now_iso() -> str:
+    """Millisecond-precision UTC, so live-request spacing is computable."""
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+class LiveEvidenceCapture:
+    """Record what the live transport did -- on success AND on failure.
+
+    Divergence class 3 must be *evidenced*, and `raw_bindings_returned` /
+    `fetch_limit` are that evidence. They are carried up the live path as
+    `TransportEvidence` but are deliberately not exposed on
+    `PPDCompsResponse`, so the only ways to see them are to widen a public
+    response model or to observe the transport call.
 
     Widening the model would put a rollout-diagnostic field into every
     consumer's payload permanently, so this observes instead: it wraps the exact
@@ -1172,10 +1249,19 @@ class LiveEvidenceCapture:
     and changes nothing about what that method does. The wrap is installed and
     removed around the live arm; the serving application is a different process
     and is untouched either way.
+
+    **The wrapper catches as well as returns.** A success-only wrapper records
+    nothing about the case that actually needs explaining: a 429 raises out of
+    `_fetch_sparql`, so there is no return value to inspect and the exception is
+    the only place the status and headers exist. It is described here, at the
+    seam, and then re-raised untouched -- observing a failure must not change
+    what the caller sees, and must not retry it.
     """
 
     def __init__(self) -> None:
         self.last: dict[str, Any] = {}
+        #: `None` until a live call raises. Populated at the transport seam.
+        self.last_error: Optional[dict[str, Any]] = None
         self._original: Optional[Callable[..., Any]] = None
 
     def __enter__(self) -> "LiveEvidenceCapture":
@@ -1184,7 +1270,13 @@ class LiveEvidenceCapture:
         self._original = PricePaidDataClient.search_with_evidence
 
         def _wrapped(inner_self, **kwargs):
-            page = self._original(inner_self, **kwargs)
+            try:
+                page = self._original(inner_self, **kwargs)
+            except BaseException as exc:
+                # Described, never swallowed and never retried: the caller's
+                # abort semantics are exactly as they were.
+                self.last_error = describe_live_error(exc)
+                raise
             evidence = getattr(page, "evidence", None)
             self.last = {
                 "raw_bindings_returned": getattr(
@@ -1514,22 +1606,49 @@ def run_compare(*, instance: Stage1Instance, materialized: Materialized,
             live_response = None
             check_live_budget(live_calls, limits, len(corpus), case.shape)
             with LiveEvidenceCapture() as capture:
+                # Wall-clock anchors, recorded on BOTH paths. The delay is
+                # applied after the call and is dwarfed by the call itself, so
+                # the realised spacing between live requests can only be read
+                # off timestamps -- it cannot be inferred from
+                # `live_delay_seconds`.
+                live_started_at = _utc_now_iso()
+                live_started = time.monotonic()
+
+                def _timing(outcome: str) -> dict[str, Any]:
+                    return {
+                        "started_at": live_started_at,
+                        "finished_at": _utc_now_iso(),
+                        "elapsed_ms": round(
+                            (time.monotonic() - live_started) * 1000.0, 2),
+                        "outcome": outcome,
+                    }
+
                 try:
                     live_calls += 1
                     live_response, live_observed, _, live_ms = _observe(
                         live_service, case)
+                    record["live_timing"] = _timing("ok")
                     record["live"] = _arm_record(live_response, case,
                                                  live_observed, live_ms)
                     record["live"]["transport_evidence"] = dict(capture.last)
                     record["live_truncation_evidenced"] = capture.truncation_evidenced
                 except MidnightCrossed:
+                    record["live_timing"] = _timing("midnight_crossed")
                     midnight["unrecoverable"] = True
                     results.append(record)
                     raise
                 except Exception as exc:  # noqa: BLE001 -- recorded, then stops
+                    record["live_timing"] = _timing("error")
+                    # Described at the transport seam where the status and
+                    # headers exist; `describe_live_error` is the fallback for a
+                    # failure raised somewhere other than that seam, so the
+                    # record has the same shape either way.
+                    detail = capture.last_error or describe_live_error(exc)
                     live_errors.append({"shape": case.shape,
-                                        "error": f"{type(exc).__name__}: {exc}"})
+                                        "error": f"{type(exc).__name__}: {exc}",
+                                        **detail})
                     record["live_error"] = f"{type(exc).__name__}: {exc}"
+                    record["live_error_detail"] = detail
                     results.append(record)
                     raise RunAborted(
                         f"{case.shape}: the live arm failed "
