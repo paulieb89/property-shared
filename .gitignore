@@ -57,3 +57,9 @@ scripts/*
 !scripts/rightmove_address_dump.py
 !scripts/fly_observability_snapshot.py
 !scripts/validate.sh
+
+# Live git worktrees, not disposable scratch. Untracked and unignored, this
+# directory presented as `?? .claude/worktrees/` in every status, one
+# `git clean -fd` away from destroying four checked-out worktrees. Ignoring it
+# is the protection: git clean skips ignored paths without -x.
+.claude/worktrees/
