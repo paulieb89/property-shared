@@ -5,6 +5,64 @@ Versioning here is not strict SemVer: breaking changes are documented in a
 v1.11.0, v1.10.0, v1.4.0) rather than forcing a major bump. This entry follows
 that established practice.
 
+## v1.19.1 (2026-09-05) — EPC certificates were unfetchable on three upstream shape variants
+
+A smoke test reported one certificate failing validation on `tenure: 'ND'`.
+Auditing the class rather than the instance found three variants, all with the
+same user-visible effect: the whole certificate raises and nothing is returned,
+on both `epc_certificate` and `property_epc`-with-address.
+
+Measured at the live boundary on 2026-09-05 across 133 certificates from twelve
+postcodes, **14 (10.5%) were unfetchable**:
+
+| Field | Value | Certificates | Schemas |
+|---|---|---|---|
+| `tenure` | `'ND'` | 3 | SAP 16.1, SAP 19.1.0 |
+| `built_form` | `'NR'` | 5 | RdSAP 21.0.1 |
+| `co2_emissions_current` / `_potential` | `{"value": 1.8, "quantity": "tonnes per year"}` | 6 | SAP 13.0 |
+
+### Fixed
+
+- **The coded fields are keyed by string upstream, not by integer.**
+  `/api/codes/info` lists `ND` ("unknown") and `NR` ("Not Recorded") as
+  first-class keys beside the numeric ones, in every schema version checked, so
+  these are stated answers rather than absences. `built_form_code`,
+  `property_type_code` and `tenure_code` are now `Optional[str]` carrying the
+  upstream key verbatim. They are NOT normalised to `None`: that would conflate
+  "upstream states the tenure is unknown" with "upstream said nothing about
+  tenure", and discard a label upstream supplies.
+- **The codebook made the mirror-image mistake.** `_fetch_table` coerced keys
+  with `int()` inside a `try/except` that `continue`d, silently dropping `ND`
+  and `NR` from every table — so even had the model accepted them, they could
+  never have resolved. Both sides now use the upstream key space.
+- **CO2 emissions carry the dual shape `EPCMoney` already documents** for the
+  six cost fields — a bare number in most schemas, `{value, quantity}` in
+  SAP 13.0. Modelled as the new `EPCQuantity` with the same discipline: the unit
+  is reported when upstream states it and never fabricated when it does not
+  (`"quantity": ""` was observed, and is a stated nothing).
+
+### Compatibility
+
+No contract change. `EPCData` still carries `built_form`, `property_type` and
+`tenure` as labels (`str`) and `co2_emissions_*` as `float`; the `*_code` fields
+are internal to `property_core.epc`.
+
+### Verified
+
+Against the live EPC API, same 133-certificate sample: **133/133 fetched, 0
+failures** (was 119/133). `ND` and `NR` now resolve to "unknown" and "Not
+Recorded" rather than to `None`.
+
+### Known, not fixed here
+
+`SAP-Schema-13.0` has no `tenure` table upstream — `/api/codes/info` returns a
+permanent 404. That 404 counts toward the codebook's outage breaker, and once
+tripped every label for every schema returns `None` for the rest of the process
+(35 tenure labels unresolved across the sweep). Pre-existing, and a different
+failure mode from this release — a missing label, not an unfetchable
+certificate. A 404 is a permanent per-table answer rather than an outage, so it
+wants caching as "no such table" instead of failure accounting.
+
 ## v1.19.0 (2026-09-04) — PPD serves from the local snapshot; full history; two wrong-answer fixes
 
 The release that moves PPD off the live Land Registry SPARQL source. That source
