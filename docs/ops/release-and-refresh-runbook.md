@@ -128,14 +128,31 @@ confusing failure here.
 
 **Order is the whole safety property:**
 
-1. PUT the bundle
+1. Upload the bundle **as a multipart upload**
 2. **GET it back and verify** sha256 and byte length — catches a truncated upload
 3. PUT the manifest
 4. PUT `current.json` **last**
 
 `current.json` is the single control point; every Machine reads it on next boot.
 Stop at any point before step 4 and nothing has changed for anyone, because it
-still names the previous manifest.
+still names the previous manifest. This is not theoretical: on 2026-09-04 the
+first publish attempt failed at step 1 after 8.5 minutes of transfer, and
+production was untouched.
+
+**The bundle must go up as multipart, not a single PUT.** A single PUT of the
+1.19 GB bundle was rejected with `XAmzContentSHA256Mismatch` after transferring
+the whole object — the server received a complete request whose body hashed
+differently from the signed header. Small objects sign and upload fine by either
+route, so the fault is in streaming a very large body as one request.
+
+Multipart is what S3 clients do above ~100 MB anyway, and it is better here for
+a reason beyond working: each part carries its own sha256 and is rejected on
+arrival, so a corrupt transfer fails on the offending part in seconds instead of
+at the end of the whole object. 64 MiB parts; S3's minimum is 5 MiB except for
+the last. Abort the upload id if any part fails, or the incomplete upload lingers
+and is billed.
+
+Manifest and `current.json` are small enough for a single PUT.
 
 ### Activating
 
