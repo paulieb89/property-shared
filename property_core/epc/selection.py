@@ -1,13 +1,23 @@
 """Safe candidate selection.
 
-v1.14 contract — deliberately only three ways to select a certificate:
+v1.14 contract — deliberately only four ways to select a certificate:
 
   1. exact UPRN match (exactly one candidate carries it),
-  2. exact normalized full-address equality, or
+  2. exact normalized full-address equality,
   3. the same, after canonicalizing a LEADING "Flat <n>" / "Apartment <n>"
-     designator to one token (see _canon),
+     designator to one token (see _canon), or
+  4. several candidates proven to be ONE property -- an agreed non-empty UPRN
+     and agreed canonical address -- in which case the newest certificate by
+     registration date wins (see _one_property_latest),
 
 and otherwise EPCAmbiguousMatchError.
+
+Rule 4 is not a fifth relaxation of the kind catalogued below. Those all
+invented a winner from partial evidence about *which property*. This one adds no
+property evidence at all: it applies only once identity is already established
+by rules 1-3's standard, and then chooses among that single property's own
+certificate history, which is a thing properties genuinely have -- re-certified
+on every sale and let.
 
 There is no structured street/building/unit acceptance path. One existed and was
 repaired four times, each round finding a new way for partial evidence to look
@@ -53,6 +63,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import date
 from typing import Iterable, Optional
 
 from property_core.epc.errors import EPCAmbiguousMatchError
@@ -89,6 +100,64 @@ def _canon(s: Optional[str]) -> str:
     return _DESIGNATOR_RE.sub(r"flat \1", _norm(s), count=1)
 
 
+def _registration_date(row: EPCSearchRow) -> Optional[date]:
+    """The row's registration date, or None if it cannot be ordered.
+
+    Requires a canonical ISO round trip. Comparing the strings directly would
+    be safe only for `YYYY-MM-DD`, and the repo has the scar for it: an
+    unvalidated date once sorted after a real one and was read as "beyond
+    coverage" (see `ppd_source.validate_date_range`). Anything unparseable
+    yields None, which refuses rather than orders arbitrarily.
+    """
+    text = (row.registration_date or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = date.fromisoformat(text)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.isoformat() == text else None
+
+
+def _one_property_latest(rows: list[EPCSearchRow]) -> Optional[EPCSearchRow]:
+    """The newest certificate, when every row is provably the SAME property.
+
+    Properties are re-certified on sale and on let, so a property with several
+    certificates is the normal case. Before this, every one of them was
+    unreachable by address: the collision rule saw two rows and refused, and no
+    amount of correct address text could get past it.
+
+    Deliberately narrower than "same UPRN wins". All three must hold:
+
+      * **every** row carries a non-empty UPRN and they are all equal. UPRN is
+        optional upstream and often absent, so absence proves nothing and two
+        blanks are not agreement.
+      * the rows agree on canonical address text. A shared UPRN with *different*
+        addresses is contradictory upstream data, not one property, and picking
+        between them would be the precise failure this module exists to prevent.
+      * the dates order strictly. A tie has no "most recent", and resolving one
+        by row order is a defect already named in the module docstring.
+
+    Any of those failing returns None, and the caller refuses as before.
+    """
+    uprns = {r.uprn for r in rows}
+    if len(uprns) != 1:
+        return None
+    only = next(iter(uprns))
+    if not only:
+        return None
+    if len({_canon(r.address) for r in rows}) != 1:
+        return None
+
+    dated = [(_registration_date(r), r) for r in rows]
+    if any(d is None for d, _ in dated):
+        return None
+    dated.sort(key=lambda pair: pair[0])
+    if dated[-1][0] == dated[-2][0]:
+        return None
+    return dated[-1][1]
+
+
 @dataclass(frozen=True)
 class SelectionResult:
     """The selected row and the identity evidence that selected it.
@@ -97,10 +166,17 @@ class SelectionResult:
     retained so callers that record a score keep a stable field, not because
     there is a spectrum. ``method`` distinguishes literal equality from
     designator-canonicalized equality so a consumer can treat them differently.
+
+    ``uprn_latest_certificate`` is still identity, hence still 100: the property
+    is pinned by an agreed UPRN *and* agreed address text. What it additionally
+    discloses is that the property had more than one certificate and the newest
+    was taken -- a choice among one property's own history, never among
+    properties.
     """
 
     row: EPCSearchRow
     method: str          # "uprn" | "exact_address" | "address_designator_normalized"
+                         # | "uprn_latest_certificate"
     confidence: int      # always 100
 
 
@@ -126,8 +202,13 @@ def select_candidate(
         if len(hits) == 1:
             return SelectionResult(hits[0], "uprn", 100)
         if len(hits) > 1:
+            latest = _one_property_latest(hits)
+            if latest is not None:
+                return SelectionResult(latest, "uprn_latest_certificate", 100)
             raise EPCAmbiguousMatchError(
-                f"{len(hits)} certificates share UPRN {uprn}; cannot select one", hits)
+                f"{len(hits)} certificates share UPRN {uprn} but disagree on "
+                f"address or registration date, so they cannot be shown to be "
+                f"one property's certificate history; cannot select one", hits)
         # A supplied UPRN that matches nothing is evidence of a MISS, not an
         # invitation to fall back to weaker address text.
         raise EPCAmbiguousMatchError(
@@ -179,6 +260,12 @@ def select_candidate(
         return SelectionResult(row, method, 100)
 
     if len(canon) > 1:
+        # Same property, certified more than once: identity is proven by UPRN,
+        # so this is a choice among one property's certificates, not among
+        # properties. The current certificate is the newest one.
+        latest = _one_property_latest(canon)
+        if latest is not None:
+            return SelectionResult(latest, "uprn_latest_certificate", 100)
         if all(_norm(r.address) == target for r in canon):
             raise EPCAmbiguousMatchError(
                 f"{len(canon)} certificates share the address text {address!r}; "

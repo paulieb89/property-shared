@@ -113,6 +113,7 @@ async def enrich_comps_with_epc(
     # attaching a neighbouring property's EPC.
     cert_cache: Dict[str, Any] = {}
     ambiguous = 0
+    by_method: Dict[str, int] = {}
 
     for postcode, indices in postcode_groups.items():
         page = postcode_pages.get(postcode)
@@ -146,6 +147,7 @@ async def enrich_comps_with_epc(
                 # confidence tier cannot silently be reported as certainty.
                 match_score = selected.confidence
                 comp.epc_match_method = selected.method
+                by_method[selected.method] = by_method.get(selected.method, 0) + 1
                 floor_sqm = match.floor_area
                 price = comp.price
 
@@ -168,6 +170,20 @@ async def enrich_comps_with_epc(
                 else:
                     comp.price_per_sqm = None
                     comp.price_per_sqft = None
+
+    # `ambiguous` was counted and never read, so how often selection refused --
+    # and therefore what any change to it is worth -- could not be measured from
+    # anything this function left behind. Logged with the method breakdown so a
+    # before/after is readable without instrumenting a release.
+    if ambiguous or by_method:
+        _log.info(
+            "EPC enrichment: %d matched (%s), %d refused as ambiguous, "
+            "%d postcode(s)",
+            sum(by_method.values()),
+            ", ".join(f"{m}={n}" for m, n in sorted(by_method.items())) or "none",
+            ambiguous,
+            len(postcode_groups),
+        )
 
     return comps
 
