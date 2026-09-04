@@ -57,3 +57,5 @@ scripts/*
 !scripts/rightmove_address_dump.py
 !scripts/fly_observability_snapshot.py
 !scripts/validate.sh
+!scripts/deploy_fly.py
+!scripts/verify_release.py

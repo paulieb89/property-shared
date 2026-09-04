@@ -28,10 +28,22 @@ jobs:
     name: Deploy property-shared to Fly
     runs-on: ubuntu-latest
     needs: publish
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --remote-only --ha=false
+      # Pinned by SHA rather than @master: this job holds a production deploy
+      # token, and @master runs whatever is on that branch at that moment. The
+      # SHA below is tag 1.6 / v1, which is what @master already resolved to
+      # when this was pinned, so the pin changes nothing except reproducibility.
+      # The flyctl BINARY is deliberately unpinned -- it talks to a moving
+      # server API, so pinning it turns a rare flake into certain rot.
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1  # 1.6
+      # One step, not a `run:` plus an `if: failure()` retry step: a failed step
+      # fails the job even when a later one succeeds, so that shape needs
+      # continue-on-error and then reports a misleading green. The ladder lives
+      # in a script so it can be tested -- see tests/test_deploy_fly.py.
+      - name: Deploy (Depot, then --depot=false fallback)
+        run: python3 scripts/deploy_fly.py --app property-shared --config fly.toml
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
@@ -39,9 +51,35 @@ jobs:
     name: Deploy propertydata to Fly
     runs-on: ubuntu-latest
     needs: publish
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --config fly.app.toml --remote-only --ha=false
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1  # 1.6
+      - name: Deploy (Depot, then --depot=false fallback)
+        run: python3 scripts/deploy_fly.py --app propertydata --config fly.app.toml
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_PROPERTYDATA }}
+
+  reconcile:
+    name: Both apps must serve the released version
+    runs-on: ubuntu-latest
+    needs: [deploy, deploy-propertydata]
+    # `!cancelled()`, not the default. On v1.15.1 one deploy failed and one
+    # succeeded -- a normal terminal state of this graph -- so the job that
+    # would have noticed must run precisely when a deploy has failed. Not
+    # `always()`, so a cancelled run is not reported as version drift.
+    #
+    # If `publish` fails both deploys skip and this still fails, because neither
+    # app serves the tag. That is correct: a release that shipped nothing must
+    # not show green.
+    if: ${{ !cancelled() }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconcile deployed versions against the release tag
+        run: |
+          python3 scripts/verify_release.py \
+            --expect "${{ github.event.release.tag_name }}" \
+            --target property-shared=https://property-shared.fly.dev \
+            --target propertydata=https://propertydata.fly.dev \
+            --attempts 20 --interval 15 --require-consecutive 2
