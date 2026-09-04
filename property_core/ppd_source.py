@@ -36,6 +36,7 @@ from property_core.config import ppd_snapshot_enabled
 from property_core.exceptions import InvalidDateRangeError, PPDCoverageError
 from property_core.provenance import (
     CompletenessBasis,
+    DateWindow,
     PPDProvenance,
     SourceKind,
     TransportEvidence,
@@ -77,6 +78,15 @@ class CoverageDecision:
     #: `snapshot_provenance`. An interval that reaches past either bound was
     #: only partly answered, however exhaustively the overlap was searched.
     fully_contained: bool = False
+
+    #: What the caller actually asked for, before any clamping. `from_date` and
+    #: `to_date` above are the window that was QUERIED, and on their own a
+    #: reader cannot tell whether that was the request or a clamp -- nor can a
+    #: model whose earlier turn has left its context. Kept so the answer is
+    #: auditable on its own terms. `None` on both means the caller named no
+    #: bound, which is itself the thing worth recording.
+    requested_from: Optional[str] = None
+    requested_to: Optional[str] = None
 
     @property
     def narrowed(self) -> bool:
@@ -305,6 +315,8 @@ def resolve_coverage(
         to_clamped=to_clamped,
         recent_period_provisional=provisional,
         fully_contained=fully_contained,
+        requested_from=from_date,
+        requested_to=to_date,
     )
 
 
@@ -369,6 +381,10 @@ def snapshot_provenance(
         sample_limit=sample_limit,
         sample_complete=completeness_basis is not None,
         completeness_basis=completeness_basis,
+        requested_window=DateWindow(from_date=decision.requested_from,
+                                    to_date=decision.requested_to),
+        effective_window=DateWindow(from_date=decision.from_date,
+                                    to_date=decision.to_date),
         warnings=tuple(warnings),
     )
 

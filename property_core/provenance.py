@@ -93,6 +93,15 @@ class TransportEvidence(BaseModel):
         return self.source_exhausted is True
 
 
+class DateWindow(BaseModel):
+    """An inclusive date range, either end optionally unbounded."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    from_date: Optional[str] = None
+    to_date: Optional[str] = None
+
+
 class PPDProvenance(BaseModel):
     """Additive provenance block attached to PPD-bearing responses.
 
@@ -141,6 +150,16 @@ class PPDProvenance(BaseModel):
     sample_limit: int = Field(0, ge=0)
     sample_complete: bool = False
     completeness_basis: Optional[CompletenessBasis] = None
+
+    #: What was asked for, and what could be answered. Published as a pair
+    #: because either alone is ambiguous: `effective` on its own cannot say
+    #: whether it was the request or a clamp, and a caller deciding whether an
+    #: answer supports a claim needs both. A model that has dropped the earlier
+    #: turn from its context cannot reconstruct this from anywhere else, which
+    #: is why it travels with the answer rather than only in a prior response.
+    #: `None` means no window was resolved for this response.
+    requested_window: Optional["DateWindow"] = None
+    effective_window: Optional["DateWindow"] = None
 
     attribution_ref: str = ATTRIBUTION_REF
     #: A tuple, not a list: ``frozen=True`` is shallow, so a list field would
