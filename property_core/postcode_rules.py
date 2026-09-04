@@ -87,6 +87,40 @@ def normalise_prefix(value: object, *, field: str = "postcode_prefix") -> str:
     return text
 
 
+def normalise_postcode_or_outcode(value: object, *, field: str = "postcode") -> str:
+    """Validate a full postcode or an outcode. Raises InvalidPostcodeError.
+
+    Rightmove's typeahead resolves full postcodes ('B5 4BX' -> POSTCODE^4991456)
+    and outcodes ('B5' -> OUTCODE^86), and returns no match for a sector ('B5 7',
+    'E14 9') -- probed live 2026-09-03.
+
+    Deliberately between the two existing helpers, and neither of them fits:
+    `normalise_prefix` admits sectors, which can never resolve, so it would send
+    input upstream that is guaranteed to come back empty; `normalise_postcode`
+    admits only full postcodes, so it would reject an outcode that does resolve
+    and is a documented input. Composed from the same private predicates as
+    both, so the GIR special cases cannot drift apart from them.
+    """
+    from property_core.exceptions import InvalidPostcodeError
+
+    text = _normalise(value)
+    if _is_full(text) or _is_outcode(text):
+        return text
+    expected = "a full postcode ('B5 4BX') or an outcode ('B5')"
+    if _is_sector(text):
+        # A sector is well-formed, so "not valid" alone sends the caller looking
+        # for a typo that is not there. Name the input that would work.
+        expected += (
+            f"; a postcode sector has no Rightmove location -- use the outcode "
+            f"{text.split(' ')[0]!r} or a full postcode"
+        )
+    raise InvalidPostcodeError(
+        value=value if isinstance(value, str) else repr(value),
+        field=field,
+        expected=expected,
+    )
+
+
 def is_sector(prefix: str) -> bool:
     return _is_sector(prefix)
 

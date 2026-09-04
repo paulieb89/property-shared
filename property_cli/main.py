@@ -563,6 +563,7 @@ app.add_typer(rightmove, name="rightmove")
 
 
 @rightmove.command("search-url")
+@_ppd_errors
 def rightmove_search_url(
     postcode: list[str] = typer.Argument(..., help="Postcode (can include spaces)"),
     property_type: str = typer.Option("sale"),
@@ -599,6 +600,7 @@ def rightmove_search_url(
 
 
 @rightmove.command("listings")
+@_ppd_errors
 def rightmove_listings(
     postcode: list[str] = typer.Argument(..., help="Postcode or outcode, e.g. 'NG1 1AA'"),
     property_type: str = typer.Option("sale", help="sale or rent"),
