@@ -44,14 +44,16 @@ def test_the_months_typo_that_started_this_is_now_refused(client):
     assert "from_date" in detail["supported"] and "to_date" in detail["supported"]
 
 
-def test_a_misspelling_is_refused_and_the_intended_name_suggested(client):
-    """`form_date` silently did nothing. Naming the near-miss is the whole point."""
+def test_a_misspelling_is_refused_and_the_accepted_name_is_listed(client):
+    """`form_date` silently did nothing; now it fails and the real name is shown."""
     r = client.get("/v1/ppd/transactions",
                    params={"postcode": "NG11 9HD", "form_date": "2024-01-01"})
     assert r.status_code == 400, r.text
     detail = r.json()["detail"]
-    assert "form_date" in detail["unknown"]
-    assert detail["did_you_mean"].get("form_date") == "from_date"
+    assert detail["unknown"] == ["form_date"]
+    assert "from_date" in detail["supported"], (
+        "the accepted name must be listed, so the caller can see the near miss"
+    )
 
 
 def test_every_unknown_parameter_is_named_not_just_the_first(client):
@@ -148,19 +150,5 @@ def test_the_error_body_is_machine_readable_not_only_prose(client):
     assert detail["error"] == "unknown_query_parameter"
     assert isinstance(detail["unknown"], list) and detail["unknown"] == ["zzz"]
     assert isinstance(detail["supported"], list) and detail["supported"]
-    assert isinstance(detail["did_you_mean"], dict)
     assert detail["retryable"] is False
     assert isinstance(detail["detail"], str) and detail["detail"]
-
-
-def test_did_you_mean_is_present_but_empty_when_nothing_is_close(client):
-    """Always the same type. An absent key would make consumers branch on shape."""
-    r = client.get("/v1/ppd/transactions",
-                   params={"postcode": "NG11 9HD", "zzzzzzzz": 1})
-    assert r.json()["detail"]["did_you_mean"] == {}
-
-
-def test_an_unrelated_name_is_not_given_a_confident_wrong_suggestion(client):
-    """A wrong suggestion is its own plausible-but-wrong answer."""
-    r = client.get("/v1/ppd/transactions", params={"postcode": "NG11 9HD", "colour": 1})
-    assert "colour" not in r.json()["detail"]["did_you_mean"]

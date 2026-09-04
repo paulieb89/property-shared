@@ -14,30 +14,30 @@ dropped, so nothing could notice — least of all a model, which had no second
 source to compare against.
 
 A silently discarded parameter is worse than a rejected one. A rejection is
-recoverable in the next tool call; a plausible wrong answer is not recoverable
-at all, because nothing downstream knows to doubt it.
+recoverable; a plausible wrong answer is not, because nothing downstream knows
+to doubt it.
 
 So this is a deliberate breaking change: requests that "succeeded" while
-carrying a typo now fail. The response names the offending parameters, lists
-what the route does accept, and suggests the near-miss — because the caller most
-likely to hit this is an agent that has to fix it without a human reading a
-changelog.
+carrying a typo now fail, naming the offending parameters and what the route
+does accept.
+
+**This is a REST concern, not an LLM one.** An MCP client reads the tool's JSON
+Schema and calls with the declared arguments; it never assembles a query string,
+so it cannot make this mistake. The callers who can are a human, a conventional
+API client, a buggy wrapper, or server-side code forwarding the wrong parameter.
+For them the essential requirement is simply that the request is refused before
+any work happens. An earlier version also returned a `did_you_mean` suggestion;
+it was removed as ergonomics the contract does not need. Every field kept here
+is one a client can act on mechanically.
 """
 
 from __future__ import annotations
-
-import difflib
-from typing import Iterable
 
 from fastapi import HTTPException, Request
 
 #: Parameters accepted anywhere, so a route need not declare them to tolerate
 #: them. Kept deliberately small: every entry here is a name a typo can hide in.
 _ALWAYS_ALLOWED: frozenset[str] = frozenset()
-
-#: Cutoff for "did you mean". High enough that unrelated names are not paired
-#: with a confident-looking suggestion, which would be its own wrong answer.
-_SUGGESTION_CUTOFF = 0.7
 
 
 def _declared(request: Request) -> set[str]:
@@ -57,16 +57,6 @@ def _declared(request: Request) -> set[str]:
         # this one; missing them would reject a parameter the route does accept.
         stack.extend(current.dependencies)
     return names
-
-
-def _suggestions(unknown: Iterable[str], declared: Iterable[str]) -> dict[str, str]:
-    declared = list(declared)
-    out: dict[str, str] = {}
-    for name in unknown:
-        match = difflib.get_close_matches(name, declared, n=1, cutoff=_SUGGESTION_CUTOFF)
-        if match:
-            out[name] = match[0]
-    return out
 
 
 async def reject_unknown_query_params(request: Request) -> None:
@@ -95,7 +85,6 @@ async def reject_unknown_query_params(request: Request) -> None:
             ),
             "unknown": unknown,
             "supported": supported,
-            "did_you_mean": _suggestions(unknown, supported),
             "retryable": False,
         },
     )

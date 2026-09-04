@@ -127,9 +127,9 @@ class TestMcpWindowBoundaries:
         prov = result["provenance"]
         # today is past the fixture's coverage_to, so the upper bound clamps
         assert prov["effective_window"]["to_date"] == COVERAGE_TO
-        # A `months` request names no upper bound: "from X to now". That is the
-        # request, and `exclude_none` drops the null rather than inventing today.
-        assert prov["requested_window"].get("to_date") is None
+        # `months` means "ending today", so the requested upper bound IS today.
+        # A null here would read as an unbounded request, which it is not.
+        assert prov["requested_window"]["to_date"] == date.today().isoformat()
 
     def test_a_window_wholly_outside_coverage_falls_back_to_live(self, fake_live):
         """MIN_MONTHS today ends up entirely after this fixture's coverage_to.

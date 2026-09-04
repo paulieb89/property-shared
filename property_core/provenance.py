@@ -151,6 +151,13 @@ class PPDProvenance(BaseModel):
     sample_complete: bool = False
     completeness_basis: Optional[CompletenessBasis] = None
 
+    #: **The resolved window the caller asked for**, not the literal fields they
+    #: sent. A `months` request is already dates by the time it arrives here, and
+    #: `months` means "ending today", so the upper bound is today rather than
+    #: null. Reporting null there would read as an unbounded request when the
+    #: request was bounded -- which is the whole failure this pair exists to
+    #: prevent, one level down.
+    #:
     #: What was asked for, and what could be answered. Published as a pair
     #: because either alone is ambiguous: `effective` on its own cannot say
     #: whether it was the request or a clamp, and a caller deciding whether an
