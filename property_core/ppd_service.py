@@ -742,9 +742,33 @@ class PPDService:
         if not transactions:
             return None
 
+        # Both sources match `paon` by SUBSTRING, so asking for "5" also returns
+        # 15, 25 and 5A. Two separate problems follow, and the uniqueness check
+        # alone solves neither:
+        #
+        #   * "5" was REFUSED because 15 came back with it -- though 5 is exactly
+        #     one of the candidates and exactly what was asked for. Measured
+        #     across six outcodes of the real artifact, this made 14% of
+        #     addresses, 1 in 7, unresolvable.
+        #   * "2" was ANSWERED WITH 25, because 25 was the only partial match
+        #     and a single candidate passes a uniqueness check unchallenged.
+        #     That is another property's sale history presented as yours, which
+        #     is the failure this module exists to prevent.
+        #
+        # Narrowing to an exact `paon` first fixes both. It is not a relaxation:
+        # nothing is selected that was not already returned, and the uniqueness
+        # check still runs afterwards on what survives.
+        wanted = self._normalise_paon(paon)
+        exact = [t for t in transactions if self._normalise_paon(t.paon) == wanted]
+        if not exact:
+            # Every candidate merely CONTAINS the requested number. None of them
+            # is the property that was asked for.
+            return None
+        transactions = exact
+
         # Uniqueness check: all matched transactions must represent the same
-        # building. If CONTAINS matching returned multiple distinct houses,
-        # the input was ambiguous and we should not guess.
+        # building. An exact house number is not identity on its own -- the same
+        # number exists on other streets -- so this still has to hold.
         identities = {(t.paon, t.street) for t in transactions}
         if len(identities) != 1:
             return None
@@ -776,6 +800,17 @@ class PPDService:
             # -- so one label over both would misstate one of them.
             provenance=provenance_for(len(transactions)),
         )
+
+    @staticmethod
+    def _normalise_paon(value: Optional[str]) -> str:
+        """Compare house numbers on case and spacing only.
+
+        Deliberately no more than that: "5" and "5A" are different properties,
+        and anything that equated them would be inventing identity rather than
+        comparing it.
+        """
+        return " ".join((value or "").upper().split())
+
 
     @staticmethod
     def _parse_paon(address: str) -> Optional[str]:
