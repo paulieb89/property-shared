@@ -430,7 +430,8 @@ class PPDService:
         subject_property = None
         if address:
             try:
-                subject_property = self._subject_property_lookup(postcode, address)
+                subject_property = self._subject_property_lookup(
+                    postcode, address, warnings=warnings)
             except InvalidPostcodeError:
                 # Caller error. Must surface as 422, not be softened into a
                 # warning that reads like an upstream hiccup.
@@ -659,7 +660,8 @@ class PPDService:
         return transactions, _live_provenance, False
 
     def _subject_property_lookup(
-        self, postcode: str, address: str
+        self, postcode: str, address: str,
+        warnings: Optional[List[str]] = None,
     ) -> Optional[SubjectProperty]:
         """Search for a specific property by postcode and address.
 
@@ -682,16 +684,60 @@ class PPDService:
         words = address_clean.split()
         street = " ".join(words[1:]) if len(words) > 1 else None
 
-        # Deliberately NOT wrapped in a bare except: an upstream failure must
-        # reach comps() so it can be reported as "not checked" rather than
-        # silently rendered as "no history".
-        transactions = self.client.sparql_search(
-            postcode=postcode,
-            paon=paon,
-            street=street,
-            limit=50,
-            order_desc=True,
-        )
+        # Routed like every other read. This was hardwired live because an
+        # eleven-year snapshot would truncate a property's history, and a
+        # truncated history is indistinguishable from a complete one. Coverage
+        # now runs from 1995, so the reason is gone -- and leaving it live left
+        # the feature broken whenever the live source was.
+        #
+        # GUARANTEED, not EXPLICIT: this query names no dates, and the honest
+        # answer to "the whole history" is the whole coverage plus a warning
+        # saying so, not a refusal.
+        provenance_for = None
+        transactions = None
+
+        adapter = self._active_adapter()
+        if adapter is not None:
+            try:
+                decision = resolve_coverage(
+                    adapter, from_date=None, to_date=None,
+                    policy=CoveragePolicy.GUARANTEED)
+                page = adapter.search(
+                    postcode=postcode,
+                    paon=paon,
+                    street=street,
+                    limit=50,
+                    order_desc=True,
+                )
+            except SnapshotFailure as exc:
+                # Falls back like any snapshot failure, and says so. Never
+                # swallowed: a snapshot that cannot answer is not an absence.
+                if warnings is not None:
+                    warnings.append(fallback_warning(exc))
+            else:
+                transactions = list(page.transactions)
+
+                def provenance_for(count: int):        # noqa: F811
+                    return snapshot_provenance(
+                        adapter, decision=decision, sample_count=count,
+                        sample_limit=50,
+                        completeness_basis=page.completeness_basis,
+                        warnings=decision.warnings)
+
+        if transactions is None:
+            # Deliberately NOT wrapped in a bare except: an upstream failure must
+            # reach comps() so it can be reported as "not checked" rather than
+            # silently rendered as "no history".
+            transactions = self.client.sparql_search(
+                postcode=postcode,
+                paon=paon,
+                street=street,
+                limit=50,
+                order_desc=True,
+            )
+
+            def provenance_for(count: int):            # noqa: F811
+                return live_provenance(sample_count=count, sample_limit=50)
 
         if not transactions:
             return None
@@ -724,11 +770,11 @@ class PPDService:
             last_sale=first,
             transaction_count=len(transactions),
             transaction_history=transactions,
-            # Its own block. A property's history routinely predates snapshot
-            # coverage, so this is always live -- and a mixed-source response
-            # that labelled both halves `snapshot` would misstate one of them.
-            provenance=live_provenance(sample_count=len(transactions),
-                                       sample_limit=50),
+            # Still its own block even when both halves are snapshot-sourced.
+            # The sample limits differ -- this asks for one property's whole
+            # history at limit 50, comps asks a bounded window at its own limit
+            # -- so one label over both would misstate one of them.
+            provenance=provenance_for(len(transactions)),
         )
 
     @staticmethod

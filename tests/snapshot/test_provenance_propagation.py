@@ -181,29 +181,63 @@ def test_cli_comps_carries_provenance_in_core_mode(snapshot_routing, capsys):
     assert json.loads(result.output)["provenance"]["source"] == "snapshot"
 
 
-def test_mixed_source_comps_declares_both(snapshot_routing, fake_live):
-    """Spec test 26. Subject-property history is live; the comps are not."""
+def test_both_halves_of_comps_declare_the_same_source(snapshot_routing, fake_live):
+    """Was spec test 26, "subject-property history is live; the comps are not".
+
+    That split existed because an eleven-year snapshot would have truncated a
+    property's history. Coverage now runs from 1995, so the subject lookup
+    routes like everything else and both halves are snapshot-sourced.
+
+    The nested provenance block stays, and is still the point: the two halves
+    have different sample limits and different completeness bases, so one label
+    over both would misstate one of them even now they share a source.
+    """
     from property_core.ppd_service import PPDService
 
     result = PPDService().comps(postcode="B5 7AA", address="1 High Street",
                                 search_level="district")
     assert result.provenance.source is SourceKind.SNAPSHOT
     assert result.subject_property is not None
-    assert result.subject_property.provenance.source is SourceKind.SPARQL
+    assert result.subject_property.provenance.source is SourceKind.SNAPSHOT
+    assert result.subject_property.provenance is not result.provenance
+    assert fake_live.calls == 0, "neither half should have consulted the live source"
 
 
 def test_subject_property_failure_warns_and_success_does_not(snapshot_routing,
-                                                             fake_live):
-    """Spec test 17. A failed lookup is never rendered as an absent history."""
-    from property_core.ppd_service import PPDService
+                                                             fake_live,
+                                                             monkeypatch):
+    """Spec test 17. A failed lookup is never rendered as an absent history.
 
-    fake_live.rows = []
-    genuine = PPDService().comps(postcode="B5 7AA", address="1 High Street",
+    The assertions are unchanged; only how each condition is induced moved,
+    because the subject lookup now routes to the snapshot instead of calling
+    SPARQL directly. `fake_live.rows = []` no longer produces an empty result
+    -- the snapshot genuinely holds `1 HIGH STREET` -- and `fake_live.raises`
+    no longer reaches a path the lookup takes.
+
+    So a genuine absence is now an address the snapshot does not hold, and a
+    failure is the snapshot query itself raising. The taxonomy under test --
+    absence is silent, failure warns, neither is ever the other -- is the same.
+    """
+    from property_core.ppd_service import PPDService
+    from property_core.snapshot.adapter import SnapshotAdapter
+
+    genuine = PPDService().comps(postcode="B5 7AA",
+                                 address="9999 Nonexistent Avenue",
                                  search_level="district")
     assert genuine.subject_property is None
     assert not any("lookup unavailable" in w for w in genuine.warnings)
 
-    fake_live.raises = RuntimeError("SPARQL down")
+    # Raise only for the subject query, which is the only caller passing `paon`.
+    # Failing every search would take comps down with it and test something else.
+    original = SnapshotAdapter.search
+
+    def _fail_the_subject_query(self, **kwargs):
+        if kwargs.get("paon"):
+            raise RuntimeError("snapshot query failed")
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(SnapshotAdapter, "search", _fail_the_subject_query)
+
     failed = PPDService().comps(postcode="B5 7AA", address="1 High Street",
                                 search_level="district")
     assert failed.subject_property is None
