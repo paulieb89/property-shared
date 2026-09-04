@@ -165,15 +165,36 @@ def test_the_whole_history_of_the_property_is_returned_not_only_the_latest(route
     assert subject.last_sale.transaction_id == "T-127-2024", "most recent first"
 
 
-def test_vague_input_spanning_buildings_still_returns_none(routed, fake_live):
-    """The uniqueness guard must survive the move.
+def test_an_exact_house_number_resolves_despite_longer_neighbours(routed, fake_live):
+    """`27` collides with 27A and 127 and is still exactly one of them.
 
-    `27` is a substring of 27, 27A and 127 -- three distinct buildings. Refusing
-    is the documented behaviour, the live source does the same, and it only
-    works because the filter stayed a substring match. Exact equality would
-    resolve this to one property and quietly answer a question nobody asked.
+    This asserted `None` when written, matching the behaviour at the time. That
+    refusal was the 14%-of-addresses defect: the request was never ambiguous,
+    because the exact match was among the candidates. Narrowing to it first is
+    what changed; see test_subject_property_exact_match.py.
     """
-    assert _subject(address="27 Havenwood Rise") is None
+    subject = _subject(address="27 Havenwood Rise")
+    assert subject is not None
+    assert {t.transaction_id for t in subject.transaction_history} == {"T-27"}
+
+
+def test_input_with_no_exact_match_still_returns_none(routed, fake_live):
+    """Genuine ambiguity, which is now the narrow case it should always have been.
+
+    `2` is a substring of 27, 27A and 127 and is none of them. Every candidate
+    merely contains the number asked for, so nothing here is the property the
+    caller meant.
+    """
+    assert _subject(address="2 Havenwood Rise") is None
+
+
+def test_an_exact_number_on_two_streets_still_returns_none(routed, fake_live):
+    """An exact house number is not identity on its own.
+
+    `5` exists on HAVENWOOD RISE and on OTHER LANE. With no street to
+    discriminate, the uniqueness check still refuses.
+    """
+    assert _subject(address="5") is None
 
 
 def test_an_address_with_no_house_number_still_returns_none(routed, fake_live):
