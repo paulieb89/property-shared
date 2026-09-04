@@ -33,6 +33,17 @@ _NO_DEMONSTRATED_SOURCE = (
 )
 
 
+def _quantity(value) -> Optional[float]:
+    """Legacy scalar for a measured amount. No unit conversion is attempted.
+
+    Every observed unit is "tonnes per year", which is what the legacy field
+    already carried, so the scalar transfers unchanged. A future differing unit
+    would need converting rather than passing through — hence the unit is kept
+    on the source model instead of being discarded here.
+    """
+    return None if value is None else float(value.value)
+
+
 def _money(value, field: str, warnings: list[str], inferred: list[str]) -> Optional[int]:
     """Legacy scalar, when the currency is the expected one or was never stated.
 
@@ -99,7 +110,7 @@ def to_epcdata(
             "placeholder would be indistinguishable from real data"
         )
 
-    def label(code: str, key: Optional[int]) -> Optional[str]:
+    def label(code: str, key: Optional[str]) -> Optional[str]:
         if key is None:
             return None
         resolved = codebook.label_sync(code, key, doc.schema_type) if codebook else None
@@ -135,8 +146,10 @@ def to_epcdata(
         hot_water_cost_potential=_money(doc.hot_water_cost_potential, "hot_water_cost_potential", warnings, inferred_currency),
         lighting_cost_current=_money(doc.lighting_cost_current, "lighting_cost_current", warnings, inferred_currency),
         lighting_cost_potential=_money(doc.lighting_cost_potential, "lighting_cost_potential", warnings, inferred_currency),
-        co2_emissions_current=doc.co2_emissions_current,
-        co2_emissions_potential=doc.co2_emissions_potential,
+        # Legacy field is `float | None`; the unit, when upstream stated one,
+        # stays on the source model rather than being folded into the number.
+        co2_emissions_current=_quantity(doc.co2_emissions_current),
+        co2_emissions_potential=_quantity(doc.co2_emissions_potential),
         inspection_date=doc.inspection_date,
         certificate_hash=doc.certificate_number,
         lmk_key=doc.certificate_number,
