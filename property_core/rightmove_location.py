@@ -13,9 +13,17 @@ from urllib.parse import urlencode
 
 import requests
 
+from property_core.exceptions import LocationLookupError, LocationNotFoundError
+from property_core.postcode_rules import normalise_postcode_or_outcode
 
-class LocationLookupError(Exception):
-    """Raised when Rightmove location lookup fails."""
+# Re-exported so `from property_core.rightmove_location import LocationLookupError`
+# keeps working. The types live in `property_core.exceptions` with the rest of
+# the taxonomy, because that is what the REST mapping and the CLI decorator read.
+__all__ = [
+    "LocationLookupError",
+    "LocationNotFoundError",
+    "RightmoveLocationAPI",
+]
 
 
 _SORT_TYPES = {
@@ -67,8 +75,23 @@ class RightmoveLocationAPI:
         self._last_request_time = time.time()
 
     def lookup_postcode(self, postcode: str) -> Optional[str]:
-        """Return Rightmove location identifier for a postcode/outcode."""
-        postcode_upper = postcode.upper().strip()
+        """Return Rightmove location identifier for a postcode/outcode.
+
+        Validated here, at the network boundary, rather than at each of the eight
+        call sites of `build_search_url` -- one grammar in one place cannot drift
+        the way eight copies would, and a shape that can never resolve is refused
+        before it spends an upstream request.
+
+        Returns `None` when the upstream answered and held no match. That is an
+        absence this signature can express, so it stays expressible here;
+        `build_search_url` converts it, because a function that must return a URL
+        cannot.
+
+        Raises:
+            InvalidPostcodeError: the input is not a full postcode or outcode.
+            LocationLookupError: Rightmove could not be consulted.
+        """
+        postcode_upper = normalise_postcode_or_outcode(postcode)
         if self._cache is not None and postcode_upper in self._cache:
             return self._cache[postcode_upper]
 
@@ -115,9 +138,10 @@ class RightmoveLocationAPI:
         """Build a Rightmove search URL from a postcode/outcode."""
         location_identifier = self.lookup_postcode(postcode)
         if not location_identifier:
-            raise LocationLookupError(
-                f"Could not find location identifier for postcode '{postcode}'."
-            )
+            # Absence, not failure: the input passed the grammar and the upstream
+            # answered normally with no match. Raising LocationLookupError here
+            # made an empty result indistinguishable from an outage.
+            raise LocationNotFoundError(postcode)
 
         # Full postcodes tend to be very tight searches; default to a small radius
         # so the first request is more likely to return results.

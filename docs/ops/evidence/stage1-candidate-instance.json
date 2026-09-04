@@ -1,0 +1,98 @@
+{
+  "kind": "stage1_qualification_candidate",
+  "is_instance": false,
+  "note": "A CANDIDATE Instance. It is reviewed and committed as its own change before Stage 1 runs; it is never read as runtime configuration and nothing here is hard-coded into the tool.",
+  "definitional_geographies": {
+    "S1_district": "B5",
+    "S2_neighbour_district": "B50",
+    "S3_sector": "B5 4"
+  },
+  "substituted": false,
+  "coverage": {
+    "coverage_from": "2016-01-01",
+    "coverage_to": "2026-06-30",
+    "provisional_from": "2026-03-01"
+  },
+  "comparator_version": "1",
+  "baselines_satisfy_their_relations": true,
+  "baselines_refusal": null,
+  "baselines_note": "S1 is measured over B5, and S3/S9 over B5 4. If they do not satisfy the strict-subset and category-B relations, the Definition allows a substituted geography with recorded justification -- which is an authoring decision, not something this tool may make.",
+  "unqualified_definitional_cases": [],
+  "requires_owner_adjudication": [],
+  "substitution_route": "Definition section 4 permits substituting a definitional geography with recorded justification. Supply all of ['S1_district', 'S2_neighbour_district', 'S3_sector'] under the Instance's `substitutions` key, each with a `geography` and a `justification`.",
+  "unqualified_placeholders": [
+    "S11_provisional_empty",
+    "S4_thin"
+  ],
+  "candidate_instance": {
+    "instance_kind": "stage1",
+    "snapshot_version": "v20260828T194003Z",
+    "bundle_sha256": "50f802b29d9802ee42319122214aeb0adc6761e96c4f6c9ddd0498500bb9072c",
+    "geographies": {
+      "S5_dense": "E14 9",
+      "S6_unit": "HA9 0DY",
+      "S7_type_weak": "E14 9",
+      "S8_type_strong": "LU7 3",
+      "S13_empty_unit": "HA9 0DY"
+    },
+    "aggregate_baselines": {
+      "S1_full": 139,
+      "S3_full": 70,
+      "S9_full": 136
+    },
+    "qualified_at": "2026-09-02",
+    "qualification": {
+      "S1_district": {
+        "rule": "the longer neighbouring outcode holds comparable or greater volume (Definition section 4)",
+        "geography": "B5",
+        "measured_rows": 139,
+        "neighbour_geography": "B50",
+        "measured_neighbour_rows": 182,
+        "measured_neighbour_ratio": 1.3094,
+        "comparable_or_greater": true
+      },
+      "S2_district": {
+        "rule": "non-empty under frozen parameters",
+        "geography": "B50",
+        "measured_rows": 182
+      },
+      "S3_sector": {
+        "rule": "a strict subset of S1's district, carrying the S3 and S9 aggregate baselines",
+        "geography": "B5 4",
+        "measured_rows": 70,
+        "measured_rows_category_all": 136,
+        "inside_s1_district": true
+      },
+      "S5_dense": {
+        "rule": "matching rows greatly exceed limit (50)",
+        "measured_rows": 649
+      },
+      "S6_unit": {
+        "rule": "aggregate-dense (>= 10 rows), so not individually identifying",
+        "measured_rows": 109
+      },
+      "S7_type_weak": {
+        "rule": "at least 90% of the base is F",
+        "measured_share_f": 0.9892,
+        "measured_rows": 649
+      },
+      "S8_type_strong": {
+        "rule": "a real spread across F/D/S/T, F not dominant",
+        "measured_share_f": 0.0442,
+        "measured_types_present": [
+          "D",
+          "F",
+          "S",
+          "T"
+        ]
+      },
+      "S13_empty_unit": {
+        "rule": "non-empty under the residential default, zero rows once filtered to property_type=D",
+        "measured_rows_default": 109,
+        "measured_rows_type_d": 0
+      }
+    },
+    "staleness_bound_days": 45,
+    "governs_run": "<fill in: the Stage 1 run this Instance governs>"
+  }
+}

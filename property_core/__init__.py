@@ -23,6 +23,8 @@ from property_core.attribution import (
 from property_core.exceptions import (
     InvalidDateRangeError,
     InvalidPostcodeError,
+    LocationLookupError,
+    LocationNotFoundError,
     PPDCoverageError,
     PPDError,
     SnapshotFailure,
@@ -106,6 +108,8 @@ __all__ = [
     "HMLR_LICENCE_URL",
     "InvalidDateRangeError",
     "InvalidPostcodeError",
+    "LocationLookupError",
+    "LocationNotFoundError",
     "PPDCoverageError",
     "PPDError",
     "PPDProvenance",

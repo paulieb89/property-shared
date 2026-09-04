@@ -1,0 +1,247 @@
+{
+  "kind": "stage1_shadow_comparison",
+  "stage_1_evidence": true,
+  "latency_sample_kind": "deployed_machine_frozen_corpus",
+  "not_organic_traffic": "The request mix is the frozen thirteen-case corpus, chosen in advance, executed on the deployed production Machine against the selected artifact. It is not a sample of organic traffic and must never be described as one (governing spec rev 10).",
+  "definition": "docs/design/ppd-shadow-corpus.md",
+  "artifact": {
+    "snapshot_version": "v20260828T194003Z",
+    "bundle_sha256": "50f802b29d9802ee42319122214aeb0adc6761e96c4f6c9ddd0498500bb9072c",
+    "coverage_from": "2016-01-01",
+    "coverage_to": "2026-06-30",
+    "provisional_from": "2026-03-01",
+    "comparator_version": "1"
+  },
+  "instance": {
+    "instance_kind": "stage1",
+    "qualified_at": "2026-09-02",
+    "governs_run": "stage1-v20260828T194003Z-2026-09-02",
+    "staleness_bound_days": 45,
+    "aggregate_baselines": {
+      "S1_full": 139,
+      "S3_full": 70,
+      "S9_full": 136
+    },
+    "baselines_are": "declared during qualification, not measured here"
+  },
+  "isolation": {
+    "installed_into_server_state": false,
+    "snapshot_routing_enabled": false,
+    "artifacts_downloaded": 0,
+    "snapshot_written_to": false
+  },
+  "limits": {
+    "live_delay_seconds": 2.0,
+    "latency_repeats": 30,
+    "max_live_per_case": 1,
+    "deadline_seconds": 3600.0,
+    "min_available_memory_bytes": 268435456,
+    "live_calls_made": 1
+  },
+  "excluded": {
+    "health": 0,
+    "memory": 0
+  },
+  "midnight": {
+    "retries": 0,
+    "unrecoverable": false,
+    "pair_date_mismatches": 0
+  },
+  "aborted": "S1: the live arm failed (HTTPError: HTTP Error 503: Service Temporarily Unavailable); completeness is already lost, so no later case runs",
+  "cases_total": 1,
+  "cases_compared": 0,
+  "live_errors": [
+    {
+      "shape": "S1",
+      "error": "HTTPError: HTTP Error 503: Service Temporarily Unavailable",
+      "type": "HTTPError",
+      "message": "HTTP Error 503: Service Temporarily Unavailable",
+      "status": 503,
+      "reason": "Service Temporarily Unavailable",
+      "headers": {}
+    }
+  ],
+  "latency": {
+    "snapshot_arm": {
+      "n": 0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "p99_ms": null,
+      "max_ms": null,
+      "method": "nearest rank: sorted ascending, 1-based rank ceil(p/100*N)"
+    },
+    "per_case_ms": {}
+  },
+  "exit_criteria": {
+    "all_thirteen_cases_compared": {
+      "passed": false,
+      "cases_recorded": 1,
+      "cases_compared": 0,
+      "required": 13,
+      "cases_missing_snapshot_arm": [],
+      "cases_missing_live_arm": [
+        "S1"
+      ],
+      "cases_never_reached": [
+        "S11",
+        "S12",
+        "S13",
+        "S14",
+        "S2",
+        "S3",
+        "S4",
+        "S5",
+        "S6",
+        "S7",
+        "S8",
+        "S9"
+      ],
+      "live_errors": 1,
+      "snapshot_errors": 0,
+      "note": "the frozen corpus is thirteen cases with two arms each; a report covering fewer is not a smaller Stage 1 result, it is not a Stage 1 result"
+    },
+    "corpus_invariants_hold": {
+      "passed": false,
+      "assertions_checked": 6,
+      "failures": [],
+      "note": "Definition section 3's universal invariants and each shape's intent, asserted on the snapshot arm; a case reporting sample_complete true is a defect, not a divergence"
+    },
+    "zero_unexplained_false_empties": {
+      "passed": false,
+      "false_empty_shapes": [],
+      "note": "a false empty is only a failure when it is unexplained; these are checked against the classification below"
+    },
+    "zero_geography_contamination": {
+      "passed": false,
+      "findings": []
+    },
+    "field_equality_on_shared_ids": {
+      "passed": false,
+      "mismatch_rows": 0,
+      "vacuous_comparison_shapes": [],
+      "note": "a shape listed under vacuous_comparison_shapes shared no transaction id while both arms returned rows; equality over an empty intersection proves nothing and is reported as a failure, not a pass"
+    },
+    "every_divergence_classified": {
+      "passed": false,
+      "unclassified": 0,
+      "note": "an unclassified divergence blocks exit"
+    },
+    "no_unconfirmed_classifications": {
+      "passed": true,
+      "operator_confirmation_required": 0,
+      "note": "later A/C/D revision cannot be evidenced from these two sources; while any remain proposed, Stage 1 cannot exit on this report alone -- external confirmation is a separately authorised step"
+    },
+    "zero_snapshot_errors": {
+      "passed": true,
+      "errors": []
+    },
+    "p95_under_one_second": {
+      "passed": false,
+      "verdict": "insufficient_evidence",
+      "p95_ms": null,
+      "n": 0,
+      "required_observations": 390,
+      "required_repeats_per_case": 30,
+      "cases_short_of_the_required_repeats": [
+        "S1",
+        "S11",
+        "S12",
+        "S13",
+        "S14",
+        "S2",
+        "S3",
+        "S4",
+        "S5",
+        "S6",
+        "S7",
+        "S8",
+        "S9"
+      ],
+      "criterion": "p95 < 1 second on the deployed production Machine and selected artifact, measured across the frozen corpus request mix (governing spec rev 10)",
+      "note": "a partial sample is insufficient_evidence, never a pass: a percentile over fewer observations than the gate is defined over is a different measurement"
+    }
+  },
+  "passed": false,
+  "cases": [
+    {
+      "shape": "S1",
+      "intent": "contamination boundary",
+      "request": {
+        "wire": {
+          "postcode": "B5",
+          "search_level": "district",
+          "months": 24,
+          "limit": 50,
+          "transaction_category": "A",
+          "filter_outliers": false,
+          "auto_escalate": true,
+          "enrich_epc": false,
+          "property_type": "<omitted>",
+          "address": "<omitted>"
+        },
+        "effective": {
+          "property_type": "residential_default (F/D/S/T)",
+          "address": null,
+          "transaction_category": "A"
+        }
+      },
+      "artifact": {
+        "snapshot_version": "v20260828T194003Z",
+        "bundle_sha256": "50f802b29d9802ee42319122214aeb0adc6761e96c4f6c9ddd0498500bb9072c",
+        "coverage_from": "2016-01-01",
+        "coverage_to": "2026-06-30",
+        "provisional_from": "2026-03-01",
+        "comparator_version": "1"
+      },
+      "snapshot": {
+        "count": 50,
+        "latency_ms": 314.61,
+        "thin_market": false,
+        "outcodes_returned": [
+          "B5"
+        ],
+        "sectors_returned": [
+          "B5 4",
+          "B5 5",
+          "B5 6",
+          "B5 7"
+        ],
+        "warning_classes": [
+          "coverage_clamp",
+          "freshness"
+        ],
+        "saturated_at_limit": true,
+        "returned_date_from": "2025-06-20",
+        "returned_date_to": "2026-06-26",
+        "source": "snapshot",
+        "observed_at": "2026-09-04",
+        "derived_from_date": "2024-09-14",
+        "resolved_to_date": "2026-06-30",
+        "recent_period_provisional": true,
+        "sample_complete": false
+      },
+      "snapshot_invariants": {
+        "coverage_clamp_warning_present": true,
+        "sample_complete_is_false": true,
+        "completeness_basis_is_null": true,
+        "answered_by_snapshot": true,
+        "provisional_flagged": true,
+        "geography_isolation": true
+      },
+      "live_timing": {
+        "started_at": "2026-09-04T09:45:37.817+00:00",
+        "finished_at": "2026-09-04T09:50:09.599+00:00",
+        "elapsed_ms": 271785.89,
+        "outcome": "error"
+      },
+      "live_error": "HTTPError: HTTP Error 503: Service Temporarily Unavailable",
+      "live_error_detail": {
+        "type": "HTTPError",
+        "message": "HTTP Error 503: Service Temporarily Unavailable",
+        "status": 503,
+        "reason": "Service Temporarily Unavailable",
+        "headers": {}
+      }
+    }
+  ]
+}

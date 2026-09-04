@@ -1,9 +1,17 @@
-"""Protocol-neutral PPD exceptions.
+"""Protocol-neutral typed failures for `property_core`.
 
 `property_core` has four consumers (REST API, two MCP servers, CLI) that map
 failures differently, so these carry typed data and no transport concerns. The
 REST layer chooses the response code; MCP surfaces them as tool errors; the CLI
 exits non-zero.
+
+`PPDError` is the base for every typed failure here, not only PPD ones -- the
+name is historical. Non-PPD paths (Rightmove location lookup, below) subclass it
+deliberately, because the REST mapping convention and `property_cli`'s
+`_ppd_errors` decorator both key off this base, and a parallel hierarchy would
+mean a second decorator and a second set of `except` clauses saying the same
+thing. Nothing PPD-flavoured crosses a protocol boundary: a caller sees
+`str(exc)` and `code`, and `code` names the actual failure.
 
 The distinction these types exist to preserve: **a failure is not an absence**.
 An empty result means "no matching rows within the stated coverage" and nothing
@@ -221,4 +229,50 @@ class UpstreamShapeError(UpstreamUnavailableError):
     """
 
     code = "upstream_shape_error"
+    retryable = True
+
+
+class LocationNotFoundError(PPDError):
+    """A well-formed postcode or outcode that Rightmove holds no location for.
+
+    Distinct from `InvalidPostcodeError`, and the distinction is the caller's
+    next action. `XX99 9XX` satisfies the grammar, so telling that caller their
+    input "is not valid" states a false fact and sends them hunting a typo that
+    is not there. The upstream answered normally, with an empty match list, so
+    this is not a failure either -- it is an absence, and consumers map it the
+    same way they already map `TransactionNotFoundError`.
+    """
+
+    code = "rightmove_location_not_found"
+    retryable = False
+
+    def __init__(self, value: str, *, field: str = "postcode"):
+        self.value = value
+        self.field = field
+        super().__init__(
+            f"no Rightmove location matches {field} {value!r}; the input is "
+            f"well-formed, so this is an absence rather than a bad input"
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "error": self.code,
+            "detail": str(self),
+            "field": self.field,
+            "value": self.value,
+            "retryable": self.retryable,
+        }
+
+
+class LocationLookupError(UpstreamUnavailableError):
+    """Rightmove's location service could not be consulted.
+
+    Previously a bare `Exception` raised for BOTH a transport failure and a
+    successful-but-empty lookup, which made the two indistinguishable to every
+    consumer. It now covers only the former. Reparenting is what supplies
+    `to_dict()`, `retryable` and `_ppd_errors` handling -- setting the
+    attributes by hand would supply the data without the behaviour.
+    """
+
+    code = "rightmove_location_unavailable"
     retryable = True

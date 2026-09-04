@@ -118,3 +118,33 @@ async def test_rightmove_listing_detail_live() -> None:
     assert detail.url.startswith("https://www.rightmove.co.uk/properties/")
     assert detail.address is not None
     assert detail.tenure_type in ("FREEHOLD", "LEASEHOLD", None)
+
+
+def test_rightmove_resolves_outcodes_and_full_postcodes_but_never_sectors() -> None:
+    """Pin the grammar the typed-error taxonomy is built on.
+
+    `normalise_postcode_or_outcode` admits full postcodes and outcodes and
+    refuses sectors, because that is what Rightmove actually does -- probed
+    2026-09-03. If Rightmove ever starts resolving sectors, or stops resolving
+    outcodes, this fails loudly instead of the library quietly refusing input
+    that works (or spending requests on input that cannot).
+    """
+    if os.getenv("RUN_LIVE_TESTS") != "1":
+        pytest.skip("Set RUN_LIVE_TESTS=1 to run live network tests")
+
+    from property_core.exceptions import InvalidPostcodeError
+
+    api = RightmoveLocationAPI(cache_enabled=False)
+
+    for full in ("SW1A 1AA", "B5 4BX"):
+        assert (api.lookup_postcode(full) or "").startswith("POSTCODE^"), full
+        time.sleep(0.5)
+
+    for outcode in ("B5", "NG1"):
+        assert (api.lookup_postcode(outcode) or "").startswith("OUTCODE^"), outcode
+        time.sleep(0.5)
+
+    # Refused locally, so no request is spent proving what cannot resolve.
+    for sector in ("B5 7", "E14 9"):
+        with pytest.raises(InvalidPostcodeError):
+            api.lookup_postcode(sector)
