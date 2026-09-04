@@ -89,12 +89,12 @@ def _spec_text() -> str:
 @pytest.mark.parametrize(
     "published, value, code_value",
     [
-        ("`MAX_BUNDLE_BYTES` **1 GiB**", 1 * 1024 ** 3, DEFAULT_MAX_BUNDLE_BYTES),
+        ("`MAX_BUNDLE_BYTES` **2 GiB**", 2 * 1024 ** 3, DEFAULT_MAX_BUNDLE_BYTES),
         ("total download deadline **300 s**", 300.0, DEFAULT_TOTAL_DEADLINE_SECONDS),
         ("stall detection **60 s**", 60.0, DEFAULT_STALL_SECONDS),
         ("socket\n  timeout **10 s**".replace("\n  ", " "), 10.0, DEFAULT_TIMEOUT),
         ("`MAX_MEMBERS` (**5,000**", 5_000, ExtractionLimits().max_members),
-        ("`MAX_TOTAL_BYTES` (**2 GiB**", 2 * 1024 ** 3,
+        ("`MAX_TOTAL_BYTES` (**4 GiB**", 4 * 1024 ** 3,
          ExtractionLimits().max_total_bytes),
         ("`bundle_bytes * 2.5`", 2.5, DISK_HEADROOM_MULTIPLIER),
     ],

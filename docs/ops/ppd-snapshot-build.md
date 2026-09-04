@@ -279,8 +279,46 @@ Halt and report; there is no override flag for any of these.
 
 ## Measured results
 
-Recorded from two full local builds on 2026-08-28 (workstation, no network,
-no deployed system touched). Source: the HM Land Registry release fetched on
+Recorded from two full local builds on 2026-09-04 (workstation, no deployed
+system touched). Source: the HM Land Registry release published 2026-08-28 and
+fetched the same day, digested while streaming.
+
+| | |
+|---|---|
+| Source file | `pp-complete.csv`, 5,510,772,256 bytes, sha256 `cb3e4ffc…e9d8f5` |
+| Source release | ETag `"10f2334fe5b8179139ed2bf7cca0e108-657"`, Last-Modified Fri, 28 Aug 2026 |
+| Digest evidence | `streamed-download` — digested from the same response that wrote the file |
+| Declared coverage | `1995-01-01` … `2026-07-31`, `provisional_from` `2026-04-01` |
+| Rows written | **31,525,946** |
+| Eligible source rows (counted from the source) | 31,525,946 — equal, so nothing was lost between reading and writing |
+| Rows outside the declared window | 0 — the window is the whole register |
+| Rows with no parseable date | 0 |
+| Distinct `transaction_id` | 31,525,946 — equal, so the key holds |
+| Earliest / latest `transfer_date` | 1995-01-01 / 2026-07-31 |
+| Partitions | 32 (`year=1995` … `year=2026`) |
+| Parquet on disk | 1,194,660,216 B (**1139.3 MiB**) |
+| Bundle `.tar.zst` | 1,189,365,783 B (**1134.3 MiB**), sha256 `d0897c94…1e874e` |
+| Extracted by the runtime | 1,194,660,216 B (1139.3 MiB) |
+| Build | ingest 32.7 s · derive 38.3 s · write 22.2 s |
+| Whole pipeline | **156 s** wall clock: build → validate → package → verify → boot |
+| Peak RSS | 4,306.9 MB with `--memory 4GB` (DuckDB spills beneath the limit) |
+| Gates | all ten passed |
+| Boot through `SnapshotRuntime` + `SnapshotAdapter` | **READY**, validated through the adapter |
+
+Both builds produced a byte-identical bundle under different version names,
+which is the determinism claim: same sha256 `d0897c94…1e874e` from
+`v20260904T164011Z` and `v20260904T164625Z`.
+
+The first of those two runs was **refused at the boot check** —
+`BundleVerificationError: manifest declares 1189365783 bytes, above the
+1073741824-byte maximum` — and was not promoted. That is the fail-closed design
+working: it built, validated and packaged, then declined to publish an artifact
+every Machine would have rejected at boot. `MAX_BUNDLE_BYTES` was raised to
+2 GiB and the build re-run.
+
+### Superseded — the eleven-partition build, 2026-08-28
+
+Retained as the record of the previous window. Source: the release fetched on
 2026-08-27.
 
 | | |
@@ -297,7 +335,7 @@ no deployed system touched). Source: the HM Land Registry release fetched on
 | Rows with no parseable date | 0 |
 | Partitions | 11 (`year=2016` … `year=2026`) |
 | Parquet on disk | 280,924,336 B (**267.9 MiB**) |
-| Bundle `.tar.zst` | 279,109,872 B (**266.2 MiB**), sha256 `50f802b2…9072c` |
+| Bundle `.tar.zst` | 279,109,872 B (**266.2 MiB**) — superseded, sha256 `50f802b2…9072c` |
 | Extracted by the runtime | 280,925,271 B (267.9 MiB) |
 | Build | ingest 44.6 s · derive 13.5 s · write 8.7 s |
 | Whole pipeline | **82 s** wall clock: build → validate → package → verify → boot |
@@ -336,17 +374,17 @@ of the writer.
 
 ### What this means for G1a and G1b
 
-| | Superseded §1.1 / §4.7 baseline | Now | Class |
+| | Superseded 11-partition baseline | Now (32 partitions) | Class |
 |---|---|---|---|
-| Bundle size | 214 MiB (year+area) | **266.2 MiB** (+24.4%) | **measured** — 279,109,872 B |
-| Extracted | ~230 MiB implied | **267.9 MiB** | **measured** — 280,925,271 B |
-| Transfer @100 Mbit/s | 18.0 s | ~22.3 s | *calculated* — bytes × 8 / 1e8 |
-| Simultaneous bundle + extracted payload | ~444 MiB implied | ~534.1 MiB | *calculated* — 266.2 + 267.9, arithmetic only |
-| §4.7 free-space precondition (`bundle_bytes * 2.5`) | ~535 MiB | ~665.4 MiB | *calculated* — policy constant × measured bytes |
+| Bundle size | 266.2 MiB | **1134.3 MiB** | **measured** — 1,189,365,783 B |
+| Extracted | 267.9 MiB | **1139.3 MiB** | **measured** — 1,194,660,216 B |
+| Transfer @100 Mbit/s | ~22.3 s | ~95.1 s | *calculated* — bytes × 8 / 1e8 |
+| Simultaneous bundle + extracted payload | ~534.1 MiB | ~2273.6 MiB | *calculated* — 1134.3 + 1139.3, arithmetic only |
+| §4.7 free-space precondition (`bundle_bytes * 2.5`) | ~665.4 MiB | ~2835.7 MiB | *calculated* — policy constant × measured bytes |
 
 **Only the first two rows are measurements.** The remaining three are arithmetic
 over them, and are stated as inputs rather than results. In particular
-~534.1 MiB is **not** a measured peak disk figure: it is a sum that ignores
+~2273.6 MiB is **not** a measured peak disk figure: it is a sum that ignores
 staging directories, per-attempt temporary files and filesystem overhead, and no
 overlap has been observed on any machine.
 
@@ -364,8 +402,12 @@ measured at **+22%**. The real year-only bundle is materially larger (see the
 table above), which moved two numbers the rollout depends on:
 
 * the §1.1 transfer figure (18.0 s @100 Mbit/s) understated transfer time and so
-  overstated the headroom inside the 30 s readiness target — now ~22.3 s,
-  calculated, leaving ~7.7 s; and
+  overstated the headroom inside the 30 s readiness target. That correction gave
+  ~22.3 s at eleven partitions. **Both figures are now superseded**: full history
+  transfers ~95.1 s calculated, which does not fit the 30 s target at all — and
+  no longer needs to, because rev 9 made the snapshot boot non-blocking. The
+  transfer now bounds how long after readiness the snapshot starts answering,
+  not readiness itself (§1.1); and
 * the transient-disk budget, now split into **G1a** (`property-shared`, 2 GB) and
   **G1b** (`propertydata`, 512 MB), each measured against the real bundle with
   §4.7's `bundle_bytes * 2.5` free-space rule applied to it.

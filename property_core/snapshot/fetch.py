@@ -26,9 +26,20 @@ from property_core.snapshot.models import SnapshotManifest
 
 DEFAULT_CHUNK_SIZE = 1024 * 1024
 #: Hard ceiling regardless of what a manifest claims. A manifest is data from
-#: outside this process; it does not get to size our disk usage. The measured
-#: 11-partition snapshot is 266.2 MiB, so this leaves roughly 3.8x margin.
-DEFAULT_MAX_BUNDLE_BYTES = 1 * 1024 ** 3
+#: outside this process; it does not get to size our disk usage.
+#:
+#: Raised from 1 GiB when coverage went to the full PPD history. The measured
+#: 32-partition snapshot is 1,189,365,783 B (1.108 GiB), which the old ceiling
+#: refused at boot -- correctly, and before a byte transferred. 2 GiB leaves
+#: ~1.8x margin, and the register grows by roughly a million rows a year, so
+#: this should not need revisiting for a decade.
+#:
+#: Checked against the whole stack rather than in isolation:
+#:   preflight    bundle * 2.5 = 5.37 GiB at the cap, vs 8.32 GB free on the
+#:                Machine (2.97 GiB at the actual 1.108 GiB bundle)
+#:   extraction   ExtractionLimits.max_total_bytes raised to 4 GiB in step, or
+#:                a bundle near this cap would unpack into a smaller one
+DEFAULT_MAX_BUNDLE_BYTES = 2 * 1024 ** 3
 
 #: Whole-transfer budget, evaluated BETWEEN reads. A download that never
 #: finishes is a boot that never finishes, and readiness would hang instead of
