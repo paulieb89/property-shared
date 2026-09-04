@@ -85,13 +85,13 @@ def test_the_materialized_snapshot_holds_exactly_the_published_partitions(
     directory = Path(report.snapshot_dir)
     written = sorted(p.relative_to(directory).as_posix()
                      for p in directory.rglob("*.parquet"))
-    assert written == [f"year={y}/data.parquet" for y in range(2016, 2027)]
+    assert written == [f"year={y}/data.parquet" for y in range(1995, 2027)]
 
 
 def test_the_verification_record_carries_the_declared_coverage(published, tmp_path):
     runtime, report = boot(published, tmp_path)
     record = runtime.store.verified_record(report.version)
-    assert record.coverage_from == "2016-01-01"
+    assert record.coverage_from == "1995-01-01"
     assert record.coverage_to == "2026-06-30"
     assert record.provisional_from == "2026-03-01"
     assert record.layout == "year"
@@ -102,7 +102,7 @@ def test_the_booted_snapshot_opens_through_the_real_adapter(published, tmp_path)
     runtime, report = boot(published, tmp_path)
     record = runtime.store.verified_record(report.version)
     with SnapshotAdapter.open(Path(report.snapshot_dir), record) as adapter:
-        assert adapter.coverage_from == "2016-01-01"
+        assert adapter.coverage_from == "1995-01-01"
         assert adapter.version == published.version
 
 

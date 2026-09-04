@@ -28,14 +28,20 @@ from tests.snapshot.build_fixtures import csv_row, write_source_csv  # noqa: E40
 
 # -- window arithmetic -------------------------------------------------------
 
-def test_coverage_starts_at_january_of_the_eleventh_calendar_year_back():
-    # Eleven partitions ending 2026 means the window opens on 2016-01-01, which
-    # is what makes a 120-month request from any date in 2026 serviceable.
-    assert coverage_start(date(2026, 6, 30)) == date(2016, 1, 1)
+def test_coverage_starts_at_the_first_year_of_ppd():
+    # 32 partitions ending 2026 opens the window on 1995-01-01, the first year
+    # of Price Paid Data. Full history is what lets the subject-property lookup
+    # -- the one unbounded query -- route to the snapshot at all.
+    #
+    # This pins the arithmetic that PARTITION_YEARS has to track: when the
+    # release year rolls to 2027, 32 would start the window at 1996 and quietly
+    # drop a year, so the constant must be incremented and this test is what
+    # says so.
+    assert coverage_start(date(2026, 6, 30)) == date(1995, 1, 1)
 
 
-def test_expected_years_are_eleven_consecutive_calendar_years():
-    assert expected_years(date(2026, 6, 30)) == tuple(range(2016, 2027))
+def test_expected_years_span_ppd_history():
+    assert expected_years(date(2026, 6, 30)) == tuple(range(1995, 2027))
     assert len(expected_years(date(2026, 6, 30))) == PARTITION_YEARS
 
 
@@ -58,7 +64,7 @@ def built(tmp_path: Path):
         csv_row("{CCC}", "B50 4AA", "2024-03-01 00:00", 400_000),
         csv_row("{DDD}", "M3 7AA", "2026-06-30 00:00", 250_000),
         # Outside the window on both sides -- must not reach the snapshot.
-        csv_row("{OLD}", "B5 7AC", "2015-12-31 00:00", 100_000),
+        csv_row("{OLD}", "B5 7AC", "1994-12-31 00:00", 100_000),
         csv_row("{NEW}", "B5 7AD", "2026-07-01 00:00", 500_000),
     ])
     result = build_snapshot(BuildRequest(
@@ -73,7 +79,7 @@ def built(tmp_path: Path):
 def test_build_writes_one_parquet_file_per_expected_year(built):
     written = sorted(p.relative_to(built.snapshot_dir).as_posix()
                      for p in built.snapshot_dir.rglob("*.parquet"))
-    assert written == [f"year={y}/data.parquet" for y in range(2016, 2027)]
+    assert written == [f"year={y}/data.parquet" for y in range(1995, 2027)]
     assert built.parquet_files == PARTITION_YEARS
 
 
@@ -107,7 +113,7 @@ def test_build_derives_exact_outcode_and_sector_columns(built):
 
 
 def test_build_reports_the_window_it_was_given(built):
-    assert built.coverage_from == date(2016, 1, 1)
+    assert built.coverage_from == date(1995, 1, 1)
     assert built.coverage_to == date(2026, 6, 30)
     assert built.provisional_from == date(2026, 3, 1)
 
@@ -159,7 +165,7 @@ def test_a_blank_transaction_id_inside_the_window_fails_the_build(tmp_path):
 
 def test_a_malformed_price_outside_the_window_does_not_fail_the_build(tmp_path):
     # Rows the snapshot never serves are not its problem.
-    bad = list(csv_row("{OLD}", "B5 7AB", "2011-04-01 00:00", 0))
+    bad = list(csv_row("{OLD}", "B5 7AB", "1994-04-01 00:00", 0))
     bad[1] = "not-a-price"
     built = build_from(tmp_path, [
         csv_row("{OK}", "B5 7AA", "2024-03-01 00:00", 200_000), tuple(bad)])
@@ -171,7 +177,7 @@ def test_the_build_counts_eligible_source_rows_independently_of_what_it_wrote(
     built = build_from(tmp_path, [
         csv_row("{A}", "B5 7AA", "2024-03-01 00:00", 200_000),
         csv_row("{B}", "B5 7AB", "2016-03-01 00:00", 210_000),
-        csv_row("{OLD}", "B5 7AC", "2011-03-01 00:00", 100_000),
+        csv_row("{OLD}", "B5 7AC", "1994-03-01 00:00", 100_000),
     ])
     assert built.eligible_source_rows == 2
     assert built.rows == 2

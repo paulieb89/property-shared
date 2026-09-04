@@ -226,7 +226,7 @@ def test_coverage_gate_rejects_a_row_filed_under_the_wrong_year(snapshot):
 
 def test_coverage_gate_rejects_a_start_that_is_not_the_partition_boundary(snapshot):
     _, declared = snapshot
-    report = run(declared.replace(coverage_from=date(2016, 2, 1)))
+    report = run(declared.replace(coverage_from=date(1995, 2, 1)))
     assert failed(report) == {"coverage"}
 
 
@@ -265,13 +265,19 @@ def test_guarantee_gate_rejects_a_window_that_does_not_reach_back_120_months(sna
     # The shape a shortened partition count produces: the window opens later
     # than `today - 120 months`, so the largest legal request falls outside it.
     # Nothing else in the report reads `today`, so only this gate can fire.
-    report = run(declared, today=date(2025, 1, 1))
+    #
+    # With full history (window opens 1995-01-01) this needs a `today` early
+    # enough that even 32 years cannot reach back 120 months -- 1995-01-01 plus
+    # 3600 days is 2004-11-13, so 2004-01-01 is inside the failing side and
+    # 2005-01-01 the passing side. The pair brackets the real boundary rather
+    # than testing a date that now passes trivially.
+    report = run(declared, today=date(2004, 1, 1))
     assert failed(report) == {"guarantee"}
 
 
 def test_guarantee_gate_passes_once_the_window_reaches_back_far_enough(snapshot):
     _, declared = snapshot
-    assert run(declared, today=date(2025, 11, 15)).failures == ()
+    assert run(declared, today=date(2005, 1, 1)).failures == ()
 
 
 # -- provisional ------------------------------------------------------------
@@ -362,7 +368,7 @@ def test_validation_records_the_content_digest_as_a_fact(snapshot):
     _, declared = snapshot
     report = run(declared)
     assert set(report.facts["content_digest_per_year"]) == {
-        str(y) for y in range(2016, 2027)}
+        str(y) for y in range(1995, 2027)}
 
 
 def test_the_build_records_its_peak_memory(snapshot):

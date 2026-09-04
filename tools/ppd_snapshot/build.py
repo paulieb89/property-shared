@@ -34,9 +34,18 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-#: Section 1.1. Not a tunable: ten partitions cannot serve a 120-month request
-#: made in December, and twelve buys coverage nothing asks for.
-PARTITION_YEARS = 11
+#: Full PPD history: 1995 to the current release year. Was 11, sized to the
+#: `months le=120` API ceiling on the reasoning that twelve "buys coverage
+#: nothing asks for". That reasoning held only while every surface was bounded.
+#: The subject-property history lookup is NOT bounded -- it asks for a single
+#: property's whole sale record -- which is why it was hardwired to the live
+#: source and stayed broken when that source degraded. Covering the full history
+#: is what lets it route to the snapshot like everything else.
+#:
+#: Derived, not a magic number: 2026 - 32 + 1 == 1995, the first year of PPD.
+#: It therefore needs incrementing when the release year rolls over, and
+#: `test_coverage_starts_at_the_first_year_of_ppd` pins that.
+PARTITION_YEARS = 32
 
 #: Section 1.3. HMLR revises recent months after first publication, so the tail
 #: of the window is declared provisional in the manifest.
