@@ -1,6 +1,9 @@
 """Cached codebook for the coded integers the certificate returns.
 
-The upstream returns `built_form: 4`, not "Mid-Terrace". Resolution goes through
+The upstream returns `built_form: 4`, not "Mid-Terrace". Keys are STRINGS: the
+tables carry `ND` ("unknown") and `NR` ("Not Recorded") beside the numeric keys,
+and certificates do return them. Coercing keys with int() silently dropped both
+from every table, so they could never resolve. Resolution goes through
 /api/codes/info, which — verified by probe — returns a whole table when given
 (code, schemaVersion) without a key. So the cache unit is a table, not a key.
 
@@ -30,6 +33,10 @@ SUPPORTED_CODES = ("built_form", "property_type", "tenure")
 
 _BREAKER_THRESHOLD = 3
 
+# warm() resolves a throwaway key purely to force the table load. Any key does;
+# it is in the string key space so the signature stays honest.
+_WARM_KEY = "0"
+
 
 class EPCCodebook:
     """Table-per-(code, schemaVersion) cache with a failure breaker."""
@@ -47,7 +54,7 @@ class EPCCodebook:
         # One budget for the whole warm, not per table: three sequential
         # per-request timeouts would exceed the 30s MCP tool timeout on their own.
         self._warm_budget = warm_budget
-        self._tables: dict[tuple[str, str | None], dict[int, str]] = {}
+        self._tables: dict[tuple[str, str | None], dict[str, str]] = {}
         # Single-flight: concurrent callers awaiting the same (code,
         # schemaVersion) share one in-flight fetch instead of each issuing a
         # request. Without this, four concurrent cold certificates produced
@@ -66,7 +73,7 @@ class EPCCodebook:
             h["Authorization"] = f"Bearer {self._token}"
         return h
 
-    async def _fetch_table(self, code: str, schema_version: Optional[str]) -> dict[int, str]:
+    async def _fetch_table(self, code: str, schema_version: Optional[str]) -> dict[str, str]:
         params = {"code": code}
         if schema_version:
             params["schemaVersion"] = schema_version  # verbatim — proven 11/11
@@ -76,19 +83,19 @@ class EPCCodebook:
             raise RuntimeError(f"codebook HTTP {resp.status_code}")
         body = resp.json()
         entries = body.get("data") if isinstance(body, dict) else body
-        table: dict[int, str] = {}
+        table: dict[str, str] = {}
         for entry in entries or []:
             key = entry.get("key")
             values = entry.get("values") or []
             if key is None or not values:
                 continue
-            try:
-                table[int(key)] = values[0].get("value")
-            except (TypeError, ValueError):
+            key = str(key).strip()
+            if not key:
                 continue
+            table[key] = values[0].get("value")
         return table
 
-    async def label(self, code: str, key: Optional[int], schema_version: Optional[str]) -> Optional[str]:
+    async def label(self, code: str, key: Optional[str], schema_version: Optional[str]) -> Optional[str]:
         """Resolve one code to its label, or None. Never raises.
 
         Async because the certificate path is async: a synchronous request here
@@ -181,7 +188,7 @@ class EPCCodebook:
 
         try:
             await asyncio.wait_for(
-                asyncio.gather(*(self.label(c, 0, schema_version) for c in pending)),
+                asyncio.gather(*(self.label(c, _WARM_KEY, schema_version) for c in pending)),
                 timeout=self._warm_budget,
             )
         except asyncio.TimeoutError:
@@ -191,7 +198,7 @@ class EPCCodebook:
             ]
         return []
 
-    def label_sync(self, code: str, key: Optional[int], schema_version: Optional[str]) -> Optional[str]:
+    def label_sync(self, code: str, key: Optional[str], schema_version: Optional[str]) -> Optional[str]:
         """Cache-only lookup for synchronous callers. Never issues a request."""
         if key is None or code not in SUPPORTED_CODES:
             return None

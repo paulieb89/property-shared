@@ -27,7 +27,11 @@ from property_core.epc.errors import EPCUpstreamShapeError
 _SEARCH_MARKERS = {"certificateNumber", "addressLine1", "currentEnergyEfficiencyBand", "schemaType"}
 _CERT_MARKERS = {"address_line_1", "current_energy_efficiency_band", "schema_type", "assessment_type"}
 
-# Coded integers resolvable via /api/codes in v1.14.0. Six further coded fields
+# Coded fields resolvable via /api/codes in v1.14.0. The key space is STRING,
+# not integer: alongside the numeric keys the tables carry `ND` ("unknown") and
+# `NR` ("Not Recorded"), and certificates do return them — measured 2026-09-05,
+# 8 of 133 live certificates (6.0%) carried one. Typing these int made every
+# such certificate unfetchable. Six further coded fields
 # (conservatory_type, language_code, measurement_type, multiple_glazing_type,
 # region_code, report_type) have no table upstream at all — see
 # UNRESOLVED_CODE_TABLES.
@@ -36,6 +40,8 @@ UNRESOLVED_CODE_TABLES = (
     "conservatory_type", "language_code", "measurement_type",
     "multiple_glazing_type", "region_code", "report_type",
 )
+
+_QUANTITY_FIELDS = ("co2_emissions_current", "co2_emissions_potential")
 
 _MONEY_FIELDS = (
     "heating_cost_current", "heating_cost_potential",
@@ -124,6 +130,50 @@ class EPCMoney(BaseModel):
         if not currency:
             raise EPCUpstreamShapeError(f"{field}: missing currency")
         return cls(value=value, currency=currency)
+
+
+class EPCQuantity(BaseModel):
+    """A measured amount with an optionally-stated unit.
+
+    Same dual shape as EPCMoney, and for the same reason — which one appears is a
+    property of the SCHEMA, not of the field. Measured 2026-09-05:
+
+        RdSAP 17.x-21.x, SAP 16.x-19.x  ->  a bare number
+        SAP-Schema-13.0                 ->  {"value", "quantity"}
+
+    A bare number states no unit, so `unit` stays None and `unit_stated` is
+    False. The unit is never fabricated: "tonnes per year" is not written in
+    where upstream said nothing, because a stated unit and an assumed one are
+    not the same claim. `"quantity": ""` was observed and is a stated nothing.
+    """
+
+    value: Decimal
+    unit: Optional[str] = None
+
+    @property
+    def unit_stated(self) -> bool:
+        """DERIVED, never stored — see EPCMoney.currency_stated for the reasoning."""
+        return self.unit is not None
+
+    @classmethod
+    def from_source(cls, raw: Any, field: str) -> "EPCQuantity":
+        # bool BEFORE the number check: isinstance(True, int) is True in Python.
+        if isinstance(raw, bool):
+            raise EPCUpstreamShapeError(
+                f"{field}: expected a number or {{value, quantity}}, got bool {raw!r}"
+            )
+        if isinstance(raw, (int, float)):
+            return cls(value=_finite(raw, field), unit=None)
+        if not isinstance(raw, dict) or "value" not in raw:
+            raise EPCUpstreamShapeError(
+                f"{field}: expected a number or {{value, quantity}}, "
+                f"got {type(raw).__name__} {raw!r:.60}"
+            )
+        if isinstance(raw["value"], bool):
+            raise EPCUpstreamShapeError(f"{field}: value is not numeric: {raw['value']!r}")
+        # Unlike currency, an absent or empty unit is NOT an error: it is the
+        # bare-number case wearing an object, and the amount is still usable.
+        return cls(value=_finite(raw["value"], field), unit=_str_or_none(raw.get("quantity")))
 
 
 class EPCPagination(BaseModel):
@@ -312,13 +362,14 @@ class EPCCertificateDoc(BaseModel):
     registration_date: Optional[str] = None
     completion_date: Optional[str] = None
 
-    co2_emissions_current: Optional[float] = None
-    co2_emissions_potential: Optional[float] = None
+    co2_emissions_current: Optional[EPCQuantity] = None
+    co2_emissions_potential: Optional[EPCQuantity] = None
 
-    # Raw codes always preserved; labels resolved separately by the codebook.
-    built_form_code: Optional[int] = None
-    property_type_code: Optional[int] = None
-    tenure_code: Optional[int] = None
+    # Raw codes always preserved verbatim in the upstream key space (string —
+    # `4` and `ND` are both keys); labels resolved separately by the codebook.
+    built_form_code: Optional[str] = None
+    property_type_code: Optional[str] = None
+    tenure_code: Optional[str] = None
 
     # Schema-variant field sampled by tests.
     photovoltaic_supply: Optional[Any] = None
@@ -360,6 +411,8 @@ class EPCCertificateDoc(BaseModel):
             )
 
         money = {f: EPCMoney.from_source(raw[f], f) for f in _MONEY_FIELDS if raw.get(f) is not None}
+        quantities = {f: EPCQuantity.from_source(raw[f], f)
+                      for f in _QUANTITY_FIELDS if raw.get(f) is not None}
 
         known = {
             "certificate_number": certificate_number,
@@ -379,12 +432,13 @@ class EPCCertificateDoc(BaseModel):
             "inspection_date": _str_or_none(raw.get("inspection_date")),
             "registration_date": _str_or_none(raw.get("registration_date")),
             "completion_date": _str_or_none(raw.get("completion_date")),
-            "co2_emissions_current": raw.get("co2_emissions_current"),
-            "co2_emissions_potential": raw.get("co2_emissions_potential"),
-            "built_form_code": raw.get("built_form"),
-            "property_type_code": raw.get("property_type"),
-            "tenure_code": raw.get("tenure"),
+            # _str_or_none, not str(): keeps an absent code distinct from the
+            # stated-unknown code `ND`, which is a real key with a real label.
+            "built_form_code": _str_or_none(raw.get("built_form")),
+            "property_type_code": _str_or_none(raw.get("property_type")),
+            "tenure_code": _str_or_none(raw.get("tenure")),
             "photovoltaic_supply": raw.get("photovoltaic_supply"),
+            **quantities,
             **money,
         }
 

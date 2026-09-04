@@ -123,7 +123,7 @@ class TestCodebookBudget:
         t = CountingTransport()
         book = EPCCodebook(transport=t)
         for _ in range(10):
-            _run(book.label("built_form", 4, "RdSAP-Schema-20.0.0"))
+            _run(book.label("built_form", "4", "RdSAP-Schema-20.0.0"))
         assert t.counts["codebook"] == 1, "one table fetch per (code, schemaVersion)"
 
     def test_schema_version_is_sent_verbatim(self):
@@ -135,7 +135,7 @@ class TestCodebookBudget:
             return httpx.Response(200, json={"data": []})
 
         book = EPCCodebook(transport=httpx.MockTransport(handler))
-        _run(book.label("built_form", 4, "RdSAP-Schema-20.0.0"))
+        _run(book.label("built_form", "4", "RdSAP-Schema-20.0.0"))
         assert seen[0].get("schemaVersion") == "RdSAP-Schema-20.0.0"
 
     def test_codebook_outage_is_circuit_broken_not_retried_per_certificate(self):

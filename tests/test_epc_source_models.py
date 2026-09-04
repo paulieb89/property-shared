@@ -121,7 +121,8 @@ class TestCertificateAdapter:
 
     def test_raw_codes_preserved_alongside_labels(self):
         doc = EPCCertificateDoc.from_source(CERT_DOC, certificate_number="1")
-        assert doc.built_form_code == 4 and doc.property_type_code == 2 and doc.tenure_code == 3
+        # The upstream key space is string — `4` and `ND` are both keys.
+        assert doc.built_form_code == "4" and doc.property_type_code == "2" and doc.tenure_code == "3"
 
     def test_schema_variant_fields_absent_are_none_not_errors(self):
         """Older schemas legitimately omit fields (72 vs 83 observed)."""

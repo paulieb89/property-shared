@@ -44,7 +44,7 @@ class TestOneAttemptIsOneFailure:
 
         async def main():
             return await asyncio.gather(
-                *(book.label("built_form", 4, SCHEMA) for _ in range(4))
+                *(book.label("built_form", "4", SCHEMA) for _ in range(4))
             )
 
         results = _run(main())
@@ -66,7 +66,7 @@ class TestOneAttemptIsOneFailure:
             # Three separate attempts, each awaited to completion so they do
             # not share an in-flight task.
             for code in ("built_form", "property_type", "tenure"):
-                await book.label(code, 1, SCHEMA)
+                await book.label(code, "1", SCHEMA)
 
         _run(main())
         assert len(requests) == 3
@@ -84,9 +84,9 @@ class TestOneAttemptIsOneFailure:
 
         async def main():
             for code in ("built_form", "property_type", "tenure"):
-                await book.label(code, 1, SCHEMA)
+                await book.label(code, "1", SCHEMA)
             before = len(requests)
-            await book.label("built_form", 1, "SAP-Schema-13.0")
+            await book.label("built_form", "1", "SAP-Schema-13.0")
             return before, len(requests)
 
         before, after = _run(main())
@@ -104,10 +104,10 @@ class TestOneAttemptIsOneFailure:
         book = _book(handler)
 
         async def main():
-            await book.label("built_form", 4, SCHEMA)
+            await book.label("built_form", "4", SCHEMA)
             assert book._failures == 1
             state["fail"] = False
-            return await book.label("property_type", 4, SCHEMA)
+            return await book.label("property_type", "4", SCHEMA)
 
         _run(main())
         assert book._failures == 0, "a success must clear the failure count"
@@ -126,14 +126,14 @@ class TestCancellationSafety:
         book = _book(handler)
 
         async def main():
-            impatient = asyncio.create_task(book.label("built_form", 4, SCHEMA))
+            impatient = asyncio.create_task(book.label("built_form", "4", SCHEMA))
             await asyncio.sleep(0.05)
             impatient.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await impatient
             # The shared loader should have survived and populated the cache.
             await asyncio.sleep(0.35)
-            return await book.label("built_form", 4, SCHEMA)
+            return await book.label("built_form", "4", SCHEMA)
 
         assert _run(main()) == "Mid-Terrace"
         assert len(requests) == 1, f"the fetch was re-issued: {len(requests)} requests"
@@ -147,7 +147,7 @@ class TestCancellationSafety:
         book = _book(handler)
 
         async def main():
-            impatient = asyncio.create_task(book.label("built_form", 4, SCHEMA))
+            impatient = asyncio.create_task(book.label("built_form", "4", SCHEMA))
             await asyncio.sleep(0.05)
             impatient.cancel()
             with pytest.raises(asyncio.CancelledError):
@@ -174,7 +174,7 @@ class TestCancellationSafety:
             loop.set_exception_handler(
                 lambda _loop, ctx: seen.append(ctx.get("message", "")))
             try:
-                waiter = asyncio.create_task(book.label("built_form", 4, SCHEMA))
+                waiter = asyncio.create_task(book.label("built_form", "4", SCHEMA))
                 await asyncio.sleep(0.05)
                 waiter.cancel()
                 with pytest.raises(asyncio.CancelledError):
@@ -203,7 +203,7 @@ class TestSharedLoaderStillCaches:
 
         async def main():
             await asyncio.gather(*(
-                book.label(code, 1, SCHEMA)
+                book.label(code, "1", SCHEMA)
                 for code in ("built_form", "property_type", "tenure")
                 for _ in range(4)
             ))

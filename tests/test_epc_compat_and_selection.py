@@ -31,13 +31,13 @@ class _StubCodebook:
         self.available = available
         self.calls: list[tuple] = []
 
-    def label_sync(self, code: str, key: int, schema_version: str | None):
+    def label_sync(self, code: str, key: str, schema_version: str | None):
         self.calls.append((code, key, schema_version))
         if not self.available:
             return None
-        return {("built_form", 4): "Mid-Terrace",
-                ("property_type", 2): "Flat",
-                ("tenure", 3): "rented (private)"}.get((code, key))
+        return {("built_form", "4"): "Mid-Terrace",
+                ("property_type", "2"): "Flat",
+                ("tenure", "3"): "rented (private)"}.get((code, key))
 
 
 class TestLegacyProjection:
