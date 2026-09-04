@@ -36,10 +36,15 @@ from typing import Annotated, Optional
 
 from pydantic import Field
 
-#: Months in the default lookback. One year of sales is enough to characterise
-#: a local market in most postcodes while staying inside the period HMLR has
-#: finished revising.
-DEFAULT_MONTHS = 12
+#: Months in the default lookback.
+#:
+#: 24 because that is what this server has always answered when `months` is
+#: omitted. The contract exists to stop the words, the schema and the behaviour
+#: disagreeing -- it is not a licence to change the behaviour while documenting
+#: it. Halving the default would move every median computed by a caller who
+#: never passed `months`, which is a product decision and needs to be taken as
+#: one, not arrive inside a documentation fix.
+DEFAULT_MONTHS = 24
 
 #: A window has to contain at least one month. There is no maximum: see the
 #: module docstring.
@@ -58,7 +63,7 @@ MONTHS_DESCRIPTION = (
 )
 
 #: The annotated type every MCP tool uses for `months`. This is what produces
-#: `{"default": 12, "description": ..., "minimum": 1, "type": "integer"}` in the
+#: `{"default": 24, "description": ..., "minimum": 1, "type": "integer"}` in the
 #: tool's input schema — the thing a model actually reads.
 MonthsParam = Annotated[int, Field(description=MONTHS_DESCRIPTION, ge=MIN_MONTHS)]
 
