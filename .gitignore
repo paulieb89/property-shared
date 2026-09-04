@@ -57,6 +57,8 @@ scripts/*
 !scripts/rightmove_address_dump.py
 !scripts/fly_observability_snapshot.py
 !scripts/validate.sh
+!scripts/deploy_fly.py
+!scripts/verify_release.py
 
 # Live git worktrees, not disposable scratch. Untracked and unignored, this
 # directory presented as `?? .claude/worktrees/` in every status, one

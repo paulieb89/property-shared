@@ -2010,9 +2010,20 @@ def test_the_release_workflow_still_deploys_both_apps():
     would become misleading in the other direction.
     """
     workflow = (REPO / ".github" / "workflows" / "release.yml").read_text()
-    assert "flyctl deploy --remote-only --ha=false" in workflow
-    assert "--config fly.app.toml" in workflow
     assert "release:" in workflow and "published" in workflow
+
+    # Both apps are named explicitly in the workflow. This previously asserted
+    # the literal `flyctl deploy --remote-only --ha=false`, which lived inline;
+    # the retry ladder moved that invocation into scripts/deploy_fly.py, so the
+    # flags are pinned there instead (below) and the app/config pairing is
+    # pinned here. The fact being guarded is unchanged: every release still
+    # deploys propertydata as well as property-shared.
+    assert "--app property-shared --config fly.toml" in workflow
+    assert "--app propertydata --config fly.app.toml" in workflow
+
+    deploy_script = (REPO / "scripts" / "deploy_fly.py").read_text()
+    assert '"--remote-only"' in deploy_script
+    assert '"--ha=false"' in deploy_script
 
 
 def test_the_runbook_documents_the_search_level_containment_rule():
