@@ -23,6 +23,19 @@ delta reviewed line by line. It is additive apart from one line:
   newline inside a JSON value, so the document did not parse. JSON output
   exists to be machine-read.
 
+**The shared window contract adds two provenance fields**, so the golden was
+regenerated a third time and that delta reviewed the same way. It is purely
+additive -- a key-level diff of every surface showed only `+` lines:
+
+* every PPD-bearing surface gains `provenance.requested_window` and
+  `provenance.effective_window`. Either alone is ambiguous: `effective` on its
+  own cannot say whether it was the request or a clamp, and a model whose
+  earlier turn has left its context cannot reconstruct it.
+* both are `null` in THIS golden, and that is correct rather than a gap. The
+  harness captures the live path, which builds no `CoverageDecision`, so there
+  is no clamp to report. `snapshot_provenance` populates both. A live path that
+  published a window would be asserting bounds it never applied.
+
 Nothing else moved. `rest.meta_integrations` is untouched, the live-path
 warning strings are byte-identical, and no row of data changed -- routing is
 inert until a snapshot is materialized and the flag is on.

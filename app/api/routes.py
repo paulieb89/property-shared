@@ -1,9 +1,17 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from .strict_query import reject_unknown_query_params
 
 from .v1 import analysis, companies_house, epc, health, meta, ppd, report, rightmove, stamp_duty
 # from .v1 import planning  # Disabled: scraping requires UK residential IP
 
-api_router = APIRouter(prefix="/v1")
+#: Applied at the router so every v1 route inherits it -- a per-route
+#: opt-in would mean the next endpoint added silently goes back to
+#: discarding typos, which is the failure this exists to stop.
+api_router = APIRouter(
+    prefix="/v1",
+    dependencies=[Depends(reject_unknown_query_params)],
+)
 api_router.include_router(health.router)
 api_router.include_router(ppd.router)
 api_router.include_router(epc.router)

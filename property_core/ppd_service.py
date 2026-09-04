@@ -19,6 +19,7 @@ from property_core.models.ppd import (
     SubjectProperty,
 )
 from property_core.ppd_client import PricePaidDataClient
+from property_core.window import window_from_months
 from property_core.ppd_source import (
     CoveragePolicy,
     active_adapter,
@@ -403,13 +404,20 @@ class PPDService:
             apply_residential_filter = False
 
         # 3. Fetch transactions, from the snapshot when one is routable.
-        from_date = (date.today() - timedelta(days=months * 30)).isoformat()
+        #
+        # Both bounds come from the shared contract. `months` means "ending
+        # today", so the upper bound is today -- deriving only the lower one
+        # left `requested_window` half-derived and half-literal, and a null
+        # upper bound read as "unbounded request" when the request was in fact
+        # bounded by today.
+        from_date, to_date = window_from_months(months)
         warnings: list[str] = []
 
         transactions, provenance_for, from_snapshot = self._fetch_comps(
             exact_postcode=exact_postcode,
             prefix=prefix,
             from_date=from_date,
+            to_date=to_date,
             sparql_property_type=sparql_property_type,
             apply_residential_filter=apply_residential_filter,
             transaction_category=transaction_category,
@@ -548,6 +556,11 @@ class PPDService:
         exact_postcode: Optional[str],
         prefix: Optional[str],
         from_date: str,
+        #: The upper bound the caller asked for. Reported, not queried: the
+        #: query needs no upper bound because nothing is dated in the future,
+        #: but the window we SAY was requested must match the published meaning
+        #: of `months` ("ending today").
+        to_date: Optional[str],
         sparql_property_type: Optional[str],
         apply_residential_filter: bool,
         transaction_category: Optional[str],
@@ -574,7 +587,7 @@ class PPDService:
                 # SnapshotCoverageGapError, and comps must still answer -- from
                 # the live source, with a warning, like any snapshot failure.
                 decision = resolve_coverage(
-                    adapter, from_date=from_date, to_date=None,
+                    adapter, from_date=from_date, to_date=to_date,
                     policy=coverage_policy)
                 page = adapter.search(
                     postcode=exact_postcode,

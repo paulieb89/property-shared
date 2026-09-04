@@ -16,6 +16,10 @@ from app.schemas.ppd import (
 )
 from property_core.block_service import analyze_blocks
 from property_core.models.block import BlockAnalysisResponse
+from property_core.window import (
+    FROM_DATE_DESCRIPTION,
+    TO_DATE_DESCRIPTION,
+)
 from property_core.exceptions import (
     InvalidDateRangeError,
     InvalidPostcodeError,
@@ -49,8 +53,8 @@ def download_url(
 def transactions(
     postcode: Optional[str] = Query(None, min_length=2),
     postcode_prefix: Optional[str] = Query(None, min_length=2),
-    from_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
-    to_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
+    from_date: Optional[str] = Query(None, description=FROM_DATE_DESCRIPTION),
+    to_date: Optional[str] = Query(None, description=TO_DATE_DESCRIPTION),
     min_price: Optional[int] = Query(None, ge=0),
     max_price: Optional[int] = Query(None, ge=0),
     property_type: Optional[str] = Query(None, description="D/S/T/F/O"),

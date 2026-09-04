@@ -15,6 +15,8 @@ from typing import Any
 
 import httpx
 from fastmcp import FastMCP
+
+from property_core.window import DEFAULT_MONTHS, MonthsParam
 from fastmcp.server.http import create_streamable_http_app
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.tools import ToolResult
@@ -175,7 +177,7 @@ async def _fetch_rightmove_image(url: str) -> bytes | None:
 @_timed_tool
 async def property_comps(
     postcode: str,
-    months: int = 24,
+    months: MonthsParam = DEFAULT_MONTHS,
     property_type: str | None = None,
     transaction_category: str | None = "A",
     filter_outliers: bool = False,
@@ -228,7 +230,7 @@ async def property_comps(
 @_timed_tool
 async def property_yield(
     postcode: str,
-    months: int = 24,
+    months: MonthsParam = DEFAULT_MONTHS,
     search_level: str = "sector",
     property_type: str | None = None,
     auto_escalate: bool = True,
@@ -563,7 +565,7 @@ async def rightmove_listing(
 async def property_blocks(
     postcode: str,
     search_level: str = "sector",
-    months: int = 24,
+    months: MonthsParam = DEFAULT_MONTHS,
 ) -> dict:
     """Property block analysis — identify buildings with multiple flat sales (block-buy opportunities)."""
     import anyio
