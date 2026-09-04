@@ -108,3 +108,68 @@ def _stub_detail():
     return RightmoveListingDetail(
         id=123456, url="https://www.rightmove.co.uk/properties/123456"
     )
+
+
+class TestCallerErrorMapping:
+    """Caller mistakes must not be reported as our failure.
+
+    A sector returned 502 Bad Gateway -- the API blaming itself for input that
+    Rightmove can never resolve. Both endpoints build their own search URL, so
+    both need the mapping; fixing only /search-url would leave identical input
+    answered 422 on one route and 502 on the other.
+    """
+
+    SECTOR = "B5 7"
+    UNKNOWN = "XX99 9XX"
+
+    @pytest.mark.parametrize("path", ["/v1/rightmove/search-url", "/v1/rightmove/listings"])
+    def test_a_sector_is_422_not_502(self, client, path):
+        with patch.object(rightmove_router, "fetch_listings") as fetch:
+            resp = client.get(path, params={"postcode": self.SECTOR})
+        assert resp.status_code == 422, resp.text
+        body = resp.json()["detail"]
+        assert body["error"] == "invalid_postcode"
+        assert body["retryable"] is False
+        # The remedy must survive into the response, not just the log.
+        assert "'B5'" in body["expected"]
+        assert fetch.call_count == 0, "a refused input must not reach the scraper"
+
+    @pytest.mark.parametrize("path", ["/v1/rightmove/search-url", "/v1/rightmove/listings"])
+    def test_a_wellformed_unknown_postcode_is_404_not_502(self, client, path):
+        with patch.object(rightmove_router, "fetch_listings") as fetch, patch(
+            "property_core.rightmove_location.requests.get"
+        ) as get:
+            get.return_value.json.return_value = {"matches": []}
+            get.return_value.raise_for_status.return_value = None
+            resp = client.get(path, params={"postcode": self.UNKNOWN})
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"]["error"] == "rightmove_location_not_found"
+        assert fetch.call_count == 0, "an absent location must not reach the scraper"
+
+    @pytest.mark.parametrize("path", ["/v1/rightmove/search-url", "/v1/rightmove/listings"])
+    def test_a_transport_failure_is_still_502_with_a_typed_body(self, client, path):
+        import requests as _requests
+
+        with patch(
+            "property_core.rightmove_location.requests.get",
+            side_effect=_requests.RequestException("upstream down"),
+        ):
+            resp = client.get(path, params={"postcode": "B5 4BX"})
+        assert resp.status_code == 502, resp.text
+        body = resp.json()["detail"]
+        assert body["error"] == "rightmove_location_unavailable"
+        assert body["retryable"] is True, "an outage is worth retrying; caller error is not"
+
+    def test_listing_detail_mapping_is_unchanged(self, client):
+        """Guard the fix from over-reaching.
+
+        /listing/{id} takes a numeric id, not a postcode, and already maps
+        correctly. It also carries a deliberate warning against catching
+        ValueError there, since pydantic's ValidationError subclasses it and an
+        upstream shape change would then be misreported as caller error.
+        """
+        with patch.object(rightmove_router, "fetch_listing") as fetch:
+            assert client.get("/v1/rightmove/listing/abc").status_code == 422
+            assert fetch.call_count == 0
+            fetch.side_effect = ValueError("upstream shape changed")
+            assert client.get("/v1/rightmove/listing/123").status_code == 502
