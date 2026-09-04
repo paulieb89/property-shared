@@ -373,6 +373,14 @@ class SnapshotAdapter:
         min_price: Optional[int] = None,
         max_price: Optional[int] = None,
         property_types: Optional[Iterable[str]] = None,
+        #: Address text filters. Substring, case-insensitive -- deliberately the
+        #: same semantics as the live source's `CONTAINS(LCASE(...))`, not a
+        #: tightening. Callers are written against over-broad matching: the
+        #: subject-property uniqueness guard refuses input that spans several
+        #: buildings, and exact equality would stop it ever firing.
+        paon: Optional[str] = None,
+        saon: Optional[str] = None,
+        street: Optional[str] = None,
         estate_type: Optional[str] = None,
         transaction_category: Optional[str] = None,
         new_build: Optional[bool] = None,
@@ -420,6 +428,15 @@ class SnapshotAdapter:
         if max_price is not None:
             where.append("price <= ?")
             params.append(int(max_price))
+
+        # `contains(lower(col), lower(?))`, parameterised. NOT a built LIKE:
+        # `%` and `_` are wildcards there, so caller text containing either
+        # would silently widen the match -- `paon='%'` returning every row on
+        # the street. Verified against DuckDB 1.5.5 before writing this.
+        for column, value in (("paon", paon), ("saon", saon), ("street", street)):
+            if value:
+                where.append(f"contains(lower({column}), lower(?))")
+                params.append(value)
 
         types = sorted({t.strip().upper() for t in property_types}) if property_types else None
         if types:
