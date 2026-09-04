@@ -13,6 +13,11 @@ from app.schemas.rightmove import (
     RightmoveListingsResponse,
     RightmoveSearchURLResponse,
 )
+from property_core.exceptions import (
+    InvalidPostcodeError,
+    LocationLookupError,
+    LocationNotFoundError,
+)
 from property_core.rightmove_location import RightmoveLocationAPI
 from property_core.rightmove_scraper import fetch_listing, fetch_listings
 
@@ -48,6 +53,16 @@ async def search_url(
             )
         )
         return RightmoveSearchURLResponse(url=url)
+    # Raised inside the worker thread; exceptions propagate unchanged out of
+    # anyio.to_thread.run_sync, so these map exactly as they would inline.
+    except InvalidPostcodeError as exc:
+        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
+    except LocationNotFoundError as exc:
+        # 404, not 422: the input is well-formed; what does not exist is a
+        # Rightmove location for it. Same line as GET /ppd/transaction.
+        raise HTTPException(status_code=404, detail=exc.to_dict()) from exc
+    except LocationLookupError as exc:
+        raise HTTPException(status_code=502, detail=exc.to_dict()) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Rightmove lookup failed: {exc}") from exc
 
@@ -91,6 +106,15 @@ async def listings(
             partial(fetch_listings, search_url, max_pages=max_pages)
         )
         return RightmoveListingsResponse(count=len(results), results=results)
+    # This endpoint builds its own search URL, so it needs the same mapping as
+    # /search-url. Without it a sector returned 502 here while returning 422
+    # there, for identical input.
+    except InvalidPostcodeError as exc:
+        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
+    except LocationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.to_dict()) from exc
+    except LocationLookupError as exc:
+        raise HTTPException(status_code=502, detail=exc.to_dict()) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Rightmove listings failed: {exc}") from exc
 
