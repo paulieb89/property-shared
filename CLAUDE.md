@@ -70,6 +70,12 @@ This repo deploys to **two separate Fly.io apps** with different Dockerfiles and
 
 `property-shared` exposes both the REST API (`/v1/`) and a plain MCP server (`/mcp`) — works in any MCP client. `propertydata` is the MCP app with Prefab UI dashboards — claude.ai only.
 
+**Releasing and refreshing the snapshot:** see
+[`docs/ops/release-and-refresh-runbook.md`](docs/ops/release-and-refresh-runbook.md).
+A code release and a snapshot refresh are independent operations — a refresh
+needs no version bump and no deploy. Release by publishing a GitHub Release, not
+by deploying locally: `fly deploy` ships the working directory, not a commit.
+
 **Deploy manually:**
 ```bash
 # property-shared (default)
