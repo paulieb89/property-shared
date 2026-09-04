@@ -5,6 +5,116 @@ Versioning here is not strict SemVer: breaking changes are documented in a
 v1.11.0, v1.10.0, v1.4.0) rather than forcing a major bump. This entry follows
 that established practice.
 
+## v1.19.0 (2026-09-04) — PPD serves from the local snapshot; full history; two wrong-answer fixes
+
+The release that moves PPD off the live Land Registry SPARQL source. That source
+degraded past usability during this work — ~58 s per call on 09-02, 173 s on
+09-04, then a **503 after 271.8 s** — and its recovery was never ours to control.
+Comps now answer in **0.27–0.45 s**.
+
+Snapshot serving was enabled on `property-shared` ahead of this release; it
+needed no code, because the machinery was already deployed and simply had no
+`PPD_SNAPSHOT_ENABLED` set.
+
+### Breaking Changes
+
+- **REST refuses unknown query parameters** (`400`, `error:
+  "unknown_query_parameter"`), naming them and listing what the route accepts.
+  Previously they were silently discarded. `GET /v1/ppd/transactions?months=24`
+  is the case that prompted it: `months` does not exist on that route — it takes
+  `from_date`/`to_date` — so the request succeeded, dropped the filter, scanned
+  the whole window instead of two years, and returned a plausible answer to a
+  question nobody asked. A rejection is recoverable in the next call; a
+  plausible wrong answer is not. MCP clients cannot hit this: they read the
+  tool's JSON Schema and never assemble a query string.
+
+### Fixed — two answers that were confidently wrong
+
+- **A property's sale history could be another property's.** `paon` is matched
+  by substring on both sources, so asking for "2 Alexandra Road" returned **25
+  Alexandra Road**, because 25 was the only partial match and a single candidate
+  passes a uniqueness check unchallenged. Its price fed
+  `subject_price_percentile` and `subject_vs_median_pct`. Reachable on both
+  paths, and found only by a test written for a different fault.
+- **And the same matching refused addresses that were never ambiguous.** "5"
+  came back with 15 and was refused, though 5 was exactly one of the candidates.
+  Measured across six outcodes of the real artifact: **14% of addresses, one in
+  seven**. Both are fixed by narrowing to an exact house number before the
+  uniqueness check — not a relaxation, since nothing is selected that the query
+  did not already return, and the check still runs on what survives.
+- **EPC address lookup refused re-certified properties.** Two certificates for
+  one property — same UPRN, address text differing by a comma — read as two
+  properties. Properties are re-certified on every sale and let, so this was the
+  normal case. Measured on real data across six postcodes: **109 of 147
+  addresses resolvable (74%) → 147 (100%)**. A postcode with no duplicates was
+  the control and did not move. The rule requires an agreed non-empty UPRN, an
+  agreed canonical address AND a strict latest date; every existing guard passes
+  unmodified.
+
+### Added
+
+- **Full PPD history.** The snapshot window goes from 11 calendar years to 32 —
+  1995 onward, the whole register. It was sized to the largest *bounded* request
+  (`months le=120`), which was correct for every bounded surface and wrong for
+  the one that is not: subject-property history asks for a property's entire
+  record with no date bound, which is why it was hardwired to live SPARQL and
+  stayed broken when that source did. Artifact `v20260904T164625Z`: 31,525,946
+  rows, 32 partitions, all ten gates, byte-identical across two builds.
+- **Subject-property history routes to the snapshot** like every other read,
+  with `paon`/`saon`/`street` filters on the adapter. They are SUBSTRING filters
+  matching live's `CONTAINS(LCASE(...))` — deliberately not exact equality,
+  which would have looked like a tightening while stopping the uniqueness guard
+  ever firing. Parameterised `contains()`, never a built `LIKE`: `%` and `_` are
+  wildcards there, so `paon='%'` would return every row on the street.
+- **One shared window contract** (`property_core/window.py`). The MCP schema for
+  `months` was `{"default": 24, "type": "integer"}` — no description, no
+  minimum, nothing about coverage. It now publishes the description, default and
+  minimum from a single structured definition that also drives validation and
+  tests, so the words, the schema and the runtime cannot disagree. No maximum is
+  declared: coverage is the real ceiling and it moves.
+- **`requested_window` and `effective_window` on provenance.** Either alone is
+  ambiguous — `effective` cannot say whether it was the request or a clamp — and
+  a model may not retain an earlier result in a later tool call, so both travel
+  with the answer.
+- **Release deploys retry and reconcile.** On v1.15.1 the PyPI publish and one
+  Fly deploy succeeded while the other failed twice on Depot builder timeouts,
+  leaving the two apps on different versions with the broken build still live.
+  Nothing noticed, because two independent leaf jobs disagreeing is a normal
+  terminal state. Deploys now fall back to `--depot=false`, and a reconcile job
+  fails loudly when the apps do not both serve the released version.
+- **An offline snapshot verifier** that needs no live upstream, recomputing
+  every row's geography from its postcode and comparing against what the build
+  stored. Run against the full-history artifact: 31,525,946 rows, one benign
+  finding (a source postcode that is the literal string `UNKNOWN`).
+
+### Changed
+
+- `MAX_BUNDLE_BYTES` 1 GiB → **2 GiB** and `MAX_TOTAL_BYTES` 2 GiB → **4 GiB**.
+  The full-history bundle is 1,189,365,783 B and the old ceiling refused it at
+  boot — correctly, and before a byte transferred. Extraction stays above what
+  fetch admits, since a compressed bundle at the cap unpacks to more than it.
+- `epc_match_rate` rises and `median_price_per_sqft` moves, because
+  newly-matched comps bring floor areas into the median.
+- Subject-property provenance now reports `source: snapshot` rather than
+  `sparql`, and declares its coverage bounds.
+- Rightmove location failures are typed: caller error 422, no such location 404,
+  upstream failure 502. Outcodes still resolve — a live probe found the earlier
+  control had tested full postcodes and one sector but never an outcode.
+
+### Operational
+
+- **The image must be deployed before `current.json` is flipped** to the
+  full-history artifact. Any Machine still running the 1 GiB ceiling refuses the
+  new bundle at boot and falls back to live.
+- Each restart re-materializes the snapshot on ephemeral rootfs: ~150 s at the
+  measured 63.6 Mbit/s. Boot is non-blocking, so the app is ready in ~10 s and
+  serves live meanwhile — which, while the live source is degraded, means PPD
+  data is briefly unavailable rather than merely stale.
+- Between this deploy and the artifact flip, subject-property history is
+  answered from the **2016** artifact and so is truncated at 2016-01-01. It is
+  declared, not silent — provenance states the coverage and a warning names the
+  narrowing — but the window is worth keeping short.
+
 ## v1.18.2 (2026-09-02) — live-arm diagnostic evidence for rate-limit failures; serving still off
 
 The out-of-band Stage 1 comparator now records why a live observation failed,
