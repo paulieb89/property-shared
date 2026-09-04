@@ -1,0 +1,16 @@
+{
+  "kind": "ppd_snapshot_nonlive_verification",
+  "not_stage_1_evidence": true,
+  "note": "A second arm that is not the live source. It shares the snapshot's own data, so it cannot detect a row that never reached the artifact; only an independent publication of the dataset can. It establishes internal consistency and query-path reachability.",
+  "artifact": {
+    "version": "v20260828T194003Z",
+    "bundle_sha256": "50f802b29d9802ee42319122214aeb0adc6761e96c4f6c9ddd0498500bb9072c",
+    "coverage_from": "2016-01-01",
+    "coverage_to": "2026-06-30",
+    "rows": 10394935
+  },
+  "rows_examined": 10394935,
+  "cases_compared": 0,
+  "passed": true,
+  "findings": []
+}
