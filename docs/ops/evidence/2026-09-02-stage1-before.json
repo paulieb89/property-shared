@@ -1,0 +1,1432 @@
+{
+  "schema_version": "2",
+  "target": {
+    "app": "property-shared",
+    "org": "personal",
+    "metrics_prefix": "property_shared"
+  },
+  "query": {
+    "window": "30m",
+    "started_at": "2026-09-02T00:01:16Z",
+    "ended_at": "2026-09-02T00:01:27Z",
+    "prometheus_base": "https://api.fly.io/prometheus/personal/api/v1",
+    "auth_scheme": "FlyV1",
+    "scrape_interval_seconds": 15
+  },
+  "series": [
+    {
+      "key": "instance_up",
+      "title": "Instance up",
+      "promql": "fly_instance_up{app=\"property-shared\"}",
+      "unit": "bool",
+      "kind": "instant",
+      "status": "ok",
+      "value": 1.0,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "region": "lhr"
+          },
+          "value": 1.0,
+          "timestamp": 1788307276
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": false,
+      "derivation": "",
+      "note": ""
+    },
+    {
+      "key": "instance_info",
+      "title": "Machine identity",
+      "promql": "fly_instance_info{app=\"property-shared\"}",
+      "unit": "info",
+      "kind": "instant",
+      "status": "ok",
+      "value": 1.0,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "cpu_count": "1",
+            "cpu_kind": "shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "memory_mb": "2048",
+            "process_group": "app",
+            "region": "lhr"
+          },
+          "value": 1.0,
+          "timestamp": 1788307276
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": false,
+      "derivation": "",
+      "note": "Labels carry instance (Machine ID), cpu_kind, cpu_count, memory_mb, process_group."
+    },
+    {
+      "key": "instance_uptime_seconds",
+      "title": "Instance uptime",
+      "promql": "fly_instance_uptime_seconds{app=\"property-shared\"}",
+      "unit": "seconds",
+      "kind": "instant",
+      "status": "ok",
+      "value": 55005.00773938,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "region": "lhr"
+          },
+          "value": 55005.00773938,
+          "timestamp": 1788307277
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": false,
+      "derivation": "",
+      "note": "Resets on Machine restart \u2014 the cheapest check that a restart actually happened."
+    },
+    {
+      "key": "scrape_up",
+      "title": "Metrics scrape up",
+      "promql": "up{app=\"property-shared\"}",
+      "unit": "bool",
+      "kind": "instant",
+      "status": "ok",
+      "value": 1.0,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "region": "lhr"
+          },
+          "value": 1.0,
+          "timestamp": 1788307277
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": false,
+      "derivation": "",
+      "note": "0 here means Fly could not scrape the app's /metrics; app_custom series then go stale."
+    },
+    {
+      "key": "app_concurrency",
+      "title": "App concurrency",
+      "promql": "fly_app_concurrency{app=\"property-shared\"}",
+      "unit": "connections",
+      "kind": "instant",
+      "status": "no_data",
+      "value": null,
+      "samples": [],
+      "error": null,
+      "no_data_reason": "empty_result",
+      "provenance": "fly_builtin",
+      "derived": false,
+      "derivation": "",
+      "note": "Verified absent for property-shared and propertydata on 2026-09-01 while present for five other fleet apps. Expect no_data, and do not read it as zero."
+    },
+    {
+      "key": "load_average_5m",
+      "title": "Load average (5m)",
+      "promql": "fly_instance_load_average{app=\"property-shared\",minutes=\"5\"}",
+      "unit": "load",
+      "kind": "instant",
+      "status": "ok",
+      "value": 0.01,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "minutes": "5",
+            "region": "lhr"
+          },
+          "value": 0.01,
+          "timestamp": 1788307277
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": false,
+      "derivation": "",
+      "note": ""
+    },
+    {
+      "key": "load_average_5m_peak",
+      "title": "Load average (5m) peak over window",
+      "promql": "max_over_time(fly_instance_load_average{app=\"property-shared\",minutes=\"5\"}[30m])",
+      "unit": "load",
+      "kind": "instant",
+      "status": "ok",
+      "value": 0.02,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "minutes": "5",
+            "region": "lhr"
+          },
+          "value": 0.02,
+          "timestamp": 1788307278
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "max_over_time over the collection window of the kernel 5-minute load average.",
+      "note": ""
+    },
+    {
+      "key": "cpu_busy_pct",
+      "title": "CPU busy",
+      "promql": "100 * (1 - sum(rate(fly_instance_cpu{app=\"property-shared\",mode=\"idle\"}[30m])) / sum(rate(fly_instance_cpu{app=\"property-shared\"}[30m])))",
+      "unit": "percent",
+      "kind": "instant",
+      "status": "ok",
+      "value": 0.42335165446494294,
+      "samples": [
+        {
+          "labels": {},
+          "value": 0.42335165446494294,
+          "timestamp": 1788307278
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "100 * (1 - idle_rate / total_rate) across all cpu modes and cpu_ids over the window.",
+      "note": ""
+    },
+    {
+      "key": "cpu_throttle",
+      "title": "CPU throttle",
+      "promql": "fly_instance_cpu_throttle{app=\"property-shared\"}",
+      "unit": "count",
+      "kind": "instant",
+      "status": "ok",
+      "value": 0.0,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "region": "lhr"
+          },
+          "value": 0.0,
+          "timestamp": 1788307278
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": false,
+      "derivation": "",
+      "note": ""
+    },
+    {
+      "key": "memory_total",
+      "title": "Machine memory total",
+      "promql": "fly_instance_memory_mem_total{app=\"property-shared\"}",
+      "unit": "bytes",
+      "kind": "instant",
+      "status": "ok",
+      "value": 2064257024.0,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "region": "lhr"
+          },
+          "value": 2064257024.0,
+          "timestamp": 1788307278
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": false,
+      "derivation": "",
+      "note": ""
+    },
+    {
+      "key": "memory_available",
+      "title": "Machine memory available",
+      "promql": "fly_instance_memory_mem_available{app=\"property-shared\"}",
+      "unit": "bytes",
+      "kind": "instant",
+      "status": "ok",
+      "value": 1692741632.0,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "region": "lhr"
+          },
+          "value": 1692741632.0,
+          "timestamp": 1788307278
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": false,
+      "derivation": "",
+      "note": ""
+    },
+    {
+      "key": "memory_available_min",
+      "title": "Machine memory available, minimum over window",
+      "promql": "min_over_time(fly_instance_memory_mem_available{app=\"property-shared\"}[30m])",
+      "unit": "bytes",
+      "kind": "instant",
+      "status": "ok",
+      "value": 1692741632.0,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "region": "lhr"
+          },
+          "value": 1692741632.0,
+          "timestamp": 1788307279
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "min_over_time of MemAvailable over the window \u2014 the Machine-wide low-water mark.",
+      "note": "This is the G1a Machine-wide available-memory figure, not process RSS."
+    },
+    {
+      "key": "instance_exit_oom",
+      "title": "OOM exits",
+      "promql": "fly_instance_exit_oom{app=\"property-shared\"}",
+      "unit": "count",
+      "kind": "instant",
+      "status": "no_data",
+      "value": null,
+      "samples": [],
+      "error": null,
+      "no_data_reason": "empty_result",
+      "provenance": "fly_builtin",
+      "derived": false,
+      "derivation": "",
+      "note": "Absent unless an OOM kill has occurred; no_data here is the healthy reading."
+    },
+    {
+      "key": "rootfs_free_bytes",
+      "title": "Root filesystem free",
+      "promql": "fly_instance_filesystem_blocks_free{app=\"property-shared\"} * fly_instance_filesystem_block_size{app=\"property-shared\"}",
+      "unit": "bytes",
+      "kind": "instant",
+      "status": "ok",
+      "value": 8038342656.0,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "mount": "/.fly-upper-layer",
+            "region": "lhr"
+          },
+          "value": 8038342656.0,
+          "timestamp": 1788307279
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "blocks_free * block_size, per mount. Mount label identifies the filesystem.",
+      "note": "Fly's ephemeral rootfs reports as mount /.fly-upper-layer. This is the free-space figure the snapshot preflight (bundle_bytes * 2.5) is measured against."
+    },
+    {
+      "key": "rootfs_free_bytes_min",
+      "title": "Root filesystem free, minimum over window",
+      "promql": "min_over_time((fly_instance_filesystem_blocks_free{app=\"property-shared\"} * fly_instance_filesystem_block_size{app=\"property-shared\"})[30m:15s])",
+      "unit": "bytes",
+      "kind": "instant",
+      "status": "ok",
+      "value": 8038342656.0,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "mount": "/.fly-upper-layer",
+            "region": "lhr"
+          },
+          "value": 8038342656.0,
+          "timestamp": 1788307279
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "min_over_time of (blocks_free * block_size) on the same mount, sampled at 15s (Fly's real stored resolution) over the window. This is the free-space low-water mark, nothing more. The additional space a run consumed is baseline_free - minimum_free on that mount \u2014 see summarise_transient_disk(). It is NOT total_bytes - minimum_free, which is total disk in use including the image and everything already present.",
+      "note": "Corroborating only. At 15s resolution a materialisation lasting ~20 s yields one or two samples and its true peak can fall entirely between them. The verifier's own 0.2 s directory sampling is the authoritative transient-disk measurement."
+    },
+    {
+      "key": "rootfs_total_bytes",
+      "title": "Root filesystem total",
+      "promql": "fly_instance_filesystem_blocks{app=\"property-shared\"} * fly_instance_filesystem_block_size{app=\"property-shared\"}",
+      "unit": "bytes",
+      "kind": "instant",
+      "status": "ok",
+      "value": 8350298112.0,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "mount": "/.fly-upper-layer",
+            "region": "lhr"
+          },
+          "value": 8350298112.0,
+          "timestamp": 1788307279
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "blocks * block_size, per mount.",
+      "note": ""
+    },
+    {
+      "key": "net_recv_bytes_rate",
+      "title": "Network received",
+      "promql": "sum(rate(fly_instance_net_recv_bytes{app=\"property-shared\",device=\"eth0\"}[30m]))",
+      "unit": "bytes/sec",
+      "kind": "instant",
+      "status": "ok",
+      "value": 341.08925495041393,
+      "samples": [
+        {
+          "labels": {},
+          "value": 341.08925495041393,
+          "timestamp": 1788307279
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "rate() of the eth0 counter over the window, summed.",
+      "note": ""
+    },
+    {
+      "key": "net_sent_bytes_rate",
+      "title": "Network sent",
+      "promql": "sum(rate(fly_instance_net_sent_bytes{app=\"property-shared\",device=\"eth0\"}[30m]))",
+      "unit": "bytes/sec",
+      "kind": "instant",
+      "status": "ok",
+      "value": 4236.625979652234,
+      "samples": [
+        {
+          "labels": {},
+          "value": 4236.625979652234,
+          "timestamp": 1788307280
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "rate() of the eth0 counter over the window, summed.",
+      "note": ""
+    },
+    {
+      "key": "app_http_responses_by_status",
+      "title": "App HTTP responses by status",
+      "promql": "sum by (status) (increase(fly_app_http_responses_count{app=\"property-shared\"}[30m]))",
+      "unit": "responses",
+      "kind": "instant",
+      "status": "ok",
+      "value": null,
+      "samples": [
+        {
+          "labels": {
+            "status": "200"
+          },
+          "value": 88.0,
+          "timestamp": 1788307280
+        },
+        {
+          "labels": {
+            "status": "202"
+          },
+          "value": 31.0,
+          "timestamp": 1788307280
+        },
+        {
+          "labels": {
+            "status": "400"
+          },
+          "value": 1.0,
+          "timestamp": 1788307280
+        },
+        {
+          "labels": {
+            "status": "404"
+          },
+          "value": 15.0,
+          "timestamp": 1788307280
+        },
+        {
+          "labels": {
+            "status": "405"
+          },
+          "value": 4.0,
+          "timestamp": 1788307280
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "increase() of the Fly proxy app-side response counter over the window, by status.",
+      "note": ""
+    },
+    {
+      "key": "edge_http_responses_by_status",
+      "title": "Edge HTTP responses by status",
+      "promql": "sum by (status) (increase(fly_edge_http_responses_count{app=\"property-shared\"}[30m]))",
+      "unit": "responses",
+      "kind": "instant",
+      "status": "ok",
+      "value": null,
+      "samples": [
+        {
+          "labels": {
+            "status": "200"
+          },
+          "value": 57.0,
+          "timestamp": 1788307280
+        },
+        {
+          "labels": {
+            "status": "202"
+          },
+          "value": 22.0,
+          "timestamp": 1788307280
+        },
+        {
+          "labels": {
+            "status": "400"
+          },
+          "value": 3.0,
+          "timestamp": 1788307280
+        },
+        {
+          "labels": {
+            "status": "404"
+          },
+          "value": 16.0,
+          "timestamp": 1788307280
+        },
+        {
+          "labels": {
+            "status": "405"
+          },
+          "value": 3.0,
+          "timestamp": 1788307280
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "increase() of the Fly edge response counter over the window, by status.",
+      "note": "Edge series carry no instance label \u2014 they are per-PoP, not per-Machine."
+    },
+    {
+      "key": "app_http_p95",
+      "title": "App HTTP p95 latency",
+      "promql": "histogram_quantile(0.95, sum by (le) (rate(fly_app_http_response_time_seconds_bucket{app=\"property-shared\"}[30m])))",
+      "unit": "seconds",
+      "kind": "instant",
+      "status": "ok",
+      "value": 0.021750741967929216,
+      "samples": [
+        {
+          "labels": {},
+          "value": 0.021750741967929216,
+          "timestamp": 1788307280
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "histogram_quantile(0.95) over the Fly proxy app-side latency histogram.",
+      "note": ""
+    },
+    {
+      "key": "app_http_p99",
+      "title": "App HTTP p99 latency",
+      "promql": "histogram_quantile(0.99, sum by (le) (rate(fly_app_http_response_time_seconds_bucket{app=\"property-shared\"}[30m])))",
+      "unit": "seconds",
+      "kind": "instant",
+      "status": "ok",
+      "value": 0.02435014839358584,
+      "samples": [
+        {
+          "labels": {},
+          "value": 0.02435014839358584,
+          "timestamp": 1788307281
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "histogram_quantile(0.99) over the Fly proxy app-side latency histogram.",
+      "note": ""
+    },
+    {
+      "key": "edge_http_p95",
+      "title": "Edge HTTP p95 latency",
+      "promql": "histogram_quantile(0.95, sum by (le) (rate(fly_edge_http_response_time_seconds_bucket{app=\"property-shared\"}[30m])))",
+      "unit": "seconds",
+      "kind": "instant",
+      "status": "ok",
+      "value": 0.12386113293808856,
+      "samples": [
+        {
+          "labels": {},
+          "value": 0.12386113293808856,
+          "timestamp": 1788307281
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "histogram_quantile(0.95) over the Fly edge latency histogram.",
+      "note": ""
+    },
+    {
+      "key": "hard_limit_reached",
+      "title": "Concurrency hard limit reached",
+      "promql": "sum(increase(fly_app_hard_limit_reached_count{app=\"property-shared\"}[30m]))",
+      "unit": "events",
+      "kind": "instant",
+      "status": "ok",
+      "value": 0.0,
+      "samples": [
+        {
+          "labels": {},
+          "value": 0.0,
+          "timestamp": 1788307282
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "increase() over the window.",
+      "note": ""
+    },
+    {
+      "key": "soft_limit_reached",
+      "title": "Concurrency soft limit reached",
+      "promql": "sum(increase(fly_app_soft_limit_reached_count{app=\"property-shared\"}[30m]))",
+      "unit": "events",
+      "kind": "instant",
+      "status": "ok",
+      "value": 0.0,
+      "samples": [
+        {
+          "labels": {},
+          "value": 0.0,
+          "timestamp": 1788307282
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "increase() over the window.",
+      "note": ""
+    },
+    {
+      "key": "process_rss",
+      "title": "Process RSS",
+      "promql": "process_resident_memory_bytes{app=\"property-shared\"}",
+      "unit": "bytes",
+      "kind": "instant",
+      "status": "ok",
+      "value": 198901760.0,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "region": "lhr"
+          },
+          "value": 198901760.0,
+          "timestamp": 1788307282
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "app_custom",
+      "derived": false,
+      "derivation": "",
+      "note": "Scraped from the app's own /metrics; single uvicorn process (see gate G2)."
+    },
+    {
+      "key": "process_rss_peak",
+      "title": "Process RSS peak over window",
+      "promql": "max_over_time(process_resident_memory_bytes{app=\"property-shared\"}[30m])",
+      "unit": "bytes",
+      "kind": "instant",
+      "status": "ok",
+      "value": 198901760.0,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "region": "lhr"
+          },
+          "value": 198901760.0,
+          "timestamp": 1788307282
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "app_custom",
+      "derived": true,
+      "derivation": "max_over_time of the scraped RSS gauge over the window.",
+      "note": "Bounded below by the scrape interval: a spike shorter than one scrape is invisible here. Not a substitute for measuring RSS inside the process under test."
+    },
+    {
+      "key": "process_open_fds",
+      "title": "Open file descriptors",
+      "promql": "process_open_fds{app=\"property-shared\"}",
+      "unit": "count",
+      "kind": "instant",
+      "status": "ok",
+      "value": 10.0,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "region": "lhr"
+          },
+          "value": 10.0,
+          "timestamp": 1788307283
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "app_custom",
+      "derived": false,
+      "derivation": "",
+      "note": ""
+    },
+    {
+      "key": "app_requests_by_route",
+      "title": "App requests by surface/route/status class",
+      "promql": "sum by (surface, route, status_class) (increase(property_shared_http_requests_total{app=\"property-shared\"}[30m]))",
+      "unit": "requests",
+      "kind": "instant",
+      "status": "ok",
+      "value": null,
+      "samples": [
+        {
+          "labels": {
+            "route": "/.well-known/glama.json",
+            "status_class": "2xx",
+            "surface": "web"
+          },
+          "value": 0.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "route": "/mcp",
+            "status_class": "2xx",
+            "surface": "mcp_proxy"
+          },
+          "value": 119.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "route": "/mcp",
+            "status_class": "4xx",
+            "surface": "mcp_proxy"
+          },
+          "value": 12.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "route": "/v1/health",
+            "status_class": "2xx",
+            "surface": "infra"
+          },
+          "value": 60.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "route": "/v1/meta",
+            "status_class": "2xx",
+            "surface": "api"
+          },
+          "value": 0.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "route": "/v1/meta/integrations",
+            "status_class": "2xx",
+            "surface": "api"
+          },
+          "value": 0.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "route": "/web",
+            "status_class": "2xx",
+            "surface": "web"
+          },
+          "value": 0.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "route": "/web",
+            "status_class": "4xx",
+            "surface": "web"
+          },
+          "value": 12.0,
+          "timestamp": 1788307283
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "app_custom",
+      "derived": true,
+      "derivation": "increase() of the app's own request counter over the window.",
+      "note": ""
+    },
+    {
+      "key": "app_request_p95",
+      "title": "App-measured request p95 latency",
+      "promql": "histogram_quantile(0.95, sum by (le) (rate(property_shared_http_request_duration_seconds_bucket{app=\"property-shared\"}[30m])))",
+      "unit": "seconds",
+      "kind": "instant",
+      "status": "ok",
+      "value": 0.0082125,
+      "samples": [
+        {
+          "labels": {},
+          "value": 0.0082125,
+          "timestamp": 1788307283
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "app_custom",
+      "derived": true,
+      "derivation": "histogram_quantile(0.95) over the app's own request-duration histogram.",
+      "note": ""
+    },
+    {
+      "key": "app_tool_calls",
+      "title": "MCP tool calls by tool and status",
+      "promql": "sum by (tool, status) (increase(property_shared_tool_calls_total{app=\"property-shared\"}[30m]))",
+      "unit": "calls",
+      "kind": "instant",
+      "status": "ok",
+      "value": null,
+      "samples": [
+        {
+          "labels": {
+            "status": "error",
+            "tool": "epc_certificate"
+          },
+          "value": 0.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "status": "error",
+            "tool": "ppd_transactions"
+          },
+          "value": 0.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "status": "error",
+            "tool": "rental_analysis"
+          },
+          "value": 0.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "status": "error",
+            "tool": "rightmove_search"
+          },
+          "value": 0.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "status": "ok",
+            "tool": "epc_certificate"
+          },
+          "value": 0.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "status": "ok",
+            "tool": "ppd_transactions"
+          },
+          "value": 0.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "status": "ok",
+            "tool": "property_comps"
+          },
+          "value": 0.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "status": "ok",
+            "tool": "property_epc_summaries"
+          },
+          "value": 0.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "status": "ok",
+            "tool": "rightmove_search"
+          },
+          "value": 0.0,
+          "timestamp": 1788307283
+        },
+        {
+          "labels": {
+            "status": "ok",
+            "tool": "stamp_duty"
+          },
+          "value": 0.0,
+          "timestamp": 1788307283
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "app_custom",
+      "derived": true,
+      "derivation": "increase() of the MCP tool-call counter over the window.",
+      "note": "Verified to have no live series for property-shared on 2026-09-01 despite the duration histogram existing \u2014 the counter is stale, not zero."
+    },
+    {
+      "key": "app_client_connections",
+      "title": "MCP client handshakes by client",
+      "promql": "sum by (client_name) (increase(property_shared_client_connections_total{app=\"property-shared\"}[30m]))",
+      "unit": "handshakes",
+      "kind": "instant",
+      "status": "ok",
+      "value": null,
+      "samples": [
+        {
+          "labels": {
+            "client_name": "AgentIndexBot"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "Anthropic/ClaudeAI"
+          },
+          "value": 1.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "Kelivo MCP"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "acton-probe"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "acton-skill-extractor"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "agent-tools.cloud"
+          },
+          "value": 1.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "agent-world-probe"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "agentage-mcp-catalog-health"
+          },
+          "value": 1.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "aisec-registry-probe"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "avp1-scan"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "chathome-skills-probe"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "claude-ai (via mcp-remote 0.8.3)"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "claude-code"
+          },
+          "value": 2.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "codex-mcp-client"
+          },
+          "value": 3.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "factanker-probe"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "forge-registry-probe"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "glama"
+          },
+          "value": 1.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "glimind-probe"
+          },
+          "value": 4.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "golemreach-trust"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "hultra-link"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "ledgerhall"
+          },
+          "value": 18.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "local-agent-mode-property (via mcp-remote 0.8.3)"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "mcp"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "mcp-checker"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "mcp-ledger-probe"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "mcp-remote-fallback-test"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "mcp-rugpull-research"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "mcp2-research"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "mcpbeat"
+          },
+          "value": 1.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "mcphq-probe"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "mcpindex-trust"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "mcpscan"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "policylayer-crawler"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "probe"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "proofbench-probe"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "sheet-add-in"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "test"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        },
+        {
+          "labels": {
+            "client_name": "unreached-probe"
+          },
+          "value": 0.0,
+          "timestamp": 1788307284
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "app_custom",
+      "derived": true,
+      "derivation": "increase() of the MCP initialize-handshake counter over the window.",
+      "note": ""
+    },
+    {
+      "key": "range_memory_available",
+      "title": "Machine memory available over time",
+      "promql": "fly_instance_memory_mem_available{app=\"property-shared\"}",
+      "unit": "bytes",
+      "kind": "range",
+      "status": "ok",
+      "value": null,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "region": "lhr"
+          },
+          "points": 61,
+          "min": 1692741632.0,
+          "max": 1692741632.0,
+          "first": 1692741632.0,
+          "last": 1692741632.0
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": false,
+      "derivation": "",
+      "note": ""
+    },
+    {
+      "key": "range_rootfs_free",
+      "title": "Root filesystem free over time",
+      "promql": "fly_instance_filesystem_blocks_free{app=\"property-shared\"} * fly_instance_filesystem_block_size{app=\"property-shared\"}",
+      "unit": "bytes",
+      "kind": "range",
+      "status": "ok",
+      "value": null,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "mount": "/.fly-upper-layer",
+            "region": "lhr"
+          },
+          "points": 61,
+          "min": 8038342656.0,
+          "max": 8038342656.0,
+          "first": 8038342656.0,
+          "last": 8038342656.0
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "fly_builtin",
+      "derived": true,
+      "derivation": "blocks_free * block_size, per mount, sampled across the window.",
+      "note": ""
+    },
+    {
+      "key": "range_process_rss",
+      "title": "Process RSS over time",
+      "promql": "process_resident_memory_bytes{app=\"property-shared\"}",
+      "unit": "bytes",
+      "kind": "range",
+      "status": "ok",
+      "value": null,
+      "samples": [
+        {
+          "labels": {
+            "app": "property-shared",
+            "host": "81e9",
+            "instance": "7849207a412608",
+            "region": "lhr"
+          },
+          "points": 61,
+          "min": 198901760.0,
+          "max": 198901760.0,
+          "first": 198901760.0,
+          "last": 198901760.0
+        }
+      ],
+      "error": null,
+      "no_data_reason": null,
+      "provenance": "app_custom",
+      "derived": false,
+      "derivation": "",
+      "note": ""
+    }
+  ],
+  "transient_disk": [
+    {
+      "status": "ok",
+      "baseline_free_bytes": 8038342656.0,
+      "minimum_free_bytes": 8038342656.0,
+      "total_bytes": 8350298112.0,
+      "delta_bytes": 0.0,
+      "method": "delta_bytes = baseline_free - minimum_free, on one mount. Not total_bytes - minimum_free, which measures total occupancy.",
+      "resolution_caveat": "Fly stores one sample per 15s. A materialisation lasting ~20 s produces one or two samples, so this delta may understate the true peak or miss it entirely.",
+      "authoritative_source": "/app/boot_only_verify.py, which samples the verifier directory every 0.2 s, is the authoritative transient-disk measurement; this delta only corroborates it.",
+      "labels": {
+        "app": "property-shared",
+        "host": "81e9",
+        "instance": "7849207a412608",
+        "mount": "/.fly-upper-layer",
+        "region": "lhr"
+      },
+      "points": 61
+    }
+  ],
+  "commands": [
+    {
+      "key": "status",
+      "command": "fly status --json -a property-shared",
+      "status": "ok",
+      "data": {
+        "name": "property-shared",
+        "hostname": "property-shared.fly.dev",
+        "machines": [
+          {
+            "id": "7849207a412608",
+            "state": "started",
+            "region": "lhr",
+            "image": "registry.fly.io/property-shared:deployment-01M1E210R0WZARCGJRC5VSZAKY",
+            "created_at": "2026-01-21T19:31:15Z",
+            "updated_at": "2026-09-01T08:43:59Z"
+          }
+        ]
+      },
+      "error": null
+    },
+    {
+      "key": "checks",
+      "command": "fly checks list --json -a property-shared",
+      "status": "ok",
+      "data": [
+        {
+          "machine": "7849207a412608",
+          "name": "servicecheck-00-http-8080",
+          "status": "passing",
+          "output": "{\"status\":\"ok\"}"
+        }
+      ],
+      "error": null
+    },
+    {
+      "key": "image",
+      "command": "fly image show --json -a property-shared",
+      "status": "ok",
+      "data": [
+        {
+          "Registry": "registry.fly.io",
+          "Repository": "property-shared",
+          "Tag": "deployment-01M1E210R0WZARCGJRC5VSZAKY",
+          "Digest": "sha256:863733618cc80d35cb2a2f2f8999c17baa74e35e1ce9dc837069e2866d0f0818",
+          "Labels": "{\"GH_ACTION_NAME\":\"__run\",\"GH_EVENT_NAME\":\"release\",\"GH_REPO\":\"paulieb89/property-shared\",\"GH_SHA\":\"eda3a84ac6fe17488778946978c2a0d6801ae436\"}",
+          "Version": "N/A",
+          "MachineID": "7849207a412608"
+        }
+      ],
+      "error": null
+    }
+  ],
+  "logs": null,
+  "notes": [
+    "No Grafana dashboard titled 'BOUCH MCP Fleet' is checked in anywhere under the mcpfleet workspace; the only checked-in dashboard is monitoring/grafana-dashboard.json ('Property Shared API'), whose PromQL targets metric names that do not exist in Fly's Prometheus (http_request_duration_seconds_*, http_requests_inprogress, http_response_size_bytes_*, external_request_duration_seconds_*). That dashboard is written for a prometheus_fastapi_instrumentator naming scheme the deployed app does not use. No series here is sourced from it. The app_custom series below are taken from the live Fly label index and from the checked-in definitions in app/core/metrics.py, not from any dashboard.",
+    "Transient disk from this collector is corroborating evidence, never the measurement. The additional space a run consumed on a mount is baseline_free - minimum_free on that same mount; total_bytes - minimum_free would instead report total disk in use at the low-water mark, including the image and everything already present. Fly stores samples every 15s, so a ~20 s materialisation yields one or two samples and its true peak can fall entirely between them. /app/boot_only_verify.py samples the verifier directory every 0.2 s and is the authoritative transient-disk measurement.",
+    "no_data (absent series, NOT zero): app_concurrency, instance_exit_oom"
+  ]
+}
