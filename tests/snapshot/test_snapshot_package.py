@@ -79,7 +79,7 @@ def test_version_is_a_path_component_the_store_will_accept():
 def test_bundle_holds_exactly_the_partition_files(released):
     _, release = released
     names = sorted(m.name for m in members(release.bundle_path))
-    assert names == [f"year={y}/data.parquet" for y in range(2016, 2027)]
+    assert names == [f"year={y}/data.parquet" for y in range(1995, 2027)]
 
 
 def test_bundle_holds_no_directory_or_special_members(released):
@@ -110,7 +110,7 @@ def test_published_manifest_parses_as_the_runtime_manifest(released):
     payload = json.loads(release.manifest_path.read_text())
     manifest = SnapshotManifest(**payload)
     assert manifest.snapshot_version == release.version
-    assert manifest.parquet_files == 11
+    assert manifest.parquet_files == 32
     assert manifest.layout == "year"
 
 

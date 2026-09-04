@@ -54,7 +54,7 @@ from typing import Any, Iterator, Optional, Sequence
 #: account"). A cold run must download exactly this many bytes; anything
 #: else means the bundle changed or the run was not genuinely cold. Not
 #: overridable from the CLI -- see `_is_cold_run_valid` and `main`.
-EXPECTED_BUNDLE_BYTES = 279_109_872
+EXPECTED_BUNDLE_BYTES = 1_189_365_783
 
 
 class VerificationRefused(RuntimeError):

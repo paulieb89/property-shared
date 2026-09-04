@@ -30,15 +30,21 @@ from property_core.snapshot.errors import ArchiveRejected, SnapshotExtraMissingE
 class ExtractionLimits:
     """Caps applied while the archive streams past.
 
-    Defaults are sized for a rolling snapshot (an 11-partition snapshot holds
-    ~11 parquet files and unpacks to a few hundred MB) with headroom, not for
-    arbitrary archives. They match the caps published in the governing
-    specification, section 4.3.
+    Defaults are sized for the full-history snapshot (32 year partitions, one
+    parquet file each, unpacking to ~1.2 GB) with headroom, not for arbitrary
+    archives.
+
+    `max_total_bytes` is deliberately kept above what
+    `fetch.DEFAULT_MAX_BUNDLE_BYTES` can deliver. A bundle is compressed, so a
+    2 GiB bundle unpacks to more than 2 GiB of parquet; leaving these equal
+    would mean the fetch ceiling admitted an archive that extraction then
+    refused, which is a failure discovered after the whole transfer rather than
+    before it.
     """
 
     max_members: int = 5_000
-    max_total_bytes: int = 2 * 1024 ** 3
-    max_member_bytes: int = 2 * 1024 ** 3
+    max_total_bytes: int = 4 * 1024 ** 3
+    max_member_bytes: int = 4 * 1024 ** 3
 
 
 @dataclass(frozen=True)

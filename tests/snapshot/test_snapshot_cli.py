@@ -106,7 +106,7 @@ def test_the_build_report_records_what_was_measured(tmp_path):
     report = json.loads(
         (tmp_path / "dist" / "build-report-v20260828T101500Z.json").read_text())
     assert report["rows"] == 2
-    assert report["parquet_files"] == 11
+    assert report["parquet_files"] == 32
     assert report["gates"] == "passed"
     assert report["rows_per_year"]["2024"] == 1
     assert report["boot_check"]["readiness"] == "ready"

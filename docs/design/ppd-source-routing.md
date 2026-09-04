@@ -155,42 +155,61 @@ process-isolated, and the attribution literal is pinned independently in test.
 
 ## 1. Snapshot scope
 
-### 1.1 Window — 11 year-partitions
+### 1.1 Window — 32 year-partitions (full PPD history)
 
-`PPDService.comps` computes `from_date = date.today() - timedelta(days=months * 30)`
-(`property_core/ppd_service.py:262`). At the public 120-month ceiling
-(`app/api/v1/ppd.py:171`) that is 3,600 days = **9.86 years measured from today**,
-not from a year boundary:
+**The snapshot retains every calendar year of Price Paid Data, 1995 to the
+current release year.** At a 2026 release that is 32 partitions opening on
+1995-01-01.
 
-| Request date | `from_date` | Partition required |
-|---|---|---|
-| 2026-01-01 | 2016-02-23 | **2016** |
-| 2026-07-01 | 2016-08-22 | **2016** |
-| 2026-12-31 | 2017-02-21 | 2017 |
+#### Why this supersedes the eleven-partition window
 
-Ten calendar-year partitions would silently under-serve a legal 120-month request
-for most of the year. **The snapshot retains the last 11 calendar-year partitions.**
+The previous window was sized to the largest *bounded* request. `PPDService.comps`
+computes `from_date = date.today() - timedelta(days=months * 30)`, so at the
+120-month REST ceiling (`app/api/v1/ppd.py`) that is 3,600 days = 9.86 years
+measured from today, not from a year boundary — ten calendar-year partitions
+would silently under-serve a legal 120-month request for most of the year, and
+eleven was the smallest count that could not. The reasoning was correct and the
+constant carried it: *"not a tunable: ten partitions cannot serve a 120-month
+request made in December, and twelve buys coverage nothing asks for."*
+
+It held only while **every** surface was bounded, and one is not. The
+subject-property history lookup asks for a single property's whole sale record
+with no date bound at all, which is why §2.6 routed it to the live source: an
+eleven-year snapshot would have truncated a history that routinely predates it,
+and a truncated history is indistinguishable from a complete one. That exception
+became the system's last hard dependency on live SPARQL, and when that source
+degraded to 503s in September 2026 the feature failed with the answer sitting in
+the snapshot.
+
+Full history removes the exception rather than working around it. "Twelve buys
+coverage nothing asks for" was true of the bounded surfaces and false of the
+unbounded one.
 
 | Partitions | Years | Size | Transfer @100 Mbit/s |
 |---|---|---|---|
-| 10 | 2017–2026 | 193 MiB — **estimated** (year+area basis) | 16.2 s — **calculated from that estimate** |
-| **11** | **2016–2026** | **266.2 MiB — measured (year-only)** | **22.3 s — calculated from the measurement** |
-| 12 | 2015–2026 | 244 MiB — **estimated** (year+area basis) | 20.4 s — **calculated from that estimate** |
+| 11 | 2016–2026 | 266.2 MiB — measured, **superseded** | 22.3 s — calculated from that measurement |
+| **32** | **1995–2026** | **1134.3 MiB — measured (year-only)** | **95.1 s — calculated from the measurement** |
 
-**The eleven-partition row is the only measured row.** 279,109,872 bytes
-(266.2 MiB), from two independent local builds on 2026-08-28 that produced a
-byte-identical bundle (`docs/ops/ppd-snapshot-build.md`).
-An earlier revision published 214 MiB here — a superseded year+area measurement
-applied to a year-only layout, when §1.2 mandates year-only and the same Phase 3
-run measured that layout at +22%. The 10- and 12-partition rows remain year+area
-**estimates**, retained only for shape; their transfer times are calculated from
-those estimates and are therefore doubly derived.
+**Both rows are measured.** The 32-partition row is 1,189,365,783 bytes
+(1134.3 MiB), 31,525,946 rows, from two local builds on 2026-09-04 that produced
+a byte-identical bundle (sha256 `d0897c94…e874e`), against the HMLR release
+published 2026-08-28. The 11-partition row is retained as the superseded
+measurement it is; an earlier revision published 214 MiB there, a year+area
+figure applied to a year-only layout.
 
-**22.3 s is arithmetic, not a measurement**: 279,109,872 × 8 / 1e8, assuming full
-link utilisation and zero protocol overhead. It leaves ~7.7 s inside the 30 s
-readiness target — down from the ~12 s the superseded figure implied. No real
-transfer has been timed on either Machine; only G1a/G1b can produce one. Phase 3
-measured extract+probe at 2.0 s on a 3.55x larger bundle (945.5 MiB).
+**95.1 s is arithmetic, not a measurement**: 1,189,365,783 × 8 / 1e8, assuming
+full link utilisation and zero protocol overhead. Measured transfer of the
+smaller bundle ran at 63.6 Mbit/s rather than the nominal 100, so the real figure
+will be higher.
+
+**This no longer fits inside the 30 s readiness target, and does not need to.**
+Since rev 9 the snapshot boot is non-blocking: the lifespan starts the download
+on a daemon thread and returns immediately, the application is ready serving live
+data from the first request, and the snapshot becomes routable when it is ready.
+What the transfer time now bounds is *how long after readiness the snapshot
+starts answering*, not readiness itself. The 30 s target continues to govern
+application readiness, which Phase E measured at 9.89 s and this change does not
+touch.
 
 The published guarantee is **`from_date >= coverage_from`**, never "10 years".
 
@@ -692,8 +711,10 @@ one undifferentiated label.
 * Bundle **streamed** to a temp file in 1 MiB chunks, SHA-256 incremental. **The
   body is never held in memory** — verified at scale: a 945.5 MiB bundle booted at
   199.5 MB peak RSS.
-* Limits: `MAX_BUNDLE_BYTES` **1 GiB** (~3.8x margin over the measured
-  266.2 MiB bundle); socket
+* Limits: `MAX_BUNDLE_BYTES` **2 GiB** (~1.8x margin over the measured
+  1134.3 MiB bundle; raised from 1 GiB when coverage went to full history, which
+  the old ceiling refused at boot — correctly, and before a byte transferred);
+  socket
   timeout **10 s**; total download deadline **300 s**; stall detection
   **60 s**. Any breach aborts and deletes the temp file. Both time budgets are
   checked after **every** read, the one returning EOF included — checking only
@@ -728,7 +749,10 @@ this rejects a well-formed decoy archive with different contents.
 Member-validating streaming extraction. Rejected: absolute paths, any `..`
 component, symlinks, hardlinks, device/FIFO nodes, duplicate names, member count
 over `MAX_MEMBERS` (**5,000**), per-member bytes over `MAX_MEMBER_BYTES`,
-cumulative decompressed bytes over `MAX_TOTAL_BYTES` (**2 GiB**). Every resolved
+cumulative decompressed bytes over `MAX_TOTAL_BYTES` (**4 GiB** — deliberately
+above what `MAX_BUNDLE_BYTES` can deliver, since a compressed bundle at the fetch
+ceiling unpacks to more than it; equal values would admit an archive that
+extraction then refused, discovered after the whole transfer). Every resolved
 path must stay inside staging. 10/10 attack classes rejected in Phase 3,
 including a hostile archive whose **SHA-256 matched its manifest** — digest checks
 cannot catch that.
@@ -1238,10 +1262,10 @@ The two facts Phase 3 could not evidence are now **blocking gates**, not caveats
   measured bundle. The 30 s readiness target is unchanged.
 
   **Calculated inputs, to be confirmed or refuted by the measurement — never
-  reported as its result:** ~534.1 MiB simultaneous bundle-plus-extracted payload
-  (266.2 + 267.9, arithmetic only; excludes staging directories, per-attempt
-  temporary files and filesystem overhead); ~665.4 MiB preflight threshold
-  (`bundle_bytes * 2.5`); ~22.3 s transfer at a nominal 100 Mbit/s. **None of
+  reported as its result:** ~2273.6 MiB simultaneous bundle-plus-extracted payload
+  (1134.3 + 1139.3, arithmetic only; excludes staging directories, per-attempt
+  temporary files and filesystem overhead); ~2835.7 MiB preflight threshold
+  (`bundle_bytes * 2.5`); ~95.1 s transfer at a nominal 100 Mbit/s. **None of
   these is a measured peak.**
 
 * **G1b — the same measurement on `propertydata`, the 512 MB-RAM Stage 3

@@ -62,10 +62,12 @@ DECISION = REPO / "docs" / "design" / "ppd-artifact-distribution-decision.md"
 
 MiB = 1024 ** 2
 
-#: The measurement, from two independent local builds on 2026-08-28 that
-#: produced a byte-identical bundle (docs/ops/ppd-snapshot-build.md).
-BUNDLE_BYTES = 279_109_872
-EXTRACTED_BYTES = 280_925_271
+#: The measurement, from two independent local builds on 2026-09-04 that
+#: produced a byte-identical bundle (docs/ops/ppd-snapshot-build.md). Supersedes
+#: the 11-partition figures (279,109,872 / 280,925,271), which the runbook keeps
+#: as its own superseded record.
+BUNDLE_BYTES = 1_189_365_783
+EXTRACTED_BYTES = 1_194_660_216
 
 #: Nominal link rate for the transfer calculation. Not a measured rate: no real
 #: transfer has been timed on either Fly Machine. That is G1a/G1b.
@@ -124,7 +126,7 @@ def test_the_recorded_byte_counts_are_the_ones_everything_derives_from():
 #: vanish from the gate that depends on it and still pass because the other
 #: document happened to mention it. Each figure is required in the section that
 #: actually relies on it, and a failure names that section.
-SPEC_WINDOW = "### 1.1 Window — 11 year-partitions"
+SPEC_WINDOW = "### 1.1 Window — 32 year-partitions (full PPD history)"
 SPEC_ROLLOUT = "## 7. TDD and rollout"
 RUNBOOK_G1 = "### What this means for G1a and G1b"
 
@@ -182,14 +184,23 @@ def test_the_preflight_figure_is_tied_to_the_shipped_headroom_multiplier(path):
 
 
 def test_the_bundle_limit_margin_is_stated_against_the_measured_bundle():
-    """§4.1's margin was ~4.8x against 214 MiB; against the real bundle it is less."""
+    """The margin has to be stated against the bundle that actually ships.
+
+    It was ~4.8x against an estimated 214 MiB, then ~3.8x against the measured
+    266.2 MiB 11-partition bundle. Full history and a 2 GiB ceiling make it
+    ~1.8x, and each superseded figure is asserted gone rather than merely
+    replaced -- a stale margin left in the text reads as authoritative.
+    """
     margin = _rounded(DEFAULT_MAX_BUNDLE_BYTES / BUNDLE_BYTES)
     section = " ".join(_section(SPEC, "## 4. Runtime design").split())
     assert f"{margin}x" in section, (
         f"§4.1 no longer states the {margin}x margin the 1 GiB ceiling actually "
         f"has over the measured bundle"
     )
-    assert "4.8x" not in section, "the superseded margin is still published"
+    for superseded in ("4.8x", "3.8x"):
+        assert superseded not in section, (
+            f"the superseded margin {superseded} is still published"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -201,40 +212,113 @@ def _occurrences(path: Path) -> list[tuple[int, str]]:
             if "214 MiB" in line]
 
 
-def test_the_specification_states_214_MiB_only_as_a_superseded_figure():
-    """Exactly one occurrence, and it is the sentence that supersedes it."""
-    found = _occurrences(SPEC)
-    assert len(found) == 1, (
-        f"expected one historical reference to 214 MiB in the specification, "
-        f"found {len(found)}: {[n for n, _ in found]}"
-    )
-    line = found[0][1]
-    assert line.strip().startswith("An earlier revision published 214 MiB here"), (
-        f"the surviving 214 MiB reference is not the supersession sentence: {line!r}"
-    )
+#: Every figure this project has published for the bundle and then replaced.
+#: Each must survive ONLY as a marked supersession. There are two now -- 214 MiB
+#: (an estimate applied to the wrong layout) and 266.2 MiB (a real measurement
+#: of the 11-partition window) -- and a third will join them at the next rebuild,
+#: so this is a list rather than a special case.
+SUPERSEDED_BUNDLE_FIGURES = ["214 MiB", "266.2 MiB"]
 
 
-def test_the_runbook_states_214_MiB_only_in_the_superseded_baseline_column():
-    """Two anchors: the comparison table's baseline cell, and the prose beneath it."""
-    found = _occurrences(RUNBOOK)
-    assert len(found) == 2, (
-        f"expected two historical references to 214 MiB in the runbook, found "
-        f"{len(found)}: {[n for n, _ in found]}"
-    )
+@pytest.mark.parametrize("figure", SUPERSEDED_BUNDLE_FIGURES)
+def test_the_specification_marks_every_superseded_bundle_figure_as_superseded(figure):
+    """A replaced figure left unqualified reads as a live claim.
 
-    rows = {line.split("|")[1].strip(): line
-            for _, line in found if line.lstrip().startswith("|")}
-    assert "Bundle size" in rows, (
-        "214 MiB no longer appears in the comparison table's Bundle size row"
-    )
-    cells = [c.strip() for c in rows["Bundle size"].split("|")]
-    assert "214 MiB" in cells[2], "214 MiB has moved out of the baseline column"
-    assert "266.2 MiB" in cells[3], "the Bundle size row no longer carries the measurement"
+    Not an exact-sentence match: the wording has changed twice and pinning it
+    made the guard about phrasing rather than about honesty. What is pinned is
+    that each occurrence sits in text that says it has been superseded.
+    """
+    found = [(n, line) for n, line in
+             enumerate(SPEC.read_text().splitlines(), 1) if figure in line]
+    assert found, f"{figure} has vanished from the specification entirely"
 
-    prose = [line for _, line in found if not line.lstrip().startswith("|")]
-    assert len(prose) == 1 and "superseded" in prose[0].lower(), (
-        f"the prose reference does not mark 214 MiB as superseded: {prose!r}"
+    text = " ".join(SPEC.read_text().split())
+    for _n, line in found:
+        i = text.index(figure.split()[0])
+        window = text[max(0, i - 400): i + 400].lower()
+        assert "supersede" in window or "earlier revision" in window, (
+            f"{figure} appears at line {_n} without nearby text marking it "
+            f"superseded: {line!r}"
+        )
+
+
+@pytest.mark.parametrize("figure", SUPERSEDED_BUNDLE_FIGURES)
+def test_the_runbook_marks_every_superseded_bundle_figure_as_superseded(figure):
+    lines = RUNBOOK.read_text().splitlines()
+    found = [(n, line) for n, line in enumerate(lines, 1) if figure in line]
+    assert found, f"{figure} has vanished from the runbook entirely"
+    text = " ".join(RUNBOOK.read_text().split()).lower()
+    needle = figure.lower()
+    at = -1
+    while (at := text.find(needle, at + 1)) != -1:
+        window = text[max(0, at - 600): at + 600]
+        assert "supersede" in window, (
+            f"{figure} appears in the runbook at offset {at} without nearby "
+            f"text marking it superseded (lines {[n for n, _ in found]})"
+        )
+
+
+def test_no_stale_bundle_size_survives_in_production_code():
+    """The same failure class as the docs: a superseded premise outside the prose."""
+    stale = [(p, f) for p in (REPO / "property_core").rglob("*.py")
+             for f in SUPERSEDED_BUNDLE_FIGURES if f in p.read_text()]
+    assert not stale, f"superseded sizing figure still in production code: {stale}"
+
+
+# ---------------------------------------------------------------------------
+# Group B -- the corrected premises
+# ---------------------------------------------------------------------------
+
+def _window_rows() -> list[str]:
+    """The data rows of §1.1's sizing table, header and separator excluded."""
+    window = _section(SPEC, SPEC_WINDOW)
+    rows = [line for line in window.splitlines() if line.strip().startswith("|")]
+    return [r for r in rows[2:] if r.strip("| ").strip()]
+
+
+def test_the_current_row_publishes_the_measurement():
+    """The guard that matters: the row in force states a measured figure."""
+    row = next((r for r in _window_rows() if "1995–2026" in r), None)
+    assert row is not None, "the 32-partition row is gone from the window section"
+    assert "1134.3 MiB" in row and "measured" in row.lower(), (
+        f"the current row does not publish the measurement: {row!r}"
     )
+    for superseded in SUPERSEDED_BUNDLE_FIGURES:
+        assert superseded not in row, (
+            f"the current row still claims the superseded size {superseded}"
+        )
+
+
+def test_every_sizing_row_declares_measured_or_estimated():
+    """A size with no class beside it is the defect this table keeps re-learning.
+
+    It has twice published a number whose provenance was not stated next to it:
+    an estimate read as a measurement, then a measurement of a window no longer
+    in force. Each row must say which it is, and its transfer time must say what
+    it was derived from.
+    """
+    rows = _window_rows()
+    assert len(rows) >= 2, f"the sizing table has collapsed to {len(rows)} row(s)"
+    for row in rows:
+        low = row.lower()
+        assert "measured" in low or "estimated" in low, (
+            f"sizing row states a size without saying whether it is measured or "
+            f"estimated: {row!r}"
+        )
+        assert "calculated" in low, (
+            f"sizing row states a transfer time without saying it is calculated "
+            f"rather than timed: {row!r}"
+        )
+
+
+def test_superseded_sizing_rows_say_so_in_the_row_itself():
+    """A reader scanning the table must not have to find the prose beneath it."""
+    for row in _window_rows():
+        if "1995–2026" in row:
+            continue
+        assert "superseded" in row.lower(), (
+            f"a non-current sizing row is not marked superseded in the row: {row!r}"
+        )
 
 
 def test_the_comparison_table_labels_its_baseline_column_as_superseded():
@@ -259,32 +343,6 @@ def test_no_stale_eleven_partition_size_survives_in_production_code():
 # ---------------------------------------------------------------------------
 # Group B -- the corrected premises
 # ---------------------------------------------------------------------------
-
-def test_the_eleven_partition_row_publishes_the_measurement():
-    """The guard that matters: the current claim is the measured one."""
-    window = _section(SPEC, "### 1.1 Window — 11 year-partitions")
-    row = next((line for line in window.splitlines()
-                if line.strip().startswith("|") and "2016–2026" in line), None)
-    assert row is not None, "the eleven-partition row is gone from §1.1"
-    assert "266.2 MiB" in row and "measured" in row.lower(), (
-        f"the eleven-partition row does not publish the measurement: {row!r}"
-    )
-    assert "214" not in row, "the eleven-partition row still claims the superseded size"
-
-
-def test_the_estimated_rows_label_both_their_size_and_their_transfer():
-    """10 and 12 partitions are year+area estimates; their times are doubly derived."""
-    window = _section(SPEC, "### 1.1 Window — 11 year-partitions")
-    for years in ("2017–2026", "2015–2026"):
-        row = next(line for line in window.splitlines()
-                   if line.strip().startswith("|") and years in line)
-        assert "estimated" in row.lower(), f"{years} row does not label its size: {row!r}"
-        assert "calculated from that estimate" in row.lower(), (
-            f"{years} row does not label its transfer time as derived from an "
-            f"estimate rather than from a measurement: {row!r}"
-        )
-
-
 @pytest.mark.parametrize("phrase", [
     "G1a",
     "G1b",
@@ -324,7 +382,7 @@ def test_the_calculated_g1_inputs_are_not_presented_as_measurements():
     marker = "Calculated inputs"
     assert marker in rollout, "§7.2 does not separate G1's calculated inputs from its result"
     block = rollout[rollout.index(marker):rollout.index(marker) + 700]
-    for figure in ("534.1", "665.4", "22.3"):
+    for figure in ("2273.6", "2835.7", "95.1"):
         assert figure in block, f"{figure} is not inside the calculated-inputs block"
 
 
