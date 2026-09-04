@@ -1,8 +1,11 @@
 # property-shared stall, 2026-08-30
 
-**Status: OPEN.** It closes when the hotfix is deployed and client
-responsiveness is verified against the running service — not when the fix
-merges. The regression tests, PR #34 and this note are the durable record.
+**Status: CLOSED, 2026-09-04.** The closing condition set when this was opened —
+responsiveness verified against the running service, not merely the fix merging —
+was met by a machine-affine probe on Machine `7849207a412608`: a 172.95 s live
+comps call during which `/v1/health` answered 345 times at a 2.3 ms mean, with
+zero non-200s. See "Closure" at the end of this note. The regression tests,
+PR #34 and this note are the durable record.
 
 Timestamped observations from the read-only diagnosis. Every figure here was
 read from the running system at the stated UTC time. This records evidence, not
@@ -291,3 +294,87 @@ here is not evidence either way.
 This single connector check does not establish, and is not sufficient on its
 own to approve, the decisive slow-comps responsiveness check above — that
 remains outstanding on its own evidence.
+
+## Closure, 2026-09-04
+
+The decisive check — outstanding since 2026-08-31, because the one attempt then
+returned 502 in 0.1 s on an upstream 429 and a request that fails that fast never
+occupies the loop.
+
+### Why this probe is machine-affine, and the earlier design was not
+
+An earlier plan for this check polled the public `/v1/health` while issuing a
+public comps request. **That would have proved nothing.** Fly's proxy can front
+more than one Machine, so the two requests could land on different ones, and a
+green result would then be two independent healthy requests rather than evidence
+that *the Machine doing the slow call* kept its event loop free — which is the
+entire claim.
+
+Both halves therefore ran inside one Machine against `127.0.0.1:8080`, which
+also removes the edge, TLS and the `hard_limit = 10` concurrency block as
+confounders. `fly status` was read first and the Machine recorded.
+
+### Conditions
+
+| Field | Value |
+|---|---|
+| Machine | `7849207a412608`, version 141, `lhr`, `started`, 1/1 checks passing |
+| Image | `property-shared:deployment-01M1KB53P76HA3HEZJ20H92176` |
+| Reported version | 1.18.2 |
+| Snapshot | `enabled: false`, `routable: false`, `state: ready`, `v20260828T194003Z` |
+| Request | `GET /v1/ppd/comps?postcode=B5 4BX&months=24&limit=50`, one call, no retry |
+| Window | 2026-09-04T09:12:25Z – 09:15:20Z |
+
+`routable: false` matters to the reading: the snapshot answers nothing, so this
+was served by the **live SPARQL path** — the only path slow enough to test the
+property at all.
+
+### Result
+
+```
+COMPS  status    : 200
+COMPS  duration  : 172.95 s
+COMPS  rows      : 50
+
+HEALTH beats during comps : 345
+HEALTH max ttfb  : 3.2 ms   (budget 1000 ms; Fly check limit 5000 ms)
+HEALTH mean ttfb : 2.3 ms
+HEALTH non-200   : 0
+HEALTH max gap   : 0.506 s  (poll interval 0.5 s)
+
+baseline beats before comps : 6
+```
+
+Against the incident's signature — **8/8** probes to `127.0.0.1:8080/v1/health`
+timing out at 6 s from inside the Machine, with `loadavg 0.00` — this is the
+property the hotfix exists to provide, now observed on the deployed Machine
+rather than only against a stub.
+
+Two anti-vacuity guards, both required for the result to mean anything:
+
+* **6 baseline beats before the comps call**, so the poller is known to have
+  been running; an empty beat list would otherwise report a perfect score for
+  the very stall being tested.
+* **172.95 s of genuine slowness.** The 2026-08-31 attempt failed in 0.1 s,
+  which is why it proved nothing. `max gap 0.506 s` against a 0.5 s poll
+  interval means not one beat was delayed, let alone missed.
+
+### What this does not establish
+
+* **Nothing about the throttle.** One request was admitted. That is one request
+  being admitted — not evidence that HMLR's rate limiting has cleared, and not a
+  property of the throttle at all. The 2026-09-02 Stage 1 run had its first two
+  calls admitted and was refused on the third.
+* **Nothing about `propertydata`**, which was not probed.
+* **Nothing about concurrency beyond one slow request.** `hard_limit = 10` was
+  bypassed by testing on localhost; whether that limit is right remains the
+  separate open question recorded above.
+* The 173 s duration is roughly three times the ~58 s live calls seen on
+  2026-09-02. Why is not established here and is not claimed.
+
+### Still open from this note, and not closed by it
+
+`rightmove_search` raising for inputs that are not resolvable full postcodes is
+addressed separately — a live probe on 2026-09-03 found the earlier control
+incomplete (it tested full postcodes and one sector, never an outcode; outcodes
+resolve). That work is its own change, not part of this closure.
