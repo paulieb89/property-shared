@@ -6,7 +6,9 @@ from functools import partial
 from typing import Literal, Optional
 
 import anyio
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
+
+from app.core.api_keys import require_rightmove_key_http
 
 from app.schemas.rightmove import (
     RightmoveListingDetailResponse,
@@ -21,7 +23,11 @@ from property_core.exceptions import (
 from property_core.rightmove_location import RightmoveLocationAPI
 from property_core.rightmove_scraper import fetch_listing, fetch_listings
 
-router = APIRouter(prefix="/rightmove", tags=["rightmove"])
+router = APIRouter(
+    prefix="/rightmove",
+    tags=["rightmove"],
+    dependencies=[Depends(require_rightmove_key_http)],
+)
 
 
 @router.get("/search-url", response_model=RightmoveSearchURLResponse)

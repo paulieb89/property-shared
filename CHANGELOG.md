@@ -5,6 +5,28 @@ Versioning here is not strict SemVer: breaking changes are documented in a
 v1.11.0, v1.10.0, v1.4.0) rather than forcing a major bump. This entry follows
 that established practice.
 
+## v1.20.0 (2026-11-16) — Rightmove surface requires an API key
+
+### Breaking Changes
+
+- **`rightmove_search`, `rightmove_listing` and every `/v1/rightmove/*` route
+  now require an API key** when called over HTTP. Present it as
+  `Authorization: Bearer <key>` or `X-API-Key: <key>`. Without a valid key, REST
+  returns `401` (`error: "api_key_required"`, with `WWW-Authenticate: Bearer`)
+  and MCP returns a structured `auth_required` tool error. Both tell the caller
+  to email paul@bouch.dev or visit https://bouch.dev for a key. The tools stay in
+  `tools/list` so callers can find out how to get access.
+- Keys are read from the `RIGHTMOVE_API_KEYS` secret (comma-separated). **With
+  no keys configured the gate refuses every remote caller.** An unset secret
+  does not reopen it.
+- Prompted by a scheduled scraper that sent roughly 8.5K `rightmove_listing`
+  calls a day, using a generic `Mozilla/5.0` User-Agent from rotating IPs.
+  Both surfaces are gated together because they expose the same listings.
+- Not gated: every other tool and route, stdio and in-process MCP clients,
+  and the `propertydata` app. Derived tools that scrape Rightmove internally
+  (`property_yield`, `rental_analysis`, the report) stay open.
+- The CLI's `--api-url` mode sends `PROPERTY_API_KEY` as `X-API-Key` when set.
+
 ## v1.19.2 (2026-11-16) — per-call client attribution via mcpfleet-obs 0.6.0
 
 The MCP layer moves off its vendored metrics middleware onto
