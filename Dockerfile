@@ -33,7 +33,7 @@ COPY property_core ./property_core
 # CMD; the app never imports it. One file only -- not tools/ or property_cli/.
 COPY tools/ppd_snapshot/boot_only_verify.py ./boot_only_verify.py
 
-# Stage 1 shadow comparison (docs/ops/ppd-stage1-shadow-runbook.md). Same
+# Stage 1 shadow comparison (tools/ppd_snapshot/stage1_shadow.py). Same
 # out-of-band contract as the verifier above: never imported by the app, never
 # wired into CMD, and refusing to do anything unless PPD_SHADOW_COMPARE_ENABLED
 # is explicitly set for the invocation.

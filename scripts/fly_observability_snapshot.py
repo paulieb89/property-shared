@@ -42,7 +42,7 @@ measurement. See `TRANSIENT_DISK_NOTE`.
 Usage:
     uv run python scripts/fly_observability_snapshot.py \\
         --app property-shared --org personal --window 30m \\
-        --output docs/ops/evidence/2026-09-01-baseline.json
+        --output /tmp/property-shared-baseline.json
 
     # opt in to a bounded, sanitised log excerpt
     ... --include-logs 50
