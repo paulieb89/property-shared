@@ -76,8 +76,8 @@ def test_rest_fails_closed_when_no_keys_are_configured(monkeypatch, client):
 
 
 def test_other_rest_routes_stay_open(keyed, client):
-    resp = client.get("/v1/stamp-duty", params={"price": 300000})
-    assert resp.status_code != 401
+    resp = client.get("/v1/calculators/stamp-duty", params={"price": 300000})
+    assert resp.status_code == 200, resp.text
 
 
 # --- MCP over HTTP ---
