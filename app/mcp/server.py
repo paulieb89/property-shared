@@ -6,97 +6,21 @@ regardless of ext-apps / Prefab UI support.
 from __future__ import annotations
 
 import asyncio
-import functools
 import logging
 import os
-import time
 from importlib.metadata import version as _pkg_version
 from typing import Any
 
 import httpx
 from fastmcp import FastMCP
+from mcpfleet_obs import install
 
 from property_core.window import DEFAULT_MONTHS, MonthsParam
 from fastmcp.server.http import create_streamable_http_app
-from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.tools import ToolResult
 from fastmcp.utilities.types import Image
 from mcp.types import TextContent
 
-from app.core.metrics import (
-    CLIENT_CONNECTIONS_TOTAL,
-    TOOL_CALLS_TOTAL,
-    TOOL_DURATION_SECONDS,
-)
-
-TRANSPORT = os.getenv("FASTMCP_TRANSPORT", "http")
-REGION = os.getenv("FLY_REGION", "local")
-
-_client_log = logging.getLogger("fastmcp.property_shared.clients")
-
-
-class ClientTrackingMiddleware(Middleware):
-    """Log clientInfo and increment connection counter on every initialize.
-
-    This server is open and unauthenticated, so the initialize handshake's clientInfo
-    is the ONLY identity a caller offers. It matters here more than most: uk-business-mcp
-    ("Ledgerhall") proxies this server as `prop_*`, and a fleet sweep on 2026-07-17 found
-    real third-party consumers (agent-tools.cloud, codex-mcp-client, ai-sdk-mcp-client)
-    invisible on every server missing this counter.
-
-    Counts handshakes, not tool calls: a client label on TOOL_CALLS_TOTAL would multiply
-    cardinality by every client ever seen. Note stateless_http=True below, so each
-    request is its own session sending its own initialize — connection counts, not user
-    counts.
-
-    Ported from uk-legal-mcp/src/gateway.py.
-    """
-
-    async def on_request(self, context: MiddlewareContext, call_next):
-        result = await call_next(context)
-        if context.method == "initialize":
-            params = context.message.params
-            info = getattr(params, "clientInfo", None)
-            client_name = getattr(info, "name", "unknown") or "unknown"
-            client_version = getattr(info, "version", "unknown") or "unknown"
-            _client_log.info(
-                "client_connected client=%s version=%s transport=%s region=%s",
-                client_name, client_version, TRANSPORT, REGION)
-            CLIENT_CONNECTIONS_TOTAL.labels(
-                client_name, client_version, TRANSPORT, REGION).inc()
-        return result
-
-
-def _timed_tool(fn):
-    tool_name = fn.__name__
-    if asyncio.iscoroutinefunction(fn):
-        @functools.wraps(fn)
-        async def _wrapped(*args, **kwargs):
-            t0 = time.perf_counter()
-            try:
-                result = await fn(*args, **kwargs)
-                TOOL_CALLS_TOTAL.labels(tool=tool_name, status="ok").inc()
-                return result
-            except BaseException:
-                TOOL_CALLS_TOTAL.labels(tool=tool_name, status="error").inc()
-                raise
-            finally:
-                TOOL_DURATION_SECONDS.labels(tool=tool_name).observe(time.perf_counter() - t0)
-        return _wrapped
-    else:
-        @functools.wraps(fn)
-        def _wrapped(*args, **kwargs):
-            t0 = time.perf_counter()
-            try:
-                result = fn(*args, **kwargs)
-                TOOL_CALLS_TOTAL.labels(tool=tool_name, status="ok").inc()
-                return result
-            except BaseException:
-                TOOL_CALLS_TOTAL.labels(tool=tool_name, status="error").inc()
-                raise
-            finally:
-                TOOL_DURATION_SECONDS.labels(tool=tool_name).observe(time.perf_counter() - t0)
-        return _wrapped
 
 
 def _with_provenance(result: dict) -> dict:
@@ -174,7 +98,6 @@ async def _fetch_rightmove_image(url: str) -> bytes | None:
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
-@_timed_tool
 async def property_comps(
     postcode: str,
     months: MonthsParam = DEFAULT_MONTHS,
@@ -227,7 +150,6 @@ async def property_comps(
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
-@_timed_tool
 async def property_yield(
     postcode: str,
     months: MonthsParam = DEFAULT_MONTHS,
@@ -267,7 +189,6 @@ async def property_yield(
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
-@_timed_tool
 async def rental_analysis(
     postcode: str,
     radius: float = 0.5,
@@ -294,7 +215,6 @@ async def rental_analysis(
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
-@_timed_tool
 async def property_epc(postcode: str, address: str | None = None) -> dict | None:
     """Energy Performance Certificate data for a UK property or postcode area.
 
@@ -348,7 +268,6 @@ async def property_epc(postcode: str, address: str | None = None) -> dict | None
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
-@_timed_tool
 async def property_epc_search(postcode: str) -> list[dict] | None:
     """DEPRECATED — use property_epc_summaries then epc_certificate.
 
@@ -370,7 +289,6 @@ async def property_epc_search(postcode: str) -> list[dict] | None:
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
-@_timed_tool
 async def property_epc_summaries(postcode: str, page: int = 1) -> dict:
     """List EPC certificate summaries at a postcode — for candidate selection.
 
@@ -421,7 +339,6 @@ async def property_epc_summaries(postcode: str, page: int = 1) -> dict:
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
-@_timed_tool
 async def epc_certificate(lmk_key: str) -> dict | None:
     """Fetch a single EPC certificate by its GOV.UK certificate number.
 
@@ -445,7 +362,6 @@ async def epc_certificate(lmk_key: str) -> dict | None:
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
-@_timed_tool
 def stamp_duty(
     price: int,
     additional_property: bool = False,
@@ -464,7 +380,6 @@ def stamp_duty(
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
-@_timed_tool
 async def rightmove_search(
     postcode: str,
     listing_type: str = "sale",
@@ -501,7 +416,6 @@ async def rightmove_search(
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
-@_timed_tool
 async def rightmove_listing(
     property_id: str,
     include_images: bool = False,
@@ -561,7 +475,6 @@ async def rightmove_listing(
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
-@_timed_tool
 async def property_blocks(
     postcode: str,
     search_level: str = "sector",
@@ -581,7 +494,6 @@ async def property_blocks(
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
-@_timed_tool
 def company_search(name: str) -> dict:
     """Search Companies House for a company by name."""
     from property_core import CompaniesHouseClient
@@ -592,7 +504,6 @@ def company_search(name: str) -> dict:
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
-@_timed_tool
 def planning_search(postcode: str) -> dict:
     """Find the council planning portal URL for a postcode."""
     from property_core import PlanningService
@@ -600,7 +511,6 @@ def planning_search(postcode: str) -> dict:
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
-@_timed_tool
 def ppd_transactions(
     postcode: str,
     limit: int = 10,
@@ -855,7 +765,12 @@ Then synthesise (3–5 short paragraphs):
 # served ASGI app, and middleware added afterwards would never reach a request.
 mark_installed(mcp)
 
-mcp.add_middleware(ClientTrackingMiddleware())
+# Fleet observability: client tracking + tool-call metrics + a /metrics route.
+# The route is unreachable here (app/main.py proxies only /mcp into this app);
+# the FastAPI /metrics endpoint serves the same registry, so the counters
+# still surface. Client identity per call resolves via mcpfleet-obs 0.6.0's
+# meta/session/User-Agent chain — see mcpfleet_obs.clients.resolve_call_client.
+install(mcp, prefix="property_shared")
 
 _http_app = create_streamable_http_app(
     mcp,

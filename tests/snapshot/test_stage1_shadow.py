@@ -50,8 +50,14 @@ GEOGRAPHIES = {
 
 
 def _rows() -> list[dict]:
-    """Enough rows that the frozen cases have something to disagree about."""
-    today = date.today()
+    """Enough rows that the frozen cases have something to disagree about.
+
+    Dates anchor to the frozen TODAY (2026-09-02) used by every qualify()
+    call in this file, not wall-clock time — coverage_to is a fixed
+    2026-06-30, so rows derived from the real date drift outside both the
+    coverage window and every measured window as time passes.
+    """
+    today = TODAY
     recent = (today - timedelta(days=120)).isoformat()
     older = (today - timedelta(days=400)).isoformat()
     rows = [
@@ -154,7 +160,10 @@ def _instance_dict(m) -> dict:
         "bundle_sha256": m.bundle_sha256,
         "geographies": dict(GEOGRAPHIES),
         "aggregate_baselines": dict(BASELINES),
-        "qualified_at": "2026-09-01",
+        # Today's date: this fixture exists to exercise non-staleness logic, so
+        # it must always be inside its bound. Tests that exercise the staleness
+        # bound itself pass explicit old/fresh dates via _write().
+        "qualified_at": date.today().isoformat(),
         # Complete: every case whose geography the Instance fixes, with the
         # three definitional entries bound to the geographies they measured.
         "qualification": _qualification_block(),
