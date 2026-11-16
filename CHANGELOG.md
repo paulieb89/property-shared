@@ -5,6 +5,22 @@ Versioning here is not strict SemVer: breaking changes are documented in a
 v1.11.0, v1.10.0, v1.4.0) rather than forcing a major bump. This entry follows
 that established practice.
 
+## v1.19.2 (2026-11-16) — per-call client attribution via mcpfleet-obs 0.6.0
+
+The MCP layer moves off its vendored metrics middleware onto
+`mcpfleet_obs.install()`: same `property_shared_*` metric names, plus
+error-category/source attribution and a bounded `client` label on every
+tool call (request `_meta` clientInfo → session → `ua:` User-Agent
+fallback). Per-boot salted `ip_hash` is available via `MCPOBS_IP_LABEL=1`.
+
+Also fixes a test-suite time bomb: the shared stage1_shadow fixture
+hardcoded `qualified_at: 2026-09-01` and began tripping its own
+staleness bound ~31 days after it was written; it now derives from
+`date.today()` (staleness tests keep explicit dates).
+
+`requires-python` floor `>=3.10` → `>=3.11` (mcpfleet-obs floor; deploy
+images already run 3.11/3.12).
+
 ## v1.19.1 (2026-09-05) — EPC certificates were unfetchable on three upstream shape variants
 
 A smoke test reported one certificate failing validation on `tenure: 'ND'`.
