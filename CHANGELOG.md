@@ -5,7 +5,7 @@ Versioning here is not strict SemVer: breaking changes are documented in a
 v1.11.0, v1.10.0, v1.4.0) rather than forcing a major bump. This entry follows
 that established practice.
 
-## Unreleased — Rightmove surface requires an API key
+## v1.20.0 (2026-11-16) — Rightmove surface requires an API key
 
 ### Breaking Changes
 
