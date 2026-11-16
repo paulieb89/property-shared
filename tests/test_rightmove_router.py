@@ -18,10 +18,12 @@ from app.api.v1 import rightmove as rightmove_router
 
 
 @pytest.fixture()
-def client():
+def client(monkeypatch):
+    # The router is key-gated; these tests are about what happens past the gate.
+    monkeypatch.setenv("RIGHTMOVE_API_KEYS", "test-key")
     app = FastAPI()
     app.include_router(rightmove_router.router, prefix="/v1")
-    return TestClient(app)
+    return TestClient(app, headers={"X-API-Key": "test-key"})
 
 
 class TestListingDetailPathValidation:

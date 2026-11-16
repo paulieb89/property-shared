@@ -1431,7 +1431,10 @@ class HTTPClient:
         if httpx is None:
             raise RuntimeError("Install api extras to use HTTP mode (uv sync --extra api)")
         self.base_url = base_url.rstrip("/")
-        self.client = httpx.Client(timeout=120)  # Planning scrapes can take 30-60s
+        # The deployed API gates /v1/rightmove/* behind a key.
+        key = os.environ.get("PROPERTY_API_KEY")
+        headers = {"X-API-Key": key} if key else None
+        self.client = httpx.Client(timeout=120, headers=headers)  # Planning scrapes can take 30-60s
 
     def get(self, path: str, params: Optional[dict[str, object]] = None) -> dict:
         resp = self.client.get(f"{self.base_url}{path}", params=params)

@@ -15,6 +15,8 @@ import httpx
 from fastmcp import FastMCP
 from mcpfleet_obs import install
 
+from app.core.api_keys import require_rightmove_key_mcp
+
 from property_core.window import DEFAULT_MONTHS, MonthsParam
 from fastmcp.server.http import create_streamable_http_app
 from fastmcp.tools import ToolResult
@@ -394,7 +396,9 @@ async def rightmove_search(
 
     listing_type: "sale" or "rent". sort_by: "newest", "most_reduced",
     "price_asc", "price_desc". Images are excluded from results.
+    Requires an API key (Authorization: Bearer <key> or X-API-Key).
     """
+    require_rightmove_key_mcp("rightmove_search")
     import anyio
     from property_core import RightmoveLocationAPI, fetch_listings
     loc_api = RightmoveLocationAPI()
@@ -427,7 +431,9 @@ async def rightmove_listing(
     rightmove.co.uk/properties/... URL), max 12 digits. Full URLs are not accepted.
     include_images fetches and embeds photos and floorplans as MCP image content.
     max_images caps the number of property photos (default 3); floorplans always included.
+    Requires an API key (Authorization: Bearer <key> or X-API-Key).
     """
+    require_rightmove_key_mcp("rightmove_listing")
     import re
 
     import anyio
