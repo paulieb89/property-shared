@@ -1,5 +1,7 @@
 # Property Shared
 
+Maintained by BOUCH — private hosting, custom tools and setup: paul@bouch.dev · [bouch.dev/products/property-mcp](https://bouch.dev/products/property-mcp)
+
 <!-- mcp-name: io.github.paulieb89/property-shared -->
 
 [![property-shared MCP server](https://glama.ai/mcp/servers/paulieb89/property-shared/badges/card.svg)](https://glama.ai/mcp/servers/paulieb89/property-shared)
