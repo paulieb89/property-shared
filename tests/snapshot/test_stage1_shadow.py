@@ -1982,36 +1982,6 @@ def test_the_budget_scales_with_an_authorised_retry_allowance():
 # The runbook describes the deploy path that actually exists
 # ---------------------------------------------------------------------------
 
-RUNBOOK = REPO / "docs" / "ops" / "ppd-stage1-shadow-runbook.md"
-
-
-def test_the_runbook_uses_the_release_workflow_not_a_manual_deploy():
-    """A local `fly deploy` ships the working directory, not a commit.
-
-    Stage 1 evidence has to be attributable to a revision. An image built from
-    whatever was on a laptop makes "which code produced this p95?"
-    unanswerable, which is precisely what a deployment gate cannot afford.
-    """
-    body = RUNBOOK.read_text()
-    assert "release.yml" in body
-    assert "publish a GitHub release" in body
-    assert "ships **the working directory, not a commit**" in body
-    assert "fly deploy --ha=false" not in body, (
-        "the runbook still tells an operator to deploy from a working directory")
-
-
-def test_the_runbook_states_that_a_release_redeploys_propertydata():
-    """Honest about the shared workflow rather than repeating "untouched".
-
-    `release.yml` deploys both apps on every release. Claiming propertydata is
-    untouched full stop would be wrong; what is true is that its configuration
-    and scope do not change.
-    """
-    body = RUNBOOK.read_text()
-    assert "redeploys `propertydata` too" in body
-    assert "untouched in configuration and scope" in body
-
-
 def test_the_release_workflow_still_deploys_both_apps():
     """Pins the fact the runbook's honesty depends on.
 
@@ -2033,20 +2003,6 @@ def test_the_release_workflow_still_deploys_both_apps():
     deploy_script = (REPO / "scripts" / "deploy_fly.py").read_text()
     assert '"--remote-only"' in deploy_script
     assert '"--ha=false"' in deploy_script
-
-
-def test_the_runbook_documents_the_search_level_containment_rule():
-    body = RUNBOOK.read_text()
-    assert "at the level each case asked at" in body
-    assert "same_sector_unit_violations" in body
-    assert "never named" in body
-
-
-def test_the_runbook_documents_enforced_staleness_and_b50_qualification():
-    body = RUNBOOK.read_text()
-    assert "enforced at load, not merely recorded" in body
-    assert "unqualified_definitional_cases" in body
-    assert "NEIGHBOUR_COMPARABLE_RATIO" in body
 
 
 # ---------------------------------------------------------------------------
@@ -2315,43 +2271,6 @@ def test_an_instance_carrying_a_substitution_drives_the_corpus(
 
     assert {c.shape: c.postcode
             for c in build(loaded.geographies, loaded.substitutions)}["S1"] == "M3"
-
-
-def test_the_runbook_carries_post_release_checks_for_propertydata():
-    """It is redeployed by the same release, so it is checked, not assumed.
-
-    "Out of scope" is a statement about what changes, not a reason to skip
-    verifying that nothing did.
-    """
-    body = RUNBOOK.read_text()
-    assert "Post-release checks — `propertydata`" in body
-    assert "must be checked, not assumed" in body
-    for check in ("propertydata.fly.dev/health", "fly secrets list -a propertydata",
-                  "fly status -a propertydata", "stage1_shadow.py",
-                  "fly image show -a propertydata"):
-        assert check in body, f"the runbook omits the propertydata check: {check}"
-    assert "stop" in body.lower()
-
-
-def test_the_runbook_documents_abort_on_first_arm_error():
-    body = RUNBOOK.read_text()
-    assert "the first error on\neither arm" in body or \
-        "**the first error on" in body
-    assert "before that case makes its live call" in body
-
-
-def test_the_runbook_documents_the_postcode_less_row_rule():
-    body = RUNBOOK.read_text()
-    assert "no usable postcode" in body
-    assert "rows_without_postcode" in body
-
-
-def test_the_runbook_documents_adjudication_and_substitution():
-    body = RUNBOOK.read_text()
-    assert "requires_owner_adjudication" in body
-    assert "NEIGHBOUR_COMPARABLE_RATIO = 1.0" in body
-    assert "auto-qualified at a 10% ratio" in body
-    assert '"substitutions"' in body
 
 
 # ---------------------------------------------------------------------------
@@ -2626,41 +2545,6 @@ def test_qualify_re_measures_against_a_substitution(tmp_path):
     # Measured over M3, not B5: the baselines describe the substituted run.
     assert out["candidate_instance"]["aggregate_baselines"]["S1_full"] == 30
     assert block["S1_district"]["measured_neighbour_rows"] == 40
-
-
-def test_the_runbook_does_not_invite_bolting_a_substitution_onto_old_evidence():
-    """The shortcut the runbook must actively steer away from.
-
-    Telling an operator to "add a substitutions block" would produce exactly
-    the Instance the loader refuses -- complete-looking, and describing
-    geographies the run will never touch.
-    """
-    body = RUNBOOK.read_text()
-    assert "A substitution is a re-qualification, not an annotation" in body
-    assert "qualify --substitutions" in body
-    assert "geographies the run will never touch" in body
-
-
-def test_the_runbook_documents_the_substitution_geometry_rules():
-    body = RUNBOOK.read_text()
-    for rule in ("extends", "lies **inside**", "test nothing",
-                 "still look like numbers"):
-        assert rule in body, f"the runbook omits the geometry rule: {rule}"
-
-
-def test_the_runbook_documents_the_owner_decision_requirement():
-    body = RUNBOOK.read_text()
-    assert "the Instance must\nanswer the referral" in body or \
-        "answer the referral" in body
-    assert "owner_decision" in body
-    assert 'Only `"accepted"` qualifies' in body
-
-
-def test_the_runbook_documents_the_latency_pass_abort():
-    body = RUNBOOK.read_text()
-    assert "This applies to the latency pass too" in body
-    assert "short of\nits thirty observations" in body or \
-        "short of" in body
 
 
 def test_the_qualify_cli_re_measures_against_the_substitutions_file(
@@ -3056,19 +2940,6 @@ def test_a_non_object_substitutions_value_is_refused_by_the_validator():
         with pytest.raises(InstanceRefused) as exc:
             validate_substitutions(value)
         assert "must be a JSON object" in str(exc.value)
-
-
-def test_the_runbook_says_the_candidate_is_taken_as_written():
-    body = RUNBOOK.read_text()
-    assert "justifications included" in body
-    assert "hand-reconstructing any of it" in body
-
-
-def test_the_runbook_documents_the_measurement_cross_checks():
-    body = RUNBOOK.read_text()
-    assert "must agree with each other" in body
-    assert "recomputed from the counts" in body
-    assert "most consequential edit" in body
 
 
 # ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ readable message on its own. These tests pin that, because "no change needed"
 is a claim about behaviour and should fail loudly if it stops being true.
 
 The target shape is the one a real ChatGPT session produced for the equivalent
-PPD error (docs/ops/2026-08-30-property-shared-stall.md):
+PPD error:
 
     Error calling tool 'ppd_transactions': postcode 'DE12' is not valid;
     expected a full UK postcode, e.g. 'B5 4BX'

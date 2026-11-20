@@ -29,8 +29,7 @@ corpus run is organic traffic, and not a licence to relabel one as the other.
 Nothing is enabled, no image is deployed, and no artifact is replaced.
 
 **Revision 9** was authorised by the Phase D review round, after the partial-G1a
-measurement recorded in
-[`docs/ops/2026-08-31-ppd-snapshot-rollout.md`](../ops/2026-08-31-ppd-snapshot-rollout.md).
+measurement on the real Machine.
 That measurement showed 36.7 s of materialization plus 3.1 s of adapter-open
 validation on the real `property-shared` Machine — so on **the measured path**,
 a boot awaited inside the ASGI lifespan did not meet the 30 s readiness target.
