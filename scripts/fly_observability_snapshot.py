@@ -509,6 +509,22 @@ SERIES: tuple[MetricSpec, ...] = (
         ),
     ),
     MetricSpec(
+        key="app_rightmove_key_calls",
+        title="Rightmove calls by API key",
+        promql=(
+            "sum by (key_id) "
+            '(increase(${prefix}_rightmove_key_calls_total{app="$app"}[$window]))'
+        ),
+        unit="calls",
+        provenance="app_custom",
+        derived=True,
+        derivation="increase() of the per-key gate counter over the window.",
+        note=(
+            "key_id is sha256(key)[:10]; 'none' = refused (no/invalid key). "
+            "Map ids to holders with the private key registry, not the repo."
+        ),
+    ),
+    MetricSpec(
         key="app_client_connections",
         title="MCP client handshakes by client",
         promql=(
