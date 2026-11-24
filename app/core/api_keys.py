@@ -15,10 +15,12 @@ logged, and a key in a URL ends up in those logs.
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import os
 from typing import Mapping
 
+from prometheus_client import Counter
 from starlette.requests import Request
 
 KEYS_ENV = "RIGHTMOVE_API_KEYS"
@@ -30,6 +32,31 @@ GATE_MESSAGE = (
     f"or 'X-API-Key: <key>'. To request a key, email {CONTACT_EMAIL} or visit "
     f"{CONTACT_URL}."
 )
+
+
+# Per-key usage. `key_id` is an opaque sha256 prefix of a *validated* key, so
+# /metrics (public) never shows a key or who holds it; the id -> holder mapping
+# lives off-repo. Refused calls share key_id="none", so a caller cannot grow
+# the label set by sending junk keys.
+KEY_CALLS_TOTAL = Counter(
+    "property_shared_rightmove_key_calls_total",
+    "Remote Rightmove calls by API key (opaque id); key_id='none' means refused.",
+    labelnames=("key_id",),
+)
+
+
+def key_id(key: str) -> str:
+    """Opaque, stable id for a key: first 10 hex chars of its sha256."""
+    return hashlib.sha256(key.encode()).hexdigest()[:10]
+
+
+def _admit(key: str | None) -> bool:
+    """Validate a presented key and count the call under its key_id."""
+    if key and key_is_valid(key):
+        KEY_CALLS_TOTAL.labels(key_id=key_id(key)).inc()
+        return True
+    KEY_CALLS_TOTAL.labels(key_id="none").inc()
+    return False
 
 
 def _configured_keys() -> list[str]:
@@ -59,7 +86,7 @@ def require_rightmove_key_mcp(tool: str) -> None:
     """Refuse an MCP tool call over HTTP that carries no valid key.
 
     Calls with no HTTP request behind them (stdio, in-process clients) are not
-    gated: they cannot come from a remote caller.
+    gated, and not counted: they cannot come from a remote caller.
     """
     from fastmcp.server.dependencies import get_http_request
     from mcpfleet_obs import raise_tool_error
@@ -69,7 +96,7 @@ def require_rightmove_key_mcp(tool: str) -> None:
         headers = get_http_request().headers
     except RuntimeError:
         return
-    if not key_is_valid(presented_key(headers)):
+    if not _admit(presented_key(headers)):
         raise_tool_error(
             "auth_required",
             is_retryable=False,
@@ -82,7 +109,7 @@ async def require_rightmove_key_http(request: Request) -> None:
     """FastAPI dependency for the /v1/rightmove router."""
     from fastapi import HTTPException
 
-    if not key_is_valid(presented_key(request.headers)):
+    if not _admit(presented_key(request.headers)):
         raise HTTPException(
             status_code=401,
             detail={

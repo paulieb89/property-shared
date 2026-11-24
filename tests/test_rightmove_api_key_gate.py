@@ -135,3 +135,48 @@ def test_mcp_tool_list_still_advertises_the_gated_tools(keyed, client):
 ])
 def test_presented_key(headers, expected):
     assert presented_key(headers) == expected
+
+
+# --- per-key usage counter ---
+
+
+def _count(kid: str) -> float:
+    from prometheus_client import REGISTRY
+    return REGISTRY.get_sample_value(
+        "property_shared_rightmove_key_calls_total", {"key_id": kid}) or 0.0
+
+
+def test_rest_counts_an_admitted_call_under_its_key_id(keyed, client):
+    from app.core.api_keys import key_id
+    before = _count(key_id(KEY))
+    with patch("app.api.v1.rightmove.fetch_listing", side_effect=RuntimeError("stub")):
+        client.get("/v1/rightmove/listing/123456", headers={"X-API-Key": KEY})
+    assert _count(key_id(KEY)) == before + 1
+
+
+def test_mcp_counts_an_admitted_call_under_its_key_id(keyed, client):
+    from app.core.api_keys import key_id
+    before = _count(key_id(KEY))
+    with patch("property_core.fetch_listing", side_effect=RuntimeError("stub")):
+        _mcp_call(client, "rightmove_listing", {"property_id": "123456"},
+                  headers={"Authorization": f"Bearer {KEY}"})
+    assert _count(key_id(KEY)) == before + 1
+
+
+@pytest.mark.parametrize("headers", [{}, {"X-API-Key": "wrong"}])
+def test_refused_calls_count_as_none_on_both_surfaces(keyed, client, headers):
+    before = _count("none")
+    with patch("app.api.v1.rightmove.fetch_listing"), patch("property_core.fetch_listing"):
+        client.get("/v1/rightmove/listing/123456", headers=headers)
+        _mcp_call(client, "rightmove_listing", {"property_id": "123456"}, headers=headers)
+    assert _count("none") == before + 2
+
+
+def test_key_calls_metric_never_exposes_a_raw_key(keyed, client):
+    from prometheus_client import generate_latest
+    with patch("app.api.v1.rightmove.fetch_listing", side_effect=RuntimeError("stub")):
+        client.get("/v1/rightmove/listing/123456", headers={"X-API-Key": KEY})
+        client.get("/v1/rightmove/listing/123456", headers={"X-API-Key": "wrong-secret"})
+    text = generate_latest().decode()
+    assert "rightmove_key_calls_total" in text
+    assert KEY not in text and "wrong-secret" not in text

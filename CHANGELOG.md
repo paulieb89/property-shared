@@ -5,6 +5,19 @@ Versioning here is not strict SemVer: breaking changes are documented in a
 v1.11.0, v1.10.0, v1.4.0) rather than forcing a major bump. This entry follows
 that established practice.
 
+## v1.21.0 (2026-11-24) — per-key Rightmove usage counter
+
+### Added
+
+- **Per-key usage counter for the Rightmove gate:**
+  `property_shared_rightmove_key_calls_total{key_id}`. It counts every remote
+  Rightmove call (REST and MCP over HTTP) at the API-key gate. `key_id` is the
+  first 10 hex characters of the sha256 of a *validated* key. Refused calls
+  (no key or an invalid key) are counted as `key_id="none"`, so callers cannot
+  add label values. No key and no holder identity appear in `/metrics`.
+- `scripts/fly_observability_snapshot.py` gains an `app_rightmove_key_calls`
+  series that queries the counter per `key_id` from Fly's Prometheus.
+
 ## v1.20.0 (2026-11-16) — Rightmove surface requires an API key
 
 ### Breaking Changes
